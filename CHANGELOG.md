@@ -2,6 +2,35 @@
 
 All notable changes to TaxLens.
 
+## [0.27.0] — 2026
+
+### Added — Form 5329: excess IRA contribution & RMD shortfall excise
+
+Federal-depth: TaxLens now computes both major Form 5329 excise taxes.
+
+- §4973 — Excess IRA contribution (6%). Triggers when contributions exceed
+  the annual cap OR when Roth contributions exceed the MAGI-phased Roth
+  limit. The excess balance carries forward and is re-excised every year
+  until removed via corrective distribution.
+- §4974 — RMD shortfall excise. 50% pre-SECURE-2.0; 25% for 2023+ (SECURE
+  Act 2.0). Compares the user-supplied required_minimum_distribution to
+  actual IRA + pension distributions.
+
+New `Return` fields: `excess_ira_contributions_in`,
+`excess_ira_contributions_removed`, `required_minimum_distribution`.
+New `TaxResult` fields: `excess_ira_contribution_excise`,
+`excess_ira_contributions_out`, `rmd_shortfall`, `rmd_shortfall_excise`.
+9 new tests, all passing (286 total).
+
+### Fixed — Browser was caching the old web UI
+
+The header returns-menu button (and other recent UI changes) appeared
+broken because the browser was serving cached copies of `index.html` and
+`app.js` from the prior version. The FastAPI sidecar now serves the HTML
+shell with `Cache-Control: no-cache` and appends a `?v={version}` query
+string to the `app.js` reference, so every release-bumped version cache-
+busts itself automatically.
+
 ## [0.26.1] — 2026
 
 ### Fixed — Returns badge in the header was not clickable

@@ -7,18 +7,24 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from taxlens.service import TaxLensService
 
 WEB_DIR = Path(__file__).parent / "web"
 
-app = FastAPI(title="TaxLens", version="0.0.1")
+try:
+    APP_VERSION = _pkg_version("taxlens")
+except PackageNotFoundError:  # pragma: no cover — editable install fallback
+    APP_VERSION = "dev"
+
+app = FastAPI(title="TaxLens", version=APP_VERSION)
 service = TaxLensService.open()
 
 
@@ -206,9 +212,26 @@ def simulate_tlh(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(str(WEB_DIR / "index.html"))
+    # Stale-cache busting: rewrite `app.js` references to include a version
+    # query string, and force `no-cache` on the HTML shell itself. Without
+    # this, a browser that loaded a prior version keeps serving the old
+    # bundle from disk-cache and never sees UI fixes (e.g. the returns-
+    # menu button) until the user manually hard-refreshes.
+    _INDEX_HTML = (WEB_DIR / "index.html").read_text(encoding="utf-8").replace(
+        '/static/app.js', f'/static/app.js?v={APP_VERSION}'
+    )
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> Response:
+        return Response(
+            content=_INDEX_HTML,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 else:
     @app.get("/")
     def index() -> JSONResponse:  # pragma: no cover

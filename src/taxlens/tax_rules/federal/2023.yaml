@@ -329,3 +329,7 @@ clean_vehicle:
     mfj:    150000
     qss:    150000
     mfs:    75000
+
+# Form 5329 §4974 RMD-shortfall excise rate: reduced from 50% to 25% by SECURE Act 2.0 (2023+).
+rmd_shortfall_excise_rate: 0.25
+

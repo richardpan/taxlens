@@ -165,6 +165,20 @@ class Return(BaseModel):
     ftc_carryforward_in: Decimal = Decimal(0)             # §904 unused FTC (10yr)
     charitable_carryover_in: Decimal = Decimal(0)         # §170(d) 5yr carryover
 
+    # Form 5329 — Excess IRA contributions (§4973) and RMD shortfall (§4974).
+    #   - excess_ira_contributions_in:        accumulated excess from prior years
+    #     (carried into this year by the service). 6% excise is reapplied every
+    #     year until the excess is removed.
+    #   - excess_ira_contributions_removed:   corrective distribution taken by the
+    #     due date of this year's return (reduces the balance subject to excise).
+    #   - required_minimum_distribution:      §401(a)(9) RMD owed this year, in
+    #     aggregate across traditional IRAs and inherited accounts. The engine
+    #     compares this against actual IRA + pension distributions and applies
+    #     §4974 excise (50% pre-SECURE-2.0; 25% for 2023+) on any shortfall.
+    excess_ira_contributions_in: Decimal = Decimal(0)
+    excess_ira_contributions_removed: Decimal = Decimal(0)
+    required_minimum_distribution: Decimal = Decimal(0)
+
     # Foreign taxes paid (for FTC) and itemized charitable already above.
     foreign_taxes_paid: Decimal = Decimal(0)
 
@@ -325,6 +339,11 @@ class TaxResult(BaseModel):
     ira_basis_out: Decimal = Decimal(0)
     ira_distribution_nontaxable: Decimal = Decimal(0)
     ira_taxable_after_basis: Decimal = Decimal(0)
+    # Form 5329 — Excess IRA contributions (§4973) and RMD shortfall (§4974).
+    excess_ira_contribution_excise: Decimal = Decimal(0)
+    excess_ira_contributions_out: Decimal = Decimal(0)
+    rmd_shortfall: Decimal = Decimal(0)
+    rmd_shortfall_excise: Decimal = Decimal(0)
     credits: Decimal
     total_tax: Decimal
 
@@ -394,6 +413,12 @@ class Rules(BaseModel):
     social_security: dict[str, Any] | None = None
     # 10% early-withdrawal penalty (§72(t)). Defaults to 0.10 if absent.
     early_withdrawal_penalty_rate: Decimal = Decimal("0.10")
+    # Form 5329 — Excess-contribution (§4973) and RMD-shortfall (§4974) excise.
+    # The §4974 RMD-shortfall rate was reduced from 50% to 25% by SECURE Act 2.0
+    # for tax years 2023+ (further reduced to 10% if corrected promptly — we
+    # apply the headline statutory rate).
+    excess_contribution_excise_rate: Decimal = Decimal("0.06")
+    rmd_shortfall_excise_rate: Decimal = Decimal("0.50")
     # Traditional IRA deduction (§219). When None, contributions are deductible
     # in full (legacy behavior). When set, applies contribution limit + active-
     # participant phaseout against MAGI.

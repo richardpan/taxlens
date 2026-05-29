@@ -650,6 +650,10 @@ async function renderYearDetail() {
     ['NIIT', r.niit],
     ...(Number(r.early_withdrawal_penalty || 0) > 0
         ? [['Early-withdrawal penalty (§72(t))', '+' + r.early_withdrawal_penalty]] : []),
+    ...(Number(r.excess_ira_contribution_excise || 0) > 0
+        ? [['Excess IRA excise (§4973, Form 5329)', '+' + r.excess_ira_contribution_excise]] : []),
+    ...(Number(r.rmd_shortfall_excise || 0) > 0
+        ? [['RMD shortfall excise (§4974, Form 5329)', '+' + r.rmd_shortfall_excise]] : []),
     ['Credits', '-' + r.credits],
     ...(Number(r.eitc || 0) > 0
         ? [['Earned Income Tax Credit (refundable)', '-' + r.eitc]] : []),
@@ -696,6 +700,8 @@ async function renderYearDetail() {
         ? [['IRA basis recovered (Form 8606)', '-' + r.ira_distribution_nontaxable]] : []),
     ...(Number(r.ira_basis_out || 0) > 0
         ? [['IRA basis carried to next year', r.ira_basis_out]] : []),
+    ...(Number(r.excess_ira_contributions_out || 0) > 0
+        ? [['Excess IRA balance carried (still 6% next year)', r.excess_ira_contributions_out]] : []),
     ...(Number(r.depreciation_current_year || 0) > 0
         ? [['MACRS depreciation (Form 4562)', '-' + r.depreciation_current_year]] : []),
     ...(Number(r.passive_loss_disallowed || 0) > 0

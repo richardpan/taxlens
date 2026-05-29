@@ -263,6 +263,123 @@ def _compute_ira_basis_pro_rata(
     return taxable, recovered, basis_remaining
 
 
+def _compute_form_5329(
+    ret: Return,
+    agi: Decimal,
+    rules: Rules,
+    rec: _StepRecorder,
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """Form 5329 — Excess IRA contributions (§4973) and RMD shortfall (§4974).
+
+    Returns (excess_excise, excess_carry_out, rmd_shortfall, rmd_excise).
+
+    Excess-contribution model (Parts III/IV):
+      - allowed_trad = annual IRA cap (incl. 50+ catchup if taxpayer_age known)
+      - allowed_roth = min(annual IRA cap, MAGI-phased Roth limit), reduced
+        by the actual traditional contribution (combined cap is the annual IRA cap)
+      - new_excess  = max(0, trad − allowed_trad) + max(0, roth − allowed_roth)
+      - balance     = max(0, excess_in − removed) + new_excess
+      - excise      = 6% × balance (the carry-out IS the balance: §4973 re-applies
+                      annually until removed via corrective distribution)
+
+    RMD model (Part IX):
+      - shortfall = max(0, rmd_due − (ira_distributions + pension_distributions))
+      - excise    = rate × shortfall (50% pre-2023; 25% for 2023+ per SECURE 2.0)
+
+    All four components are 0 if neither contribution_limits nor RMD inputs
+    are present, so legacy fixtures stay green.
+    """
+    excess_excise = ZERO
+    excess_out = ZERO
+    rmd_shortfall = ZERO
+    rmd_excise = ZERO
+
+    limits = (rules.contribution_limits or {})
+    annual_cap = Decimal(str(limits.get("ira_contribution", 0)))
+    catchup = Decimal(str(limits.get("ira_catchup_50plus", 0)))
+    if ret.taxpayer_age is not None and ret.taxpayer_age >= 50 and annual_cap > 0:
+        annual_cap = annual_cap + catchup
+
+    trad = max(ZERO, ret.traditional_ira_contributions)
+    roth = max(ZERO, ret.roth_ira_contributions)
+
+    # Roth MAGI phaseout. Falls back to no-phaseout (allowed = annual cap) if
+    # this year's YAML doesn't expose roth_ira_phaseout_{start,end}.
+    status = _status(ret)
+    phase_start_map = limits.get("roth_ira_phaseout_start") or {}
+    phase_end_map = limits.get("roth_ira_phaseout_end") or {}
+    phase_start = Decimal(str(phase_start_map.get(status, 0)))
+    phase_end = Decimal(str(phase_end_map.get(status, 0)))
+
+    if annual_cap > 0:
+        if phase_end > 0 and agi >= phase_end:
+            roth_magi_allowed = ZERO
+        elif phase_end > 0 and agi > phase_start:
+            window = phase_end - phase_start
+            roth_magi_allowed = annual_cap * (phase_end - agi) / window
+            # Round per §408A(c)(3): nearest $10, but never below $200 unless 0.
+            roth_magi_allowed = (roth_magi_allowed / Decimal(10)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            ) * Decimal(10)
+            if 0 < roth_magi_allowed < Decimal(200):
+                roth_magi_allowed = Decimal(200)
+        else:
+            roth_magi_allowed = annual_cap
+
+        # Combined cap rule: trad + roth ≤ annual_cap.
+        allowed_trad = annual_cap
+        allowed_roth = min(roth_magi_allowed, max(ZERO, annual_cap - trad))
+        excess_trad = max(ZERO, trad - allowed_trad)
+        excess_roth = max(ZERO, roth - allowed_roth)
+        new_excess = excess_trad + excess_roth
+
+        carried_in = max(ZERO, ret.excess_ira_contributions_in - ret.excess_ira_contributions_removed)
+        balance = carried_in + new_excess
+        if balance > 0:
+            rate = rules.excess_contribution_excise_rate
+            excess_excise = _money(balance * rate)
+            excess_out = _money(balance)
+            rec.add(
+                "Excess IRA contributions (§4973 / Form 5329 Pt III-IV)",
+                f"{rate} × max(0, excess_in − removed) + new_excess",
+                {
+                    "annual_cap": annual_cap,
+                    "roth_magi_allowed": roth_magi_allowed,
+                    "trad": trad, "roth": roth,
+                    "new_excess": new_excess,
+                    "excess_in": ret.excess_ira_contributions_in,
+                    "removed": ret.excess_ira_contributions_removed,
+                    "balance": balance,
+                    "rate": rate,
+                },
+                excess_excise,
+            )
+
+    # RMD shortfall (§4974 / Form 5329 Pt IX).
+    if ret.required_minimum_distribution > 0:
+        distributions = max(ZERO, ret.ira_distributions_taxable) + max(
+            ZERO, ret.pension_distributions_taxable
+        )
+        rmd_shortfall = max(ZERO, ret.required_minimum_distribution - distributions)
+        if rmd_shortfall > 0:
+            rate = rules.rmd_shortfall_excise_rate
+            rmd_excise = _money(rmd_shortfall * rate)
+            rec.add(
+                "RMD shortfall excise (§4974 / Form 5329 Pt IX)",
+                f"{rate} × max(0, rmd_due − ira_dist − pension_dist)",
+                {
+                    "rmd_due": ret.required_minimum_distribution,
+                    "ira_dist": ret.ira_distributions_taxable,
+                    "pension_dist": ret.pension_distributions_taxable,
+                    "shortfall": rmd_shortfall,
+                    "rate": rate,
+                },
+                rmd_excise,
+            )
+
+    return excess_excise, _money(excess_out), _money(rmd_shortfall), rmd_excise
+
+
 def _compute_taxable_ss(
     ret: Return, gross_excl_ss: Decimal, rules: Rules, rec: _StepRecorder
 ) -> Decimal:
@@ -1680,19 +1797,27 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
             early_withdrawal_penalty,
         )
 
+    # Form 5329 — §4973 excess IRA contribution excise + §4974 RMD shortfall excise.
+    excess_ira_excise, excess_ira_out, rmd_shortfall_amt, rmd_excise = _compute_form_5329(
+        ret, agi, rules, rec,
+    )
+
     total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit
-                 + aptc_repayment + early_withdrawal_penalty) - credits
+                 + aptc_repayment + early_withdrawal_penalty
+                 + excess_ira_excise + rmd_excise) - credits
     total_tax = max(ZERO, total_tax)
     rec.add(
         "Total tax",
         "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit"
-        " + APTC_repay + early_wd_penalty − credits",
+        " + APTC_repay + early_wd_penalty + 5329_excise − credits",
         {
             "ordinary": ord_tax, "qualified": qual_tax,
             "collectibles": coll_tax, "unrecaptured_1250": unrec_tax,
             "amt": amt, "se": se_tax, "addl_medicare": addl_medicare,
             "niit": niit, "aptc_repayment": aptc_repayment,
             "early_wd_penalty": early_withdrawal_penalty,
+            "excess_ira_excise": excess_ira_excise,
+            "rmd_excise": rmd_excise,
             "credits": credits,
         },
         total_tax,
@@ -1786,6 +1911,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         ),
         ira_distribution_nontaxable=_money(getattr(rec, "_ira_nontaxable_recovered", ZERO)),
         ira_taxable_after_basis=_money(getattr(rec, "_ira_taxable_after_basis", ZERO)),
+        excess_ira_contribution_excise=excess_ira_excise,
+        excess_ira_contributions_out=excess_ira_out,
+        rmd_shortfall=rmd_shortfall_amt,
+        rmd_shortfall_excise=rmd_excise,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )
