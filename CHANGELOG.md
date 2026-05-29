@@ -2,6 +2,30 @@
 
 All notable changes to TaxLens.
 
+## [0.23.0] — 2026
+
+### Added — Two new visualizations
+
+- **Dashboard: "Tax composition by year"** — full-width stacked bar
+  showing how every dollar of liability decomposes across ordinary,
+  qualified, AMT, SE, additional Medicare, NIIT, early-withdrawal
+  penalty, state tax, and credits (rendered as a downward stack).
+  Tooltip footer shows net liability for each year. Auto-hides any
+  series that is zero across all imported years.
+- **Year detail: Income → tax buckets Sankey** — lightweight inline
+  SVG diagram. Each visible income source (wages, qual div, ord div,
+  LTCG, STCG, interest, SE, pensions, IRA, taxable SS, unemployment,
+  other) is sized proportionally on the left; right-hand buckets are
+  Federal income tax, FICA/SE/NIIT, State tax, and Take-home. Flows
+  use a (source$ × bucket$ / gross²) thickness so the picture is
+  faithful to the actual dollar weights. Hover any block for its
+  label and exact amount.
+
+Refreshes happen automatically on year switch and on import.
+
+### Tests
+- 270 still passing (visualizations are pure UI; no engine changes).
+
 ## [0.22.0] — 2026
 
 ### Added — README screenshots + mockup capture script

@@ -186,6 +186,7 @@ function renderDashboard() {
     drawIncomeStack(fulls);
     drawRateLine(fulls);
     drawTaxDonut(fulls[fulls.length - 1]);
+    drawTaxStack(fulls);
   });
 }
 
@@ -314,6 +315,68 @@ function drawTaxDonut(full) {
       backgroundColor: ['#0f172a','#60a5fa','#f97316','#10b981','#ef4444','#f472b6','#fbbf24','#a78bfa','#14b8a6']
     }]},
     options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }
+  });
+}
+
+function drawTaxStack(fulls) {
+  const years = fulls.map(f => f.tax_year);
+  const pull = (f, k) => Number(f.result[k] || 0);
+  const stateOf = (f) => Number(f.result.state_result ? f.result.state_result.state_tax : 0);
+  const credits = (f) => Number(f.result.credits || 0)
+                       + Number(f.result.eitc || 0)
+                       + Number(f.result.actc || 0)
+                       + Number(f.result.aotc_refundable || 0)
+                       + Number(f.result.dependent_care_credit_refundable || 0);
+  const series = {
+    'Ordinary tax':    fulls.map(f => pull(f, 'ordinary_tax')),
+    'Qualified tax':   fulls.map(f => pull(f, 'qualified_tax')),
+    'AMT':             fulls.map(f => pull(f, 'amt')),
+    'SE tax':          fulls.map(f => pull(f, 'se_tax')),
+    "Add'l Medicare":  fulls.map(f => pull(f, 'additional_medicare_tax')),
+    'NIIT':            fulls.map(f => pull(f, 'niit')),
+    'Early-wd pen.':   fulls.map(f => pull(f, 'early_withdrawal_penalty')),
+    'State tax':       fulls.map(stateOf),
+    'Credits':         fulls.map(f => -credits(f)),
+  };
+  for (const k of Object.keys(series)) {
+    if (series[k].every(v => v === 0)) delete series[k];
+  }
+  const palette = {
+    'Ordinary tax':   '#0f172a',
+    'Qualified tax':  '#60a5fa',
+    'AMT':            '#ef4444',
+    'SE tax':         '#f472b6',
+    "Add'l Medicare": '#fbbf24',
+    'NIIT':           '#a78bfa',
+    'Early-wd pen.':  '#fb923c',
+    'State tax':      '#14b8a6',
+    'Credits':        '#10b981',
+  };
+  const datasets = Object.entries(series).map(([label, data]) => ({
+    label, data, backgroundColor: palette[label] || '#94a3b8', borderRadius: 3,
+  }));
+  recreate('taxStack', {
+    type: 'bar',
+    data: { labels: years, datasets },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`,
+            footer: (items) => {
+              const total = items.reduce((s, it) => s + it.parsed.y, 0);
+              return `Net liability: ${fmt(total)}`;
+            }
+          }
+        }
+      }
+    }
   });
 }
 
@@ -468,6 +531,118 @@ async function renderYearDetail() {
     ['Refund/owed', r.refund_or_owed],
   ].map(([k,v]) => `<div class="border border-slate-200 rounded-lg p-3">
     <div class="text-xs text-slate-500">${k}</div><div class="font-mono text-lg">${fmt(v)}</div></div>`).join('');
+
+  drawSankey(full);
+}
+
+// Lightweight SVG Sankey: income sources (left) → tax buckets + take-home (right).
+// Flow widths are proportional to (source$ * bucket$ / gross$).
+function drawSankey(full) {
+  const r = full.result, ret = full.return;
+  const SRC = [
+    ['Wages',        Number(ret.wages || 0),                                   '#34d399'],
+    ['Interest',     Number(ret.interest_income || 0),                         '#fbbf24'],
+    ['Qual div',     Number(ret.qualified_dividends || 0),                     '#60a5fa'],
+    ['Ord div',      Number(ret.ordinary_dividends || 0) - Number(ret.qualified_dividends || 0), '#3b82f6'],
+    ['LTCG',         Number(ret.long_term_capital_gains || 0),                 '#a78bfa'],
+    ['STCG',         Number(ret.short_term_capital_gains || 0),                '#c084fc'],
+    ['SE',           Number(ret.se_income || 0),                               '#f472b6'],
+    ['Pensions',     Number(ret.pension_distributions_taxable || 0),           '#22d3ee'],
+    ['IRA dist.',    Number(ret.ira_distributions_taxable || 0),               '#06b6d4'],
+    ['SS taxable',   Number(r.social_security_taxable || 0),                   '#facc15'],
+    ['Unemployment', Number(ret.unemployment_compensation || 0),               '#fb923c'],
+    ['Other',        Number(ret.other_ordinary_income || 0),                   '#94a3b8'],
+  ].filter(s => s[1] > 0);
+
+  const fedTax = Number(r.ordinary_tax || 0) + Number(r.qualified_tax || 0)
+               + Number(r.collectibles_tax || 0) + Number(r.unrecaptured_1250_tax || 0)
+               + Number(r.amt || 0) - Number(r.credits || 0);
+  const fica   = Number(r.se_tax || 0) + Number(r.additional_medicare_tax || 0) + Number(r.niit || 0)
+               + Number(r.early_withdrawal_penalty || 0);
+  const state  = Number(r.state_result ? r.state_result.state_tax : 0);
+  const gross  = SRC.reduce((s, x) => s + x[1], 0);
+  const totalTax = Math.max(0, fedTax) + fica + state;
+  const takeHome = Math.max(0, gross - totalTax);
+
+  const BUCKETS = [
+    ['Federal income tax', Math.max(0, fedTax), '#0f172a'],
+    ['FICA / SE / NIIT',   fica,                '#475569'],
+    ['State tax',          state,               '#14b8a6'],
+    ['Take-home',          takeHome,            '#10b981'],
+  ].filter(b => b[1] > 0);
+
+  if (gross <= 0) { $('#sankey').innerHTML = '<div class="text-sm text-slate-400 italic">No income data.</div>'; return; }
+
+  const W = 800, H = 280, PAD = 8, COL_W = 140, GAP = 6;
+  const totalRight = BUCKETS.reduce((s, b) => s + b[1], 0) || 1;
+  const totalLeft  = gross;
+  const usableH = H - PAD * 2 - GAP * Math.max(SRC.length, BUCKETS.length);
+  const leftScale  = (usableH) / totalLeft;
+  const rightScale = (usableH) / totalRight;
+
+  // Layout source rects
+  let yL = PAD;
+  const srcRects = SRC.map(([label, val, color]) => {
+    const h = Math.max(6, val * leftScale);
+    const rect = { label, val, color, x: 20, y: yL, w: COL_W, h };
+    yL += h + GAP;
+    return rect;
+  });
+  let yR = PAD;
+  const bktRects = BUCKETS.map(([label, val, color]) => {
+    const h = Math.max(8, val * rightScale);
+    const rect = { label, val, color, x: W - 20 - COL_W, y: yR, w: COL_W, h };
+    yR += h + GAP;
+    return rect;
+  });
+
+  // For each source, distribute its outflow across buckets proportionally.
+  // Track running offset within each side so flows stack cleanly.
+  const srcOff = srcRects.map(() => 0);
+  const bktOff = bktRects.map(() => 0);
+  const flows = [];
+  srcRects.forEach((src, si) => {
+    bktRects.forEach((bkt, bi) => {
+      const share = (src.val * bkt.val) / (totalLeft * totalRight);
+      const thick = share * totalRight * rightScale; // pixels
+      if (thick < 0.5) return;
+      const y1 = src.y + srcOff[si] + thick / 2;
+      const y2 = bkt.y + bktOff[bi] + thick / 2;
+      srcOff[si] += thick;
+      bktOff[bi] += thick;
+      const x1 = src.x + src.w, x2 = bkt.x;
+      const cx = (x1 + x2) / 2;
+      flows.push({
+        d: `M${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`,
+        stroke: src.color, width: thick,
+      });
+    });
+  });
+
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" class="w-full" style="max-height:340px">
+      <g stroke-opacity="0.45" fill="none">
+        ${flows.map(f => `<path d="${f.d}" stroke="${f.stroke}" stroke-width="${f.width.toFixed(2)}"/>`).join('')}
+      </g>
+      <g font-size="11" font-family="ui-sans-serif,system-ui" fill="white">
+        ${srcRects.map(s => `
+          <rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="4" fill="${s.color}">
+            <title>${esc(s.label)}: ${fmt(s.val)}</title>
+          </rect>
+          <text x="${s.x + s.w/2}" y="${s.y + s.h/2 + 4}" text-anchor="middle" ${s.h < 14 ? 'font-size="9"' : ''}>
+            ${esc(s.label)} ${fmt(s.val)}
+          </text>`).join('')}
+        ${bktRects.map(b => `
+          <rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="4" fill="${b.color}">
+            <title>${esc(b.label)}: ${fmt(b.val)}</title>
+          </rect>
+          <text x="${b.x + b.w/2}" y="${b.y + b.h/2 + 4}" text-anchor="middle" ${b.h < 14 ? 'font-size="9"' : ''}>
+            ${esc(b.label)} ${fmt(b.val)}
+          </text>`).join('')}
+      </g>
+    </svg>`;
+  $('#sankey').innerHTML = svg;
 }
 
 // ─── math view ─────────────────────────────────────────────────────────────

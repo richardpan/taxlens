@@ -79,6 +79,13 @@
         <div class="font-semibold mb-3">Tax composition (latest year)</div>
         <canvas id="taxDonut" height="180"></canvas>
       </div>
+      <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="flex items-baseline justify-between mb-3">
+          <div class="font-semibold">Tax composition by year</div>
+          <div class="text-xs text-slate-500">Stacked: every dollar of federal + state liability, year over year</div>
+        </div>
+        <canvas id="taxStack" height="120"></canvas>
+      </div>
       <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 overflow-x-auto">
         <div class="font-semibold mb-3">All returns</div>
         <table class="w-full text-sm">
@@ -108,6 +115,13 @@
       <div class="font-semibold mb-3">Federal bracket fill</div>
       <canvas id="brackets" height="180"></canvas>
       <div class="text-xs text-slate-500 mt-2">Each bar shows how much taxable income sits in that bracket and the tax owed on it.</div>
+    </div>
+    <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="flex items-baseline justify-between mb-3">
+        <div class="font-semibold">Income sources → tax buckets</div>
+        <div class="text-xs text-slate-500">Flow widths are proportional to dollars</div>
+      </div>
+      <div id="sankey" class="w-full"></div>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-3">Tax breakdown</div>
@@ -270,7 +284,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.22.0
+  TaxLens · local-first · v0.23.0
 </footer>
 
 <script src="/static/app.js"></script>
