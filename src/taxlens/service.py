@@ -27,6 +27,15 @@ from taxlens.importers import Imported, import_path
 from taxlens.models import Return, TaxResult
 
 
+def _to_jsonable(v: Any) -> Any:
+    """Coerce Decimal → str (JSON-safe). Pass through everything else."""
+    if v is None:
+        return None
+    if isinstance(v, Decimal):
+        return str(v.quantize(Decimal("0.01")))
+    return v
+
+
 @dataclass
 class TaxLensService:
     sessionmaker_: sessionmaker[Session]
@@ -168,6 +177,126 @@ class TaxLensService:
             if row is None:
                 return None
             return self._full(row)
+
+    def diff_returns(self, left_id: int, right_id: int) -> dict[str, Any] | None:
+        """Attribute the total-tax delta between two returns to individual drivers.
+
+        For each tracked input dimension we re-run the engine with just that
+        field swapped from L to R and measure how much L's total_tax shifts.
+        We also run an "L inputs, R tax year" probe to isolate rule-change
+        contribution (different brackets / SD / credits).
+
+        Returns a dict with overall deltas and an ordered list of drivers, each
+        of the form: {label, left, right, delta, attributed_tax, kind}.
+        """
+        with self.sessionmaker_() as s:
+            l_row = s.get(StoredReturn, left_id)
+            r_row = s.get(StoredReturn, right_id)
+        if l_row is None or r_row is None:
+            return None
+        l_data = self._decimalize(json.loads(l_row.return_json))
+        r_data = self._decimalize(json.loads(r_row.return_json))
+        l_ret = Return(**l_data)
+        r_ret = Return(**r_data)
+        l_res = compute(l_ret)
+        r_res = compute(r_ret)
+        overall_delta = r_res.total_tax - l_res.total_tax
+
+        # Field dimensions to probe. Each entry: (Return field, label, kind).
+        probes = [
+            ("wages",                       "Wages",                "income"),
+            ("interest_income",             "Interest income",      "income"),
+            ("ordinary_dividends",          "Ordinary dividends",   "income"),
+            ("qualified_dividends",         "Qualified dividends",  "income"),
+            ("long_term_capital_gains",     "Long-term cap gains",  "income"),
+            ("short_term_capital_gains",    "Short-term cap gains", "income"),
+            ("se_income",                   "Self-employment",      "income"),
+            ("rental_net_income",           "Rental income",        "income"),
+            ("other_ordinary_income",       "Other ordinary",       "income"),
+            ("qualifying_children",         "Qualifying children",  "credits"),
+            ("other_dependents",            "Other dependents",     "credits"),
+            ("traditional_401k_contributions", "401(k) deferral",   "deductions"),
+            ("traditional_ira_contributions", "Traditional IRA",    "deductions"),
+            ("hsa_deduction",               "HSA deduction",        "deductions"),
+            ("salt_paid",                   "SALT paid",            "deductions"),
+            ("mortgage_interest",           "Mortgage interest",    "deductions"),
+            ("charitable_contributions",    "Charitable",           "deductions"),
+            ("itemized_deductions",         "Itemized total",       "deductions"),
+            ("federal_withholding",         "Federal withholding",  "payments"),
+            ("estimated_payments",          "Estimated payments",   "payments"),
+            ("foreign_taxes_paid",          "Foreign taxes paid",   "credits"),
+        ]
+
+        drivers: list[dict[str, Any]] = []
+        for field_name, label, kind in probes:
+            l_val = getattr(l_ret, field_name, None)
+            r_val = getattr(r_ret, field_name, None)
+            if l_val == r_val:
+                continue
+            # Swap one field at a time, holding L's tax year + other inputs constant.
+            probed = l_ret.model_copy(update={field_name: r_val})
+            try:
+                probed_res = compute(probed)
+            except Exception:
+                continue
+            attributed = probed_res.total_tax - l_res.total_tax
+            # For payments (withholding, estimated), total_tax doesn't move but
+            # refund does. Report refund delta as the "attributed" effect instead.
+            if kind == "payments":
+                attributed = -(probed_res.refund_or_owed - l_res.refund_or_owed)
+            drivers.append({
+                "field": field_name,
+                "label": label,
+                "kind": kind,
+                "left": _to_jsonable(l_val),
+                "right": _to_jsonable(r_val),
+                "delta": _to_jsonable(
+                    (Decimal(r_val) - Decimal(l_val)) if isinstance(l_val, (int, Decimal)) else None
+                ),
+                "attributed_tax": _to_jsonable(attributed),
+            })
+
+        # Rule-change attribution: swap L's tax_year to R's, keep all inputs.
+        rule_attributed: Decimal | None = None
+        if l_ret.tax_year != r_ret.tax_year:
+            try:
+                rule_probe = l_ret.model_copy(update={"tax_year": r_ret.tax_year})
+                rule_res = compute(rule_probe)
+                rule_attributed = rule_res.total_tax - l_res.total_tax
+                drivers.append({
+                    "field": "_rules",
+                    "label": f"Rule changes ({l_ret.tax_year} → {r_ret.tax_year})",
+                    "kind": "rules",
+                    "left": l_ret.tax_year,
+                    "right": r_ret.tax_year,
+                    "delta": None,
+                    "attributed_tax": _to_jsonable(rule_attributed),
+                })
+            except Exception:
+                pass
+
+        # Sort by absolute attributed_tax desc, but stash "rules" near the top
+        # so users see "the law changed" as a first-class driver.
+        def _sort_key(d: dict[str, Any]) -> tuple[int, float]:
+            attr = abs(float(d["attributed_tax"] or 0))
+            return (0 if d["kind"] == "rules" else 1, -attr)
+
+        drivers.sort(key=_sort_key)
+
+        # Residual: overall_delta - sum(attributed). Reveals non-linear interactions
+        # (e.g. when AMT crosses over, when bracket boundaries are hit, etc.).
+        attributed_sum = sum((Decimal(str(d["attributed_tax"])) for d in drivers if d["attributed_tax"] is not None), Decimal(0))
+        residual = overall_delta - attributed_sum
+
+        return {
+            "left":  {"id": left_id,  "tax_year": l_ret.tax_year, "total_tax": _to_jsonable(l_res.total_tax),
+                       "refund_or_owed": _to_jsonable(l_res.refund_or_owed), "agi": _to_jsonable(l_res.agi)},
+            "right": {"id": right_id, "tax_year": r_ret.tax_year, "total_tax": _to_jsonable(r_res.total_tax),
+                       "refund_or_owed": _to_jsonable(r_res.refund_or_owed), "agi": _to_jsonable(r_res.agi)},
+            "overall_tax_delta": _to_jsonable(overall_delta),
+            "drivers": drivers,
+            "residual": _to_jsonable(residual),
+        }
 
     def advise_return(self, return_id: int) -> dict[str, Any] | None:
         """Run the single-year advisor on one stored return."""

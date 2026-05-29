@@ -2,6 +2,44 @@
 
 All notable changes to TaxLens.
 
+## [0.15.0] — 2026
+
+### Added — "What changed?" diff with driver attribution
+
+The **Compare** tab now includes a "What changed?" panel below the side-by-side
+table that explains *why* total tax shifted between two returns. For every
+input that differs between the two returns, the engine is re-run with that
+single field swapped to measure its independent contribution to the total-tax
+delta. Rule-change attribution (when the two returns are different tax years)
+gets its own line so you can see "TCJA cut my tax by $4,200" vs "but my AGI
+grew by $20k which added $4,800."
+
+Each driver is rendered as a horizontal bar (right for tax increases, left for
+decreases), color-coded by kind (income / deduction / credit / payment /
+rules), with a magnitude label and the raw values that changed. The
+unattributed residual (from non-linear interactions like AMT crossover or
+bracket boundaries) is shown at the bottom.
+
+### Added — `GET /api/diff?left=&right=`
+
+New REST endpoint returns:
+- `overall_tax_delta`
+- ordered list of `drivers` with `attributed_tax`, `kind`, `left`, `right`
+- `residual` (delta minus sum of attributions)
+- `left` / `right` summary block
+
+### Added — Historical-year PDF round-trip goldens
+
+Three new PDF goldens prove the importer + engine flow works end-to-end for:
+- **TY2018** — first post-TCJA year (lower brackets, doubled SD)
+- **TY2017** — last pre-TCJA year (verifies personal exemption activates)
+- **TY2021** — ARPA expanded CTC (verifies fully-refundable flow)
+
+### Tests
+
+7 new tests (`test_v15_diff_and_pdf.py`): 4 for the diff service + 3 for
+historical PDF round-trips. **205 tests passing.**
+
 ## [0.14.0] — 2026
 
 ### Added — Historical accuracy: 10 years of federal rules (TY2015-2024)

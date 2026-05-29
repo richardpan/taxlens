@@ -460,6 +460,59 @@ async function renderCompare() {
       <td class="text-right ${color}">${d >= 0 ? '+' : ''}${fmt(d)}</td>
       <td class="text-right pr-6 ${color}">${pct}</td></tr>`;
   }).join('');
+  await renderDiff(li, ri);
+}
+
+async function renderDiff(li, ri) {
+  const panel = document.getElementById('diffPanel');
+  panel.classList.remove('hidden');
+  try {
+    const d = await api(`/api/diff?left=${li}&right=${ri}`);
+    const overall = Number(d.overall_tax_delta);
+    const sign = overall >= 0 ? '+' : '';
+    const color = overall > 0 ? 'text-rose-600' : overall < 0 ? 'text-emerald-600' : 'text-slate-600';
+    document.getElementById('diffSummary').innerHTML =
+      `Total tax shifted <span class="${color} font-semibold">${sign}${fmt(overall)}</span> ` +
+      `(TY${d.left.tax_year} → TY${d.right.tax_year}). Largest contributors:`;
+    const maxAbs = Math.max(1, ...d.drivers.map(x => Math.abs(Number(x.attributed_tax || 0))));
+    const KIND_COLOR = {
+      income:     'bg-sky-500',
+      deductions: 'bg-emerald-500',
+      credits:    'bg-violet-500',
+      payments:   'bg-amber-500',
+      rules:      'bg-slate-700',
+    };
+    const KIND_LABEL = {
+      income: 'income', deductions: 'deduction', credits: 'credit',
+      payments: 'payment', rules: 'rules',
+    };
+    document.getElementById('diffDrivers').innerHTML = d.drivers.map(x => {
+      const v = Number(x.attributed_tax || 0);
+      if (Math.abs(v) < 1) return '';
+      const pct = Math.abs(v) / maxAbs * 100;
+      const dir = v > 0 ? 'right' : 'left';
+      const barColor = KIND_COLOR[x.kind] || 'bg-slate-500';
+      const txt = (v > 0 ? '+' : '') + fmt(v);
+      const detail = x.kind === 'rules'
+        ? ''
+        : ` <span class="text-slate-400 text-xs">(${fmt(Number(x.left))} → ${fmt(Number(x.right))})</span>`;
+      return `<div class="flex items-center gap-2 text-sm">
+        <span class="w-44 truncate" title="${x.label}">${x.label}${detail}</span>
+        <div class="flex-1 relative h-5 bg-slate-100 rounded">
+          <div class="absolute top-0 ${dir === 'right' ? 'left-1/2' : 'right-1/2'} h-5 ${barColor} rounded" style="width:${pct/2}%"></div>
+          <div class="absolute inset-0 border-l border-slate-300" style="left:50%"></div>
+        </div>
+        <span class="w-24 text-right font-mono ${v > 0 ? 'text-rose-600' : 'text-emerald-600'}">${txt}</span>
+        <span class="w-20 text-xs text-slate-400">${KIND_LABEL[x.kind] || x.kind}</span>
+      </div>`;
+    }).join('');
+    const resid = Number(d.residual || 0);
+    document.getElementById('diffResidual').textContent = Math.abs(resid) >= 1
+      ? `Unattributed residual (bracket-crossing & non-linear interactions): ${resid > 0 ? '+' : ''}${fmt(resid)}`
+      : 'All deltas attributed cleanly.';
+  } catch (e) {
+    panel.classList.add('hidden');
+  }
 }
 
 // ─── boot ──────────────────────────────────────────────────────────────────

@@ -48,6 +48,14 @@ def delete_return(return_id: int) -> dict[str, bool]:
     return {"deleted": True}
 
 
+@app.get("/api/diff")
+def diff_returns(left: int, right: int) -> dict[str, Any]:
+    out = service.diff_returns(left, right)
+    if out is None:
+        raise HTTPException(404, "left or right return not found")
+    return out
+
+
 @app.post("/api/returns/import")
 async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
     suffix = Path(file.filename or "").suffix.lower() or ".bin"
