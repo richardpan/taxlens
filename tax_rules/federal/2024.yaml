@@ -86,6 +86,7 @@ niit:
 # Child Tax Credit (simplified — phaseout omitted; v1 engine adds full phaseout).
 ctc:
   per_qualifying_child: 2000
+  refundable_per_child: 1700          # ACTC refundable ceiling (Form 8812)
   phaseout_start:
     single: 200000
     mfj:    400000
@@ -216,4 +217,52 @@ education_credits:
     mfs:    [0, 0]               # MFS not allowed
     hoh:    [80000, 90000]
     qss:    [160000, 180000]
+
+# Saver's Credit (Retirement Savings Contributions Credit, Form 8880).
+# Nonrefundable. Max contributions counted = $2,000 per person.
+# AGI-tiered credit rate: 50%, 20%, 10%, or 0% based on filing status.
+# Source: Rev. Proc. 2023-34 §3.21.
+savers_credit:
+  max_contribution_per_person: 2000
+  rates:
+    single:
+      - [23000, 0.50]
+      - [25000, 0.20]
+      - [38250, 0.10]
+    mfj:
+      - [46000, 0.50]
+      - [50000, 0.20]
+      - [76500, 0.10]
+    mfs:
+      - [23000, 0.50]
+      - [25000, 0.20]
+      - [38250, 0.10]
+    hoh:
+      - [34500, 0.50]
+      - [37500, 0.20]
+      - [57375, 0.10]
+    qss:
+      - [46000, 0.50]
+      - [50000, 0.20]
+      - [76500, 0.10]
+
+# Premium Tax Credit (Form 8962). FPL values are 2023 (used by TY 2024 returns).
+# Applicable Figure curve reflects ARPA/IRA extension through 2025 (no 400% cliff,
+# 8.5% cap above 400% FPL). 48 contiguous states; AK/HI variants in v1.x.
+ptc:
+  fpl_base: 14580                 # 1-person 2023 FPL, 48 states
+  fpl_increment_per_person: 5140
+  applicable_figure:
+    # Piecewise-linear: [pct_FPL_low, pct_FPL_high, rate_low, rate_high]
+    - [0,   150,  0.000, 0.000]
+    - [150, 200,  0.000, 0.020]
+    - [200, 250,  0.020, 0.040]
+    - [250, 300,  0.040, 0.060]
+    - [300, 400,  0.060, 0.085]
+    - [400, 99999, 0.085, 0.085]
+  # APTC repayment limits if PTC < APTC. Below 400% FPL: capped; ≥400%: full amount.
+  repayment_limits:
+    - {below_pct_fpl: 200, single: 375,  family: 750}
+    - {below_pct_fpl: 300, single: 975,  family: 1950}
+    - {below_pct_fpl: 400, single: 1625, family: 3250}
 

@@ -97,8 +97,8 @@ def test_eitc_is_refundable_pushes_refund_positive():
     r = compute(ret)
     assert r.total_tax == Decimal("0")
     assert r.eitc > Decimal("5000")
-    # Refund == EITC (since payments == 0 and total_tax == 0)
-    assert r.refund_or_owed == r.eitc
+    # Refund includes EITC (and ACTC since we have 2 kids + earned income).
+    assert r.refund_or_owed >= r.eitc
 
 
 # ── 2023 parameter sanity ───────────────────────────────────────────────────

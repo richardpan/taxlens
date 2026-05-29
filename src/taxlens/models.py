@@ -127,6 +127,15 @@ class Return(BaseModel):
     aotc_qualified_expenses: list[Decimal] = Field(default_factory=list)
     llc_qualified_expenses: Decimal = Decimal(0)
 
+    # ACA Marketplace inputs for Premium Tax Credit (Form 8962). Leave at
+    # defaults if you didn't receive marketplace coverage.
+    marketplace_household_size: int = 0        # tax family size for FPL lookup
+    marketplace_slcsp_annual: Decimal = Decimal(0)   # second-lowest-cost silver plan
+    marketplace_plan_premium_annual: Decimal = Decimal(0)  # what you actually paid
+    marketplace_advance_ptc_paid: Decimal = Decimal(0)     # APTC reported on 1095-A
+    marketplace_state_is_ak: bool = False
+    marketplace_state_is_hi: bool = False
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -206,6 +215,10 @@ class TaxResult(BaseModel):
     aotc_nonrefundable: Decimal = Decimal(0)               # Form 8863 line 19
     aotc_refundable: Decimal = Decimal(0)                  # Form 8863 line 8 (40%)
     llc_credit: Decimal = Decimal(0)                       # Form 8863 line 19 (LLC piece)
+    savers_credit: Decimal = Decimal(0)                    # Form 8880 (nonrefundable)
+    actc: Decimal = Decimal(0)                             # Additional CTC (refundable)
+    ptc_net: Decimal = Decimal(0)                          # net PTC (positive = refundable credit)
+    ptc_excess_aptc_repayment: Decimal = Decimal(0)        # additional tax owed (Form 8962)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -259,6 +272,10 @@ class Rules(BaseModel):
     eitc: dict[str, Any] | None = None
     # Education credits (Form 8863) — optional.
     education_credits: dict[str, Any] | None = None
+    # Saver's Credit (Form 8880) — optional.
+    savers_credit: dict[str, Any] | None = None
+    # Premium Tax Credit (Form 8962) — optional.
+    ptc: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

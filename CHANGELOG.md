@@ -2,6 +2,53 @@
 
 All notable changes to TaxLens.
 
+## [0.11.0] — 2026
+
+### Added — Saver's Credit, ACTC, Premium Tax Credit
+
+- **Saver's Credit (Form 8880)** — nonrefundable retirement-savings credit.
+  AGI-tiered 50% / 20% / 10% rates by filing status. Up to $2,000 of
+  contributions per person counted ($4,000 MFJ), so max credit = $1,000 /
+  $2,000. Pulls from existing `traditional_401k`, `roth_401k`,
+  `traditional_ira`, and `roth_ira` contribution fields.
+- **Additional Child Tax Credit (ACTC, Form 8812)** — refundable. CTC now
+  splits cleanly: nonrefundable portion is used against tax first, and the
+  unused portion flows refundable as ACTC, capped at `$1,700 × kids`
+  (TY 2024; $1,600 for TY 2023) and at `15% × (earned − $2,500)`. This
+  unlocks meaningful refunds for low-income families who couldn't fully
+  use the nonrefundable CTC.
+- **Premium Tax Credit (Form 8962)** — full APTC reconciliation. Inputs:
+  household size, SLCSP annual premium, actual plan premium paid, advance
+  PTC paid. Engine computes %-of-FPL (2023 FPL for TY 2024 returns),
+  looks up the piecewise-linear applicable figure (post-ARPA/IRA: no
+  400% cliff, 8.5% cap), and reconciles. If PTC > APTC: net positive
+  flows as a refundable payment. If APTC > PTC: excess flows as
+  additional tax, **capped per FPL bucket** below 400% ($375/$750,
+  $975/$1,950, $1,625/$3,250 for TY 2024).
+
+### Added — Return inputs
+- `marketplace_household_size`, `marketplace_slcsp_annual`,
+  `marketplace_plan_premium_annual`, `marketplace_advance_ptc_paid`
+
+### Added — TaxResult outputs
+- `savers_credit`, `actc`, `ptc_net`, `ptc_excess_aptc_repayment`
+
+### Engine
+- CTC computation refactored to return `(total, kid_portion)` so ACTC
+  can compute its refundable ceiling correctly with phaseout applied.
+- Excess APTC repayment is added on the tax side (Form 1040 line 17/2);
+  refundable PTC is added on the payments side (line 31).
+
+### UI
+- New cards on Year detail for ACTC, Saver's Credit, PTC refund, and
+  excess APTC repayment — visible only when non-zero.
+
+### Tests
+- 172 passing (was 156). 16 new tests covering Saver's 50/20/10 tiers,
+  contribution caps, ACTC earnings-test, ACTC zero when CTC absorbed,
+  PTC simple refund, exact APTC match, capped excess repayment, no-cliff
+  above 400% FPL, and total-tax impact.
+
 ## [0.10.0] — 2026
 
 ### Added — refundable credits (EITC + AOTC)

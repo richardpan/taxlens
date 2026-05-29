@@ -77,6 +77,7 @@ niit:
 
 ctc:
   per_qualifying_child: 2000
+  refundable_per_child: 1600          # ACTC refundable ceiling for TY 2023
   phaseout_start:
     single: 200000
     mfj:    400000
@@ -198,4 +199,45 @@ education_credits:
     mfs:    [0, 0]
     hoh:    [80000, 90000]
     qss:    [160000, 180000]
+
+# Saver's Credit (Form 8880) — TY 2023 AGI tiers.
+savers_credit:
+  max_contribution_per_person: 2000
+  rates:
+    single:
+      - [21750, 0.50]
+      - [23750, 0.20]
+      - [36500, 0.10]
+    mfj:
+      - [43500, 0.50]
+      - [47500, 0.20]
+      - [73000, 0.10]
+    mfs:
+      - [21750, 0.50]
+      - [23750, 0.20]
+      - [36500, 0.10]
+    hoh:
+      - [32625, 0.50]
+      - [35625, 0.20]
+      - [54750, 0.10]
+    qss:
+      - [43500, 0.50]
+      - [47500, 0.20]
+      - [73000, 0.10]
+
+# Premium Tax Credit (Form 8962). FPL values are 2022 (used by TY 2023 returns).
+ptc:
+  fpl_base: 13590
+  fpl_increment_per_person: 4720
+  applicable_figure:
+    - [0,   150,  0.000, 0.000]
+    - [150, 200,  0.000, 0.020]
+    - [200, 250,  0.020, 0.040]
+    - [250, 300,  0.040, 0.060]
+    - [300, 400,  0.060, 0.085]
+    - [400, 99999, 0.085, 0.085]
+  repayment_limits:
+    - {below_pct_fpl: 200, single: 350,  family: 700}
+    - {below_pct_fpl: 300, single: 900,  family: 1800}
+    - {below_pct_fpl: 400, single: 1500, family: 3000}
 

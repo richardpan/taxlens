@@ -770,10 +770,14 @@ def _compute_niit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -
     return _money(tax)
 
 
-def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
+def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+    """Returns (total_ctc_after_phaseout, ctc_kid_portion_after_phaseout).
+
+    The kid portion is reported separately so the ACTC (refundable Additional
+    CTC) can use it as its $1,700/kid refundability ceiling (Form 8812)."""
     cfg = rules.ctc
     if ret.qualifying_children <= 0 and ret.other_dependents <= 0:
-        return ZERO
+        return ZERO, ZERO
     per_child = Decimal(cfg["per_qualifying_child"])
     per_odc   = Decimal(cfg.get("per_other_dependent", 500))
     raw_ctc = per_child * ret.qualifying_children
@@ -781,13 +785,15 @@ def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) ->
     raw = raw_ctc + raw_odc
     threshold = Decimal(cfg["phaseout_start"][_status(ret)])
     if agi > threshold:
-        # IRS rounds AGI excess UP to the next $1,000.
         over = ((agi - threshold) / 1000).to_integral_value(rounding="ROUND_CEILING")
         reduction = over * Decimal(cfg["phaseout_per_1000_agi"])
         credit = max(ZERO, raw - reduction)
+        # Reduce the kid portion first per IRS ordering (ODC reduced last).
+        kid_after = max(ZERO, raw_ctc - reduction)
     else:
         reduction = ZERO
         credit = raw
+        kid_after = raw_ctc
     rec.add(
         "Child Tax Credit + ODC",
         "(CTC × children + ODC × other_deps) − phaseout",
@@ -796,16 +802,117 @@ def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) ->
             "children": ret.qualifying_children,
             "per_other_dependent": per_odc,
             "other_dependents": ret.other_dependents,
-            "raw_ctc": raw_ctc,
-            "raw_odc": raw_odc,
-            "raw": raw,
-            "agi": agi,
-            "threshold": threshold,
-            "reduction": reduction,
+            "raw_ctc": raw_ctc, "raw_odc": raw_odc, "raw": raw,
+            "agi": agi, "threshold": threshold, "reduction": reduction,
         },
         credit,
     )
+    return _money(credit), _money(kid_after)
+
+
+def _compute_savers_credit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
+    """Form 8880 — Retirement Savings Contributions Credit. Nonrefundable.
+    Credit rate (50/20/10%) drops in steps as AGI rises. Max $2,000 of
+    contributions counted per person (so up to $1k/$2k credit)."""
+    cfg = rules.savers_credit
+    if not cfg:
+        return ZERO
+    contribs = (
+        max(ZERO, ret.traditional_401k_contributions)
+        + max(ZERO, ret.roth_401k_contributions)
+        + max(ZERO, ret.traditional_ira_contributions)
+        + max(ZERO, ret.roth_ira_contributions)
+    )
+    if contribs <= ZERO:
+        return ZERO
+    n_persons = 2 if ret.filing_status in (FilingStatus.MFJ, FilingStatus.QSS) else 1
+    cap = Decimal(str(cfg["max_contribution_per_person"])) * n_persons
+    capped = min(contribs, cap)
+    rates = cfg["rates"][_status(ret)]
+    rate = ZERO
+    for agi_limit, r in rates:
+        if agi <= Decimal(str(agi_limit)):
+            rate = Decimal(str(r))
+            break
+    credit = capped * rate
+    if credit > ZERO:
+        rec.add(
+            "Saver's Credit (Form 8880) — nonrefundable",
+            "min(contribs, $2k × persons) × tier-rate(AGI)",
+            {"contribs": contribs, "capped": capped, "rate": rate, "agi": agi},
+            credit,
+        )
     return _money(credit)
+
+
+def _compute_ptc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+    """Form 8962 — Premium Tax Credit. Returns (net_ptc, excess_aptc_repayment).
+
+      - net_ptc > 0 means a refundable credit (PTC > APTC)
+      - excess_aptc_repayment > 0 means additional tax owed (PTC < APTC),
+        capped per FPL bucket below 400%.
+    """
+    cfg = rules.ptc
+    if not cfg or ret.marketplace_household_size <= 0:
+        return ZERO, ZERO
+    if ret.marketplace_slcsp_annual <= ZERO:
+        return ZERO, ZERO
+
+    base = Decimal(str(cfg["fpl_base"]))
+    increment = Decimal(str(cfg["fpl_increment_per_person"]))
+    fpl = base + increment * Decimal(ret.marketplace_household_size - 1)
+    if fpl <= ZERO:
+        return ZERO, ZERO
+
+    pct_fpl = (agi / fpl) * Decimal(100)
+
+    # Piecewise-linear applicable figure curve.
+    applicable_figure = Decimal(str(cfg["applicable_figure"][-1][3]))  # default = last rate
+    for low, high, r_low, r_high in cfg["applicable_figure"]:
+        low_d, high_d = Decimal(str(low)), Decimal(str(high))
+        r_low_d, r_high_d = Decimal(str(r_low)), Decimal(str(r_high))
+        if low_d <= pct_fpl < high_d:
+            span = high_d - low_d
+            applicable_figure = (
+                r_low_d if span == ZERO
+                else r_low_d + (r_high_d - r_low_d) * ((pct_fpl - low_d) / span)
+            )
+            break
+
+    annual_contrib = agi * applicable_figure
+    ptc_before_cap = max(ZERO, ret.marketplace_slcsp_annual - annual_contrib)
+    ptc = min(ptc_before_cap, ret.marketplace_plan_premium_annual or ret.marketplace_slcsp_annual)
+
+    aptc = ret.marketplace_advance_ptc_paid
+    if ptc >= aptc:
+        net_ptc = ptc - aptc
+        repayment = ZERO
+    else:
+        net_ptc = ZERO
+        excess = aptc - ptc
+        is_family = ret.marketplace_household_size >= 2
+        cap = None
+        for bucket in cfg["repayment_limits"]:
+            if pct_fpl < Decimal(str(bucket["below_pct_fpl"])):
+                cap = Decimal(str(bucket["family" if is_family else "single"]))
+                break
+        repayment = excess if cap is None else min(excess, cap)
+
+    rec.add(
+        "Premium Tax Credit (Form 8962)",
+        "PTC = min(SLCSP − household_income × applicable_figure(pct_FPL), plan_premium); reconcile vs APTC",
+        {
+            "household_size": ret.marketplace_household_size,
+            "fpl": fpl, "pct_fpl": pct_fpl,
+            "applicable_figure": applicable_figure,
+            "annual_contrib": annual_contrib,
+            "slcsp": ret.marketplace_slcsp_annual,
+            "computed_ptc": ptc, "aptc": aptc,
+            "net_ptc": net_ptc, "repayment": repayment,
+        },
+        net_ptc - repayment,
+    )
+    return _money(net_ptc), _money(repayment)
 
 
 def _compute_eitc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
@@ -1010,35 +1117,60 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     amt = _compute_amt(ret, taxable, pre_amt_regular, rules, rec)
     addl_medicare = _compute_additional_medicare(ret, rules, rec)
     niit = _compute_niit(ret, agi, rules, rec)
-    ctc = _compute_ctc(ret, agi, rules, rec)
+    ctc, ctc_kid_after = _compute_ctc(ret, agi, rules, rec)
     eitc = _compute_eitc(ret, agi, rules, rec)
     aotc_nonref, aotc_ref, llc = _compute_education_credits(ret, agi, rules, rec)
+    savers = _compute_savers_credit(ret, agi, rules, rec)
+    net_ptc, aptc_repayment = _compute_ptc(ret, agi, rules, rec)
     ftc_used, ftc_carry_out = _compute_ftc(ret, pre_amt_regular, agi, rec)
     amt_credit_used, amt_credit_carry_out = _compute_amt_credit(ret, pre_amt_regular, amt, rec)
-    credits = ctc + ftc_used + amt_credit_used + aotc_nonref + llc
 
-    total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit) - credits
+    # ── ACTC (Form 8812) — refundable portion of CTC ──
+    # Compute tax available to absorb the nonrefundable CTC: it stacks after
+    # other nonrefundable credits but before ACTC.
+    other_nonref = ftc_used + amt_credit_used + aotc_nonref + llc + savers
+    tax_after_other_nonref = max(ZERO, pre_amt_regular + amt - other_nonref)
+    ctc_nonref_used = min(ctc, tax_after_other_nonref)
+    ctc_leftover = ctc - ctc_nonref_used
+    actc_kid_cap = Decimal(rules.ctc.get("refundable_per_child", 1700)) * ret.qualifying_children
+    earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
+    earnings_test = max(ZERO, (earned - Decimal(2500)) * Decimal("0.15"))
+    actc = min(ctc_leftover, actc_kid_cap, earnings_test)
+    if actc > ZERO:
+        rec.add(
+            "Additional Child Tax Credit (Form 8812) — refundable",
+            "min(unused CTC, $1,700 × kids, 15% × (earned − $2,500))",
+            {"ctc_leftover": ctc_leftover, "kid_cap": actc_kid_cap,
+             "earnings_test": earnings_test, "earned": earned},
+            actc,
+        )
+
+    credits = ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
+
+    total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit + aptc_repayment) - credits
     total_tax = max(ZERO, total_tax)
     rec.add(
         "Total tax",
-        "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit − credits",
+        "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit + APTC_repay − credits",
         {
             "ordinary": ord_tax, "qualified": qual_tax,
             "collectibles": coll_tax, "unrecaptured_1250": unrec_tax,
             "amt": amt, "se": se_tax, "addl_medicare": addl_medicare,
-            "niit": niit, "credits": credits,
+            "niit": niit, "aptc_repayment": aptc_repayment, "credits": credits,
         },
         total_tax,
     )
 
     # Refundable credits are treated like payments on Form 1040.
-    payments = ret.federal_withholding + ret.estimated_payments + eitc + aotc_ref
+    payments = (ret.federal_withholding + ret.estimated_payments
+                + eitc + aotc_ref + actc + net_ptc)
     refund = payments - total_tax
     rec.add(
         "Refund (+) / owed (−)",
-        "withholding + estimated_payments + EITC + AOTC_refundable − total_tax",
+        "withholding + estimated + EITC + AOTC_refundable + ACTC + net_PTC − total_tax",
         {"withholding": ret.federal_withholding, "estimated": ret.estimated_payments,
-         "eitc": eitc, "aotc_refundable": aotc_ref, "total_tax": total_tax},
+         "eitc": eitc, "aotc_refundable": aotc_ref, "actc": actc, "net_ptc": net_ptc,
+         "total_tax": total_tax},
         refund,
     )
 
@@ -1086,6 +1218,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         aotc_nonrefundable=aotc_nonref,
         aotc_refundable=aotc_ref,
         llc_credit=llc,
+        savers_credit=savers,
+        actc=actc,
+        ptc_net=net_ptc,
+        ptc_excess_aptc_repayment=aptc_repayment,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

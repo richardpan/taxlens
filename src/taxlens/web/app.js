@@ -309,6 +309,14 @@ async function renderYearDetail() {
         ? [['AOTC nonrefundable portion', '-' + r.aotc_nonrefundable]] : []),
     ...(Number(r.llc_credit || 0) > 0
         ? [['Lifetime Learning Credit', '-' + r.llc_credit]] : []),
+    ...(Number(r.actc || 0) > 0
+        ? [['Additional CTC refundable (Form 8812)', '-' + r.actc]] : []),
+    ...(Number(r.savers_credit || 0) > 0
+        ? [["Saver's Credit (Form 8880)", '-' + r.savers_credit]] : []),
+    ...(Number(r.ptc_net || 0) > 0
+        ? [['Premium Tax Credit refund (Form 8962)', '-' + r.ptc_net]] : []),
+    ...(Number(r.ptc_excess_aptc_repayment || 0) > 0
+        ? [['Excess APTC repayment (Form 8962)', '+' + r.ptc_excess_aptc_repayment]] : []),
     ['Total federal tax', r.total_tax],
     ...(Number(r.capital_loss_carryforward_out || 0) > 0
         ? [['Cap-loss carried to next year', r.capital_loss_carryforward_out]] : []),
