@@ -2,6 +2,43 @@
 
 All notable changes to TaxLens.
 
+## [0.18.0] — 2026
+
+### Added — Traditional IRA deduction phaseout (§219(g))
+
+The engine previously treated every dollar of Traditional IRA contributions
+as an above-the-line deduction with no limit and no active-participant
+phaseout. That's correct only for filers (and spouses) NOT covered by a
+workplace retirement plan. This release closes the gap end-to-end.
+
+**Inputs (new optional `Return` fields):**
+- `is_covered_by_workplace_plan` — primary filer is an active participant
+  (W-2 box 13 "Retirement plan" checked).
+- `spouse_covered_by_workplace_plan` — relevant only on MFJ/MFS; uses the
+  higher $230k–$240k phaseout window (2024 figures).
+- `taxpayer_age` — drives the 50+ catch-up contribution limit.
+
+**Engine:**
+- New `_compute_ira_deduction()` helper. Approximates MAGI as
+  AGI-before-IRA-deduction (other above-the-line adjustments still subtracted),
+  applies the annual §219(b) contribution limit (with 50+ catch-up), then the
+  §219(g) active-participant phaseout via linear ramp.
+- The disallowed portion is surfaced separately as `ira_deduction_disallowed`
+  on `TaxResult` (economically becomes nondeductible basis in the IRA).
+- When `rules.ira_deduction` is absent the engine keeps legacy
+  "deductible-in-full" behavior — backwards compatible.
+
+**YAML config:** all 10 federal years (2015–2024) now ship year-accurate
+contribution limits and phaseout brackets (e.g. 2024: $7k/$8k, single covered
+$77k–$87k, MFJ covered $123k–$143k, spouse-covered-only $230k–$240k, MFS
+$0–$10k).
+
+**Tests:** +11 dedicated IRA deduction tests (238 total, all passing).
+Covers full deduction when uncovered, contribution capped at limit, 50+
+catch-up, full/partial/zero deduction across the phaseout range, MFJ
+thresholds, spouse-covered-only window, and historical limits (2015 $5500,
+2019 $6000).
+
 ## [0.17.0] — 2026
 
 ### Added — Retirement income (federal coverage gap)

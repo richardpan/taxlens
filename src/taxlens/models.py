@@ -124,6 +124,16 @@ class Return(BaseModel):
     tax_exempt_interest: Decimal = Decimal(0)
     early_withdrawal_subject_to_penalty: Decimal = Decimal(0)
 
+    # IRA deductibility (§219). The deduction for Traditional IRA contributions
+    # phases out by MAGI when the taxpayer (or spouse, for MFJ) is an active
+    # participant in an employer retirement plan (W-2 box 13).
+    #   - is_covered_by_workplace_plan:     primary filer is active participant
+    #   - spouse_covered_by_workplace_plan: spouse is active participant (MFJ only)
+    #   - taxpayer_age:                     used to apply the 50+ catch-up limit
+    is_covered_by_workplace_plan: bool = False
+    spouse_covered_by_workplace_plan: bool = False
+    taxpayer_age: int | None = None
+
     # ISO exercise (bargain element) — feeds AMT preferences & the advisor
     iso_bargain_element: Decimal = Decimal(0)
 
@@ -246,6 +256,9 @@ class TaxResult(BaseModel):
     pension_taxable: Decimal = Decimal(0)                  # 1040 line 5b (pensions/annuities)
     ira_taxable: Decimal = Decimal(0)                      # 1040 line 4b (IRA dist)
     early_withdrawal_penalty: Decimal = Decimal(0)         # Schedule 2 line 8 / Form 5329
+    # IRA deductibility (§219) — claimed amount after limit + active-participant phaseout.
+    ira_deduction_allowed: Decimal = Decimal(0)            # Schedule 1 line 20
+    ira_deduction_disallowed: Decimal = Decimal(0)         # phased-out portion (becomes basis)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -320,6 +333,13 @@ class Rules(BaseModel):
     social_security: dict[str, Any] | None = None
     # 10% early-withdrawal penalty (§72(t)). Defaults to 0.10 if absent.
     early_withdrawal_penalty_rate: Decimal = Decimal("0.10")
+    # Traditional IRA deduction (§219). When None, contributions are deductible
+    # in full (legacy behavior). When set, applies contribution limit + active-
+    # participant phaseout against MAGI.
+    #   {contribution_limit: {under_50, fifty_plus},
+    #    phaseout_covered: {single: {start, end}, mfj: {...}, mfs: {...}, ...},
+    #    phaseout_spouse_covered_only: {mfj: {...}, mfs: {...}}}
+    ira_deduction: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

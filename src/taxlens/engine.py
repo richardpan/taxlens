@@ -324,20 +324,35 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     )
     # Stash for TaxResult so the UI / math view can show retirement-income breakdown.
     rec._taxable_ss = taxable_ss  # type: ignore[attr-defined]
-    # Traditional IRA contributions are above-the-line (we ignore the active-participant
-    # deductibility phaseout here — the Advisor warns about it explicitly).
+
+    # ── Traditional IRA deduction (§219) ──────────────────────────────────
+    # Step A: compute "MAGI for IRA" = AGI as it would be WITHOUT the IRA
+    # deduction. Per Form 1040 / Pub 590-A worksheet, MAGI for IRA is AGI
+    # (computed without the IRA deduction) plus a few add-backs we don't
+    # model (student-loan interest, foreign earned income exclusion, etc.).
+    # We approximate MAGI ≈ gross − (all other adjustments).
+    other_adjustments_total = (
+        ret.hsa_deduction + ret.other_adjustments + half_se_tax
+    )
+    magi_for_ira = gross - other_adjustments_total
+    ira_deduction_allowed, ira_deduction_disallowed = _compute_ira_deduction(
+        ret, magi_for_ira, rules, rec
+    )
+    rec._ira_deduction_allowed = ira_deduction_allowed  # type: ignore[attr-defined]
+    rec._ira_deduction_disallowed = ira_deduction_disallowed  # type: ignore[attr-defined]
+
     adjustments = (
         ret.hsa_deduction
-        + ret.traditional_ira_contributions
+        + ira_deduction_allowed
         + ret.other_adjustments
         + half_se_tax
     )
     rec.add(
         "Above-the-line adjustments",
-        "hsa + trad_ira + other + ½ se_tax",
+        "hsa + trad_ira_deductible + other + ½ se_tax",
         {
             "hsa": ret.hsa_deduction,
-            "trad_ira": ret.traditional_ira_contributions,
+            "trad_ira_deductible": ira_deduction_allowed,
             "other": ret.other_adjustments,
             "half_se_tax": half_se_tax,
         },
@@ -346,6 +361,79 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     agi = gross - adjustments
     rec.add("AGI", "gross − adjustments", {"gross": gross, "adjustments": adjustments}, agi)
     return agi, carryforward_out
+
+
+def _compute_ira_deduction(
+    ret: Return, magi: Decimal, rules: Rules, rec: _StepRecorder
+) -> tuple[Decimal, Decimal]:
+    """Returns (allowed_deduction, disallowed_portion).
+
+    The disallowed portion is what would-be-deducted but is phased out under
+    §219(g); economically it becomes nondeductible basis in the IRA.
+    """
+    contribution = ret.traditional_ira_contributions
+    if contribution <= 0:
+        return ZERO, ZERO
+
+    cfg = rules.ira_deduction
+    if cfg is None:
+        # Legacy behavior: contributions deductible in full (no phaseout enforced).
+        return _money(contribution), ZERO
+
+    # 1. Annual contribution limit (with 50+ catch-up).
+    limits = cfg.get("contribution_limit") or {}
+    age = ret.taxpayer_age
+    if age is not None and age >= 50:
+        limit = Decimal(str(limits.get("fifty_plus", limits.get("under_50", 0))))
+    else:
+        limit = Decimal(str(limits.get("under_50", 0)))
+    capped = min(contribution, limit) if limit > 0 else contribution
+
+    # 2. Active-participant phaseout (§219(g)).
+    status = _status(ret)
+    if ret.is_covered_by_workplace_plan:
+        ph = (cfg.get("phaseout_covered") or {}).get(status)
+    elif ret.spouse_covered_by_workplace_plan and status == "mfj":
+        ph = (cfg.get("phaseout_spouse_covered_only") or {}).get(status)
+    elif ret.spouse_covered_by_workplace_plan and status == "mfs":
+        # MFS living with spouse: $0–$10k window applies regardless of who is covered.
+        ph = (cfg.get("phaseout_spouse_covered_only") or {}).get(status) \
+            or (cfg.get("phaseout_covered") or {}).get(status)
+    else:
+        ph = None  # Not covered → full deduction up to limit.
+
+    if ph is None:
+        allowed = capped
+    else:
+        start = Decimal(str(ph.get("start", 0)))
+        end = Decimal(str(ph.get("end", 0)))
+        if magi <= start:
+            allowed = capped
+        elif magi >= end:
+            allowed = ZERO
+        else:
+            # Linear ramp; round UP to nearest $10 per Pub 590-A, with $200 floor.
+            ratio = (end - magi) / (end - start)
+            allowed_raw = capped * ratio
+            allowed = max(allowed_raw, Decimal("200")) if allowed_raw > 0 else ZERO
+            allowed = min(allowed, capped)
+
+    allowed = _money(allowed)
+    disallowed = _money(capped - allowed)
+
+    rec.add(
+        "Traditional IRA deduction (§219)",
+        "min(contribution, limit) reduced by active-participant phaseout vs MAGI",
+        {
+            "contribution": contribution,
+            "limit": limit,
+            "magi": magi,
+            "covered_self": ret.is_covered_by_workplace_plan,
+            "covered_spouse": ret.spouse_covered_by_workplace_plan,
+        },
+        allowed,
+    )
+    return allowed, disallowed
 
 
 def _compute_taxable_income(
@@ -1379,6 +1467,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         pension_taxable=_money(ret.pension_distributions_taxable),
         ira_taxable=_money(ret.ira_distributions_taxable),
         early_withdrawal_penalty=early_withdrawal_penalty,
+        ira_deduction_allowed=_money(getattr(rec, "_ira_deduction_allowed", ZERO)),
+        ira_deduction_disallowed=_money(getattr(rec, "_ira_deduction_disallowed", ZERO)),
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

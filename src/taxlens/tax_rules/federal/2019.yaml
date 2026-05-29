@@ -161,3 +161,18 @@ social_security:
   first_tier_rate:  0.50
   second_tier_rate: 0.85
 
+
+# Traditional IRA deduction (§219) — active-participant phaseout.
+ira_deduction:
+  contribution_limit:
+    under_50:   6000
+    fifty_plus: 7000
+  phaseout_covered:
+    single: { start: 64000, end: 74000 }
+    hoh:    { start: 64000, end: 74000 }
+    mfj:    { start: 103000, end: 123000 }
+    qss:    { start: 103000, end: 123000 }
+    mfs:    { start: 0,     end: 10000 }
+  phaseout_spouse_covered_only:
+    mfj:    { start: 193000, end: 203000 }
+    mfs:    { start: 0,     end: 10000 }
