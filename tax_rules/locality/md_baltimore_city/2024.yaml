@@ -1,0 +1,10 @@
+locality: MD_BALTIMORE_CITY
+year: 2024
+state: MD
+
+ordinary_brackets:
+  single: [[0, 0.0320]]
+  mfj:    [[0, 0.0320]]
+  mfs:    [[0, 0.0320]]
+  hoh:    [[0, 0.0320]]
+  qss:    [[0, 0.0320]]

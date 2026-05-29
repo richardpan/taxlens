@@ -78,6 +78,15 @@ class Return(BaseModel):
     # computed by the service from a prior year's TaxResult.capital_loss_carryforward_out).
     capital_loss_carryforward_in: Decimal = Decimal(0)   # positive number = available loss
 
+    # Other multi-year carryforwards (also auto-reflowed by the service).
+    nol_carryforward_in: Decimal = Decimal(0)             # §172 NOL (positive = available)
+    amt_credit_carryforward_in: Decimal = Decimal(0)      # Form 8801 prior-year min tax credit
+    ftc_carryforward_in: Decimal = Decimal(0)             # §904 unused FTC (10yr)
+    charitable_carryover_in: Decimal = Decimal(0)         # §170(d) 5yr carryover
+
+    # Foreign taxes paid (for FTC) and itemized charitable already above.
+    foreign_taxes_paid: Decimal = Decimal(0)
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -152,6 +161,10 @@ class TaxResult(BaseModel):
     schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
+    nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
+    amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
+    ftc_carryforward_out: Decimal = Decimal(0)           # §904 — to use in a future year (10y)
+    charitable_carryover_out: Decimal = Decimal(0)       # §170(d) — to use in a future year (5y)
     credits: Decimal
     total_tax: Decimal
 

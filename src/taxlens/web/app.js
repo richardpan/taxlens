@@ -304,6 +304,16 @@ async function renderYearDetail() {
     ['Total federal tax', r.total_tax],
     ...(Number(r.capital_loss_carryforward_out || 0) > 0
         ? [['Cap-loss carried to next year', r.capital_loss_carryforward_out]] : []),
+    ...(Number(r.nol_carryforward_out || 0) > 0
+        ? [['NOL carried to next year', r.nol_carryforward_out]] : []),
+    ...(Number(r.amt_credit_carryforward_out || 0) > 0
+        ? [['AMT credit carried (Form 8801)', r.amt_credit_carryforward_out]] : []),
+    ...(Number(r.ftc_carryforward_out || 0) > 0
+        ? [['Foreign tax credit carried', r.ftc_carryforward_out]] : []),
+    ...(Number(r.charitable_carryover_out || 0) > 0
+        ? [['Charitable carryover to next year', r.charitable_carryover_out]] : []),
+    ...(Number(r.passive_loss_disallowed || 0) > 0
+        ? [['Passive loss carried (Form 8582)', r.passive_loss_disallowed]] : []),
     ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
     ...(r.state_result && r.state_result.locality
         ? [[`${r.state_result.locality} locality tax`, r.state_result.locality_tax]] : []),

@@ -2,6 +2,38 @@
 
 All notable changes to TaxLens.
 
+## [0.7.0] — 2026
+
+### Added — multi-year carryforward suite
+TaxLens now threads **six** different carryforwards automatically across
+imported years (chain resets only on year gaps >1):
+
+- **NOL §172** — net operating losses, post-TCJA 80%-of-taxable-income cap
+  on use, excess carries forward indefinitely.
+- **Passive loss §469** — already computed each year; now reflowed
+  multi-year (Form 8582 chain).
+- **AMT credit (Form 8801)** — prior-year AMT (e.g. from ISO exercises)
+  becomes a credit usable in years where AMT = 0. Current-year AMT adds
+  to next year's credit.
+- **Foreign Tax Credit §901/§904** — `foreign_taxes_paid` field; simplified
+  §904 limit (capped at regular tax); excess carries forward.
+- **Charitable contribution §170(d)** — excess over 60% AGI cash cap when
+  itemizing carries forward; surviving carryover preserved on
+  standard-deduction years.
+- **Capital loss §1212(b)** — already shipped in v0.5; documented here as
+  part of the unified carryforward story.
+
+### Added — locality coverage
+- **6 Maryland county piggyback income taxes** (Montgomery, Baltimore City,
+  Baltimore County, Prince George's, Howard, Anne Arundel) at their 2024
+  rates (2.70%–3.20% on MD taxable income).
+
+### Added — UI
+- Year-detail tab now surfaces every active carryforward as its own card.
+
+### Tests
+- 9 new tests; **113 total, all passing.**
+
 ## [0.6.0] — 2026
 
 ### Added

@@ -285,14 +285,53 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _St
 
 def _compute_taxable_income(
     ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder
-) -> tuple[Decimal, Decimal, str]:
+) -> tuple[Decimal, Decimal, str, Decimal]:
+    """Returns (taxable_income, deduction_used, deduction_kind, charitable_carryover_out).
+
+    Charitable carryover (§170(d)): excess cash contributions over 60% AGI when
+    itemizing carry forward up to 5 years."""
     std = rules.standard_deduction[_status(ret)]
+    charitable_carry_out = ZERO
     if ret.itemized_deductions is not None and ret.itemized_deductions > std:
-        deduction = ret.itemized_deductions
-        kind = "itemized"
+        # Layer in prior-year charitable carryover, capped at 60% of AGI for cash gifts.
+        carry_in = ret.charitable_carryover_in or ZERO
+        cash_cap = agi * Decimal("0.60")
+        # Approximate: assume ret.itemized_deductions already includes current-year
+        # charitable. The carryover stacks on top; excess (over cap) re-carries.
+        itemized_with_carry = ret.itemized_deductions + carry_in
+        # The carryover only adds value up to the cap; anything beyond cap carries again.
+        # Simplified: if current charitable + carry_in exceeds 60% AGI cash cap, the
+        # excess (over the cap, ignoring non-cash mix) becomes new carryover.
+        current_charitable = ret.charitable_contributions or ZERO
+        total_charitable = current_charitable + carry_in
+        if total_charitable > cash_cap:
+            used_charitable = cash_cap
+            charitable_carry_out = total_charitable - cash_cap
+            # Replace excess charitable contribution in itemized with the cap.
+            itemized_used = ret.itemized_deductions - current_charitable + used_charitable
+        else:
+            itemized_used = itemized_with_carry
+        if carry_in > 0:
+            rec.add(
+                "Charitable carryover applied",
+                "prior carryover stacked into itemized (60% AGI cash cap)",
+                {"carry_in": carry_in, "cash_cap_60pct_agi": cash_cap,
+                 "carry_out": charitable_carry_out},
+                itemized_used,
+            )
+        if itemized_used > std:
+            deduction = itemized_used
+            kind = "itemized"
+        else:
+            deduction = std
+            kind = "standard"
+            # If we fell back to standard, the carryover wasn't actually used.
+            charitable_carry_out = (ret.charitable_carryover_in or ZERO)
     else:
         deduction = std
         kind = "standard"
+        # Standard-deduction year: any prior-year charitable carryover survives.
+        charitable_carry_out = ret.charitable_carryover_in or ZERO
     rec.add(
         f"{kind.capitalize()} deduction",
         f"{kind} ({_status(ret).upper()}, {ret.tax_year})",
@@ -300,13 +339,91 @@ def _compute_taxable_income(
         deduction,
     )
     taxable = max(ZERO, agi - deduction)
+
+    # NOL §172: post-TCJA, NOL offsets up to 80% of pre-NOL taxable income.
+    # Excess NOL carries forward indefinitely.
+    nol_in = ret.nol_carryforward_in or ZERO
+    nol_used = ZERO
+    nol_out = ZERO
+    if nol_in > 0 and taxable > 0:
+        cap = (taxable * Decimal("0.80")).quantize(Decimal("0.01"))
+        nol_used = min(nol_in, cap)
+        nol_out = nol_in - nol_used
+        taxable = taxable - nol_used
+        rec.add(
+            "NOL §172 applied",
+            "min(nol_in, 80% × taxable); excess carries forward",
+            {"nol_in": nol_in, "cap_80pct": cap, "nol_used": nol_used, "nol_out": nol_out},
+            taxable,
+        )
+    elif nol_in > 0:
+        # Taxable income is already 0; entire NOL carries forward.
+        nol_out = nol_in
+
     rec.add(
         "Taxable income",
-        "max(0, agi − deduction)",
-        {"agi": agi, "deduction": deduction},
+        "max(0, agi − deduction − nol_used)",
+        {"agi": agi, "deduction": deduction, "nol_used": nol_used},
         taxable,
     )
-    return taxable, deduction, kind
+    # Stash nol_out + charitable_carry_out as attributes on the recorder so
+    # compute() can pluck them without changing the return tuple shape too much.
+    rec._nol_out = nol_out  # type: ignore[attr-defined]
+    rec._charitable_out = charitable_carry_out  # type: ignore[attr-defined]
+    return taxable, deduction, kind, nol_out
+
+
+def _compute_ftc(ret: Return, regular_tax: Decimal, agi: Decimal,
+                  rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+    """Foreign Tax Credit §901/§904. Returns (ftc_used, ftc_carry_out).
+
+    Simplified §904 limitation: FTC capped at (foreign income / total income) ×
+    pre-FTC regular tax. We don't have foreign-income tracked separately, so
+    we approximate the limit as the smaller of (foreign_taxes_paid + carry_in)
+    and the regular tax itself. Excess carries forward 10 years.
+    """
+    available = (ret.foreign_taxes_paid or ZERO) + (ret.ftc_carryforward_in or ZERO)
+    if available <= 0:
+        return ZERO, ZERO
+    # Limit at regular tax (simplified §904).
+    used = min(available, max(regular_tax, ZERO))
+    carry_out = available - used
+    rec.add(
+        "Foreign Tax Credit §901/§904",
+        "min(foreign_taxes + carry_in, regular_tax); excess carries 10y",
+        {"foreign_taxes_paid": ret.foreign_taxes_paid,
+         "carry_in": ret.ftc_carryforward_in, "limit": regular_tax,
+         "used": used, "carry_out": carry_out},
+        used,
+    )
+    return used, carry_out
+
+
+def _compute_amt_credit(ret: Return, regular_tax: Decimal, amt: Decimal,
+                         rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+    """Form 8801 Minimum Tax Credit. Returns (credit_used, new_carry_out).
+
+    Simplified: prior-year AMT (from timing items like ISO exercises) generates
+    a credit usable only in years where regular tax exceeds tentative minimum
+    tax. We approximate "regular > AMT" by checking that this year's AMT == 0.
+    The current year's AMT (if any) is added to the carryforward going out.
+    """
+    carry_in = ret.amt_credit_carryforward_in or ZERO
+    used = ZERO
+    if carry_in > 0 and amt == 0 and regular_tax > 0:
+        # Usable up to (regular_tax - 0) = regular_tax.
+        used = min(carry_in, regular_tax)
+    # Carry-out = remaining prior + any new AMT generated this year.
+    carry_out = (carry_in - used) + amt
+    if used > 0 or carry_out > 0:
+        rec.add(
+            "AMT credit (Form 8801)",
+            "use prior MTC when AMT=0; this year's AMT adds to carryforward",
+            {"carry_in": carry_in, "used": used, "amt_this_year": amt,
+             "carry_out": carry_out},
+            used,
+        )
+    return used, carry_out
 
 
 def _compute_income_tax(
@@ -703,7 +820,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
     sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rec)
-    taxable_pre_qbi, deduction, deduction_kind = _compute_taxable_income(ret, agi, rules, rec)
+    taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
+    charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
     qbi_ded = _compute_qbi(ret, taxable_pre_qbi, rules, rec)
     taxable = max(ZERO, taxable_pre_qbi - qbi_ded)
     if qbi_ded > 0:
@@ -717,7 +835,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     amt = _compute_amt(ret, taxable, pre_amt_regular, rules, rec)
     addl_medicare = _compute_additional_medicare(ret, rules, rec)
     niit = _compute_niit(ret, agi, rules, rec)
-    credits = _compute_ctc(ret, agi, rules, rec)
+    ctc = _compute_ctc(ret, agi, rules, rec)
+    ftc_used, ftc_carry_out = _compute_ftc(ret, pre_amt_regular, agi, rec)
+    amt_credit_used, amt_credit_carry_out = _compute_amt_credit(ret, pre_amt_regular, amt, rec)
+    credits = ctc + ftc_used + amt_credit_used
 
     total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit) - credits
     total_tax = max(ZERO, total_tax)
@@ -781,6 +902,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
+        nol_carryforward_out=_money(nol_carry_out),
+        amt_credit_carryforward_out=_money(amt_credit_carry_out),
+        ftc_carryforward_out=_money(ftc_carry_out),
+        charitable_carryover_out=_money(charitable_carry_out),
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )

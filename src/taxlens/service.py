@@ -85,20 +85,39 @@ class TaxLensService:
     # ── multi-year carryforward chain ────────────────────────────────────────
 
     def _reflow_carryforwards(self) -> None:
-        """Recompute every stored return in tax-year order, threading capital-loss
-        carryforward from each year into the next. Idempotent."""
+        """Recompute every stored return in tax-year order, threading all multi-year
+        carryforwards from each year into the next. Idempotent.
+
+        Threaded carryforwards:
+          - capital loss (§1212(b)) — always carries
+          - NOL (§172) — always carries (post-TCJA, indefinite)
+          - passive losses (§469, Form 8582) — always carries
+          - AMT credit (Form 8801) — always carries
+          - Foreign Tax Credit (§904) — 10-year limit (we don't expire here; small return counts)
+          - charitable contribution (§170(d)) — 5-year limit (we don't expire here)
+
+        All chains reset on year gaps >1 (defensive: we can't infer what happened
+        in the missing years)."""
+        carryforward_keys = [
+            ("capital_loss_carryforward_in", "capital_loss_carryforward_out"),
+            ("nol_carryforward_in",          "nol_carryforward_out"),
+            ("suspended_passive_losses_carryforward", "passive_loss_disallowed"),
+            ("amt_credit_carryforward_in",   "amt_credit_carryforward_out"),
+            ("ftc_carryforward_in",          "ftc_carryforward_out"),
+            ("charitable_carryover_in",      "charitable_carryover_out"),
+        ]
         with self.sessionmaker_() as s:
             rows = s.execute(
                 select(StoredReturn).order_by(StoredReturn.tax_year, StoredReturn.imported_at)
             ).scalars().all()
-            carry_in = Decimal("0")
+            carry_state: dict[str, Decimal] = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
             prev_year: int | None = None
             for row in rows:
-                # Only carry across consecutive years; reset on gaps.
                 if prev_year is not None and row.tax_year - prev_year > 1:
-                    carry_in = Decimal("0")
+                    carry_state = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
                 data = json.loads(row.return_json)
-                data["capital_loss_carryforward_in"] = str(carry_in)
+                for in_k, _ in carryforward_keys:
+                    data[in_k] = str(carry_state[in_k])
                 ret = Return(**self._decimalize(data))
                 result = compute(ret)
                 row.return_json = dumps(ret.model_dump(mode="json"))
@@ -106,7 +125,9 @@ class TaxLensService:
                     row.cache = ComputationCache(result_json=dumps(result.model_dump(mode="json")))
                 else:
                     row.cache.result_json = dumps(result.model_dump(mode="json"))
-                carry_in = result.capital_loss_carryforward_out or Decimal("0")
+                # Propagate each chain forward.
+                for in_k, out_k in carryforward_keys:
+                    carry_state[in_k] = getattr(result, out_k, None) or Decimal("0")
                 prev_year = row.tax_year
             s.commit()
 
