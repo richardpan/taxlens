@@ -6,6 +6,25 @@ A local-first tool that ingests US tax return PDFs (Form 1040 + common schedules
 - **Multi-year** — drop in any number of years; see trends instantly
 - **Privacy-first** — PDFs parsed locally; nothing leaves your machine
 
+## Screenshots
+
+Renders below are from [`docs/mockups.html`](docs/mockups.html). Regenerate any time with `python scripts/capture_mockups.py`.
+
+### Dashboard — multi-year overview
+![Dashboard](docs/screenshots/02-dashboard.png)
+
+### Year detail — income waterfall + bracket fill
+![Year detail](docs/screenshots/03-year-detail.png)
+
+### Show the math — audit trail with PDF citations
+![Show the math](docs/screenshots/04-show-the-math.png)
+
+### Compare — any two years side by side
+![Compare](docs/screenshots/05-compare.png)
+
+### Import — drag-drop multiple PDFs at once
+![Import](docs/screenshots/01-import.png)
+
 ## Repo layout
 
 ```

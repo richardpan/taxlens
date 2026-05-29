@@ -65,9 +65,9 @@
     No returns imported yet. <button class="text-emerald-600 underline" onclick="showTab('import')">Import one</button>.
   </div>
   <div id="dashContent">
-    <div class="grid grid-cols-4 gap-4 mb-6" id="kpis"></div>
-    <div class="grid grid-cols-3 gap-6">
-      <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" id="kpis"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
         <div class="font-semibold mb-3">Income composition by year</div>
         <canvas id="incomeStack" height="120"></canvas>
       </div>
@@ -79,7 +79,7 @@
         <div class="font-semibold mb-3">Tax composition (latest year)</div>
         <canvas id="taxDonut" height="180"></canvas>
       </div>
-      <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 overflow-x-auto">
         <div class="font-semibold mb-3">All returns</div>
         <table class="w-full text-sm">
           <thead class="text-xs uppercase text-slate-500">
@@ -99,7 +99,7 @@
     <select id="yearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
   </div>
   <p class="text-slate-500 mb-6">Income flow + how the federal brackets were filled.</p>
-  <div class="grid grid-cols-2 gap-6">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-3">Income → take-home waterfall</div>
       <canvas id="waterfall" height="180"></canvas>
@@ -107,10 +107,11 @@
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-3">Federal bracket fill</div>
       <canvas id="brackets" height="180"></canvas>
+      <div class="text-xs text-slate-500 mt-2">Each bar shows how much taxable income sits in that bracket and the tax owed on it.</div>
     </div>
-    <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+    <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-3">Tax breakdown</div>
-      <div id="taxBreakdown" class="grid grid-cols-3 gap-4 text-sm"></div>
+      <div id="taxBreakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"></div>
     </div>
   </div>
 </section>
@@ -140,7 +141,7 @@
     <select id="whatifYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
   </div>
   <p class="text-slate-500 mb-6">Edit any input — the engine re-runs locally and shows the delta.</p>
-  <div class="grid grid-cols-2 gap-6">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-4">Inputs</div>
       <div id="whatifForm" class="space-y-3 text-sm"></div>
@@ -197,7 +198,7 @@
   </div>
   <p class="text-slate-500 mb-6">Each suggestion shows an estimated annual savings. <strong>Not tax advice</strong> — review with a CPA before acting.</p>
 
-  <div id="advisorSummary" class="grid grid-cols-3 gap-4 mb-6"></div>
+  <div id="advisorSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"></div>
 
   <div class="mb-8">
     <h3 class="text-lg font-semibold mb-3 text-slate-700">Multi-year patterns</h3>
@@ -269,7 +270,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.21.0
+  TaxLens · local-first · v0.22.0
 </footer>
 
 <script src="/static/app.js"></script>

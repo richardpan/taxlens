@@ -351,8 +351,18 @@ async function renderYearDetail() {
     options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } } } }
   });
 
-  // Bracket fill
+  // Bracket fill — color by rate, tooltip shows both $ in bracket and tax owed
   const fills = r.ordinary_bracket_fills || [];
+  const rateColor = (rate) => {
+    const r2 = Number(rate);
+    if (r2 <= 0.10) return '#10b981';
+    if (r2 <= 0.12) return '#34d399';
+    if (r2 <= 0.22) return '#facc15';
+    if (r2 <= 0.24) return '#fb923c';
+    if (r2 <= 0.32) return '#f97316';
+    if (r2 <= 0.35) return '#ef4444';
+    return '#be123c';
+  };
   recreate('brackets', {
     type: 'bar',
     data: {
@@ -360,10 +370,37 @@ async function renderYearDetail() {
       datasets: [{
         label: 'Taxable $ in bracket',
         data: fills.map(f => Number(f.amount_in_bracket)),
-        backgroundColor: '#0f172a',
+        backgroundColor: fills.map(f => rateColor(f.rate)),
+        borderRadius: 4,
       }]
     },
-    options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } } } }
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const f = fills[items[0].dataIndex];
+              const lo = Number(f.lower || 0);
+              const hi = f.upper != null ? Number(f.upper) : null;
+              const range = hi != null
+                ? `$${(lo/1000).toFixed(0)}k–$${(hi/1000).toFixed(0)}k`
+                : `$${(lo/1000).toFixed(0)}k+`;
+              return `${(Number(f.rate)*100).toFixed(0)}% bracket · ${range}`;
+            },
+            label: (item) => {
+              const f = fills[item.dataIndex];
+              return [
+                `In this bracket: ${fmt(f.amount_in_bracket)}`,
+                `Tax owed here:   ${fmt(f.tax_in_bracket)}`,
+              ];
+            }
+          }
+        }
+      },
+      scales: { y: { ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } } }
+    }
   });
 
   // Tax breakdown cards

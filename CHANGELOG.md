@@ -2,6 +2,28 @@
 
 All notable changes to TaxLens.
 
+## [0.22.0] — 2026
+
+### Added — README screenshots + mockup capture script
+
+- New `scripts/capture_mockups.py` renders each section of
+  `docs/mockups.html` to `docs/screenshots/*.png` via headless Chromium
+  (Playwright). Five reference images shipped: Dashboard, Year detail,
+  Show the math, Compare, Import.
+- README now leads with a "Screenshots" section embedding all five.
+
+### Changed — UX/visualization polish
+
+- **Federal bracket fill chart** is now color-coded by rate
+  (green → amber → orange → red) and its tooltip shows both the dollars
+  of taxable income in the bracket *and* the dollars of tax owed there,
+  along with the bracket's actual `$X–$Y` range.
+- **Mobile responsiveness pass**: dashboard KPI strip, dashboard chart
+  grid, year-detail two-pane layout, year-detail "Tax breakdown" card
+  grid, what-if editor, and advisor summary all now collapse cleanly to
+  one column on narrow screens (`grid-cols-1 sm:/lg:` breakpoints) and
+  the returns table scrolls horizontally instead of overflowing.
+
 ## [0.21.0] — 2026
 
 ### Added — Tax year 2025 support
