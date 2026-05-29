@@ -167,6 +167,32 @@ class Return(BaseModel):
     marketplace_state_is_ak: bool = False
     marketplace_state_is_hi: bool = False
 
+    # Form 2441 — Child & Dependent Care Credit.
+    #   - dependent_care_expenses: actually paid for care of qualifying individuals
+    #     (kids under 13 or disabled spouse/dependent).
+    #   - num_qualifying_care_persons: 1 → $3k expense cap; 2+ → $6k cap.
+    #     In 2021 only (ARPA), these are $8k / $16k and the credit is refundable.
+    #   - spouse_earned_income: required on MFJ — credit is limited by the
+    #     LESSER of the two spouses' earned incomes.
+    dependent_care_expenses: Decimal = Decimal(0)
+    num_qualifying_care_persons: int = 0
+    spouse_earned_income: Decimal = Decimal(0)
+
+    # Form 5695 — Residential Clean Energy Credit (solar, geothermal, wind,
+    # fuel cell, battery storage). 30% of qualifying cost in 2022+; 26% in
+    # 2020-2021; 30% in 2019 and earlier. Excess carries forward — we don't
+    # currently track that carryforward.
+    residential_clean_energy_cost: Decimal = Decimal(0)
+
+    # Form 8936 — Clean Vehicle Credit (formerly Plug-in EV Credit).
+    #   - clean_vehicle_credit_claimed: the dollar amount the taxpayer
+    #     determined they qualify for (e.g. $7,500 for a new EV meeting
+    #     both battery + mineral sourcing in 2023+).
+    #   For 2023+ tax years the engine ALSO enforces the MAGI income cap
+    #   ($150k single / $300k MFJ for new; $75k / $150k for used).
+    clean_vehicle_credit_claimed: Decimal = Decimal(0)
+    clean_vehicle_is_used: bool = False
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -265,6 +291,11 @@ class TaxResult(BaseModel):
     ira_deduction_disallowed: Decimal = Decimal(0)         # phased-out portion (becomes basis)
     student_loan_interest_deduction: Decimal = Decimal(0)  # Sch 1 line 21 (after $2500 cap + phaseout)
     educator_expense_deduction: Decimal = Decimal(0)       # Sch 1 line 11 (after annual cap)
+    # Phase-2 credits.
+    dependent_care_credit: Decimal = Decimal(0)            # Form 2441 (nonrefundable; refundable in TY2021)
+    dependent_care_credit_refundable: Decimal = Decimal(0) # 2021-only refundable portion
+    residential_clean_energy_credit: Decimal = Decimal(0)  # Form 5695 (nonrefundable, carries forward)
+    clean_vehicle_credit: Decimal = Decimal(0)             # Form 8936 (nonrefundable)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -353,6 +384,18 @@ class Rules(BaseModel):
     # Educator expense deduction (§62(a)(2)(D)). When None, no cap enforced.
     #   {per_educator_cap: 300}  # doubled on MFJ when both spouses are educators
     educator_expense: dict[str, Any] | None = None
+    # Form 2441 — Child & Dependent Care Credit. When None, no credit.
+    #   {expense_cap_one: 3000, expense_cap_two_plus: 6000,
+    #    rate_tiers: [[agi_limit, rate], ...],  # walked low-to-high
+    #    refundable: false}
+    dependent_care_credit: dict[str, Any] | None = None
+    # Form 5695 — Residential Clean Energy Credit (solar etc.). When None, no credit.
+    #   {rate: 0.30}
+    residential_clean_energy: dict[str, Any] | None = None
+    # Form 8936 — Clean Vehicle Credit MAGI cap (2023+).
+    #   {new_magi_cap: {single, mfj, mfs, hoh, qss}, used_magi_cap: {...},
+    #    enforce: true|false}
+    clean_vehicle: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

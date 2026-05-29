@@ -2,6 +2,44 @@
 
 All notable changes to TaxLens.
 
+## [0.20.0] — 2026
+
+### Added — Phase-2 federal credits (Forms 2441, 5695, 8936)
+
+Three of the most commonly-claimed credits that were missing now flow
+through the engine end-to-end.
+
+**Form 2441 — Child & Dependent Care Credit:**
+- New inputs: `dependent_care_expenses`, `num_qualifying_care_persons`,
+  `spouse_earned_income`.
+- Engine enforces:
+  - Expense cap ($3k for one qualifying person, $6k for two or more).
+  - Earned-income limit (MFJ: lesser of two spouses' earned income).
+  - §21(a)(2) stepped rate schedule (35% → 20% in 1% / $2,000 AGI steps).
+- TY2021 (ARPA) special: $8k / $16k caps, 50%-floor schedule, **refundable**.
+  Surfaced via `dependent_care_credit_refundable` on `TaxResult`.
+
+**Form 5695 — Residential Clean Energy Credit (solar / geothermal /
+battery / wind):**
+- New input: `residential_clean_energy_cost`.
+- Year-accurate rate: 30% pre-2020, 26% in 2020–2021, 30% from 2022
+  (Inflation Reduction Act restoration).
+
+**Form 8936 — Clean Vehicle Credit:**
+- New inputs: `clean_vehicle_credit_claimed`, `clean_vehicle_is_used`.
+- Pre-2023: pass-through (no MAGI cap).
+- 2023+: MAGI cap enforced ($150k single / $300k MFJ for new vehicles;
+  $75k / $150k for used). When AGI exceeds the applicable cap, the
+  entire credit is disqualified per §30D(f)(10).
+
+**Tests:** +16 dedicated (267 total). Covers DCC caps + rate tiers +
+MFJ earned-income limit + ARPA refundable path; RCE year-aware rates;
+CVC MAGI cap behavior (new vs used, MFJ vs single, pre-2023 pass-through);
+integration test combining all three.
+
+When YAML lacks the relevant config block the engine produces $0 for
+that credit (back-compat for legacy YAML).
+
 ## [0.19.0] — 2026
 
 ### Added — Common income & above-the-line adjustments

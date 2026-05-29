@@ -1115,6 +1115,125 @@ def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) ->
     return _money(credit), _money(kid_after)
 
 
+def _compute_dependent_care_credit(
+    ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder
+) -> tuple[Decimal, Decimal]:
+    """Form 2441 — Child & Dependent Care Credit.
+
+    Returns (nonrefundable_credit, refundable_credit). The 2021 ARPA expansion
+    boosted caps to $8k/$16k, set rate to 50% (phasing down), and made it
+    refundable — driven entirely by the YAML config.
+    """
+    cfg = rules.dependent_care_credit
+    if not cfg or ret.dependent_care_expenses <= 0 or ret.num_qualifying_care_persons <= 0:
+        return ZERO, ZERO
+
+    cap = Decimal(str(
+        cfg["expense_cap_one"] if ret.num_qualifying_care_persons == 1
+        else cfg["expense_cap_two_plus"]
+    ))
+
+    # Earned-income limit: both spouses on MFJ must have earned income; the
+    # qualifying expenses can't exceed the LESSER of the two earned incomes.
+    earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
+    if ret.filing_status == FilingStatus.MFJ:
+        spouse_earned = max(ZERO, ret.spouse_earned_income)
+        if spouse_earned == 0:
+            # No spouse earned income → fully disqualified (with narrow exceptions
+            # for disabled/student spouses that we don't model here).
+            return ZERO, ZERO
+        earned_limit = min(earned, spouse_earned)
+    else:
+        earned_limit = earned
+
+    qualifying = min(ret.dependent_care_expenses, cap, earned_limit)
+    if qualifying <= 0:
+        return ZERO, ZERO
+
+    rate = ZERO
+    for agi_limit, r in cfg["rate_tiers"]:
+        if agi <= Decimal(str(agi_limit)):
+            rate = Decimal(str(r))
+            break
+
+    credit = _money(qualifying * rate)
+    rec.add(
+        "Child & Dependent Care Credit (Form 2441)",
+        "min(paid, cap, earned_income_limit) × tier-rate(AGI)",
+        {
+            "paid": ret.dependent_care_expenses,
+            "cap": cap,
+            "earned_limit": earned_limit,
+            "qualifying": qualifying,
+            "rate": rate,
+            "agi": agi,
+        },
+        credit,
+    )
+    if cfg.get("refundable"):
+        return ZERO, credit
+    return credit, ZERO
+
+
+def _compute_residential_clean_energy_credit(
+    ret: Return, rules: Rules, rec: _StepRecorder
+) -> Decimal:
+    """Form 5695 Part I — Residential Clean Energy Credit (solar, geothermal,
+    wind, fuel cell, battery storage). 30% in 2022+, 26% in 2020-2021,
+    30% in 2019 and earlier. Nonrefundable; excess carries forward (not
+    currently tracked)."""
+    cfg = rules.residential_clean_energy
+    if not cfg or ret.residential_clean_energy_cost <= 0:
+        return ZERO
+    rate = Decimal(str(cfg.get("rate", "0.30")))
+    credit = _money(ret.residential_clean_energy_cost * rate)
+    rec.add(
+        "Residential Clean Energy Credit (Form 5695)",
+        f"qualifying_cost × {rate}",
+        {"cost": ret.residential_clean_energy_cost, "rate": rate},
+        credit,
+    )
+    return credit
+
+
+def _compute_clean_vehicle_credit(
+    ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder
+) -> Decimal:
+    """Form 8936 — Clean Vehicle Credit. Takes the user-claimed amount; for
+    2023+ tax years also enforces the MAGI cap that disqualifies the entire
+    credit when income exceeds the threshold. We let taxpayers use the lesser
+    of current-year or prior-year MAGI by passing the smaller into the engine
+    via the AGI input.
+    """
+    claimed = ret.clean_vehicle_credit_claimed
+    if claimed <= 0:
+        return ZERO
+
+    cfg = rules.clean_vehicle
+    if cfg and cfg.get("enforce"):
+        status = _status(ret)
+        cap_key = "used_magi_cap" if ret.clean_vehicle_is_used else "new_magi_cap"
+        caps = cfg.get(cap_key) or {}
+        cap = Decimal(str(caps.get(status, 0)))
+        if cap > 0 and agi > cap:
+            rec.add(
+                "Clean Vehicle Credit (Form 8936) — disqualified by MAGI cap",
+                "AGI exceeds income limit",
+                {"agi": agi, "cap": cap, "is_used": ret.clean_vehicle_is_used},
+                ZERO,
+            )
+            return ZERO
+
+    credit = _money(claimed)
+    rec.add(
+        "Clean Vehicle Credit (Form 8936)",
+        "user-claimed amount (subject to MAGI cap in 2023+)",
+        {"claimed": claimed, "is_used": ret.clean_vehicle_is_used, "agi": agi},
+        credit,
+    )
+    return credit
+
+
 def _compute_savers_credit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
     """Form 8880 — Retirement Savings Contributions Credit. Nonrefundable.
     Credit rate (50/20/10%) drops in steps as AGI rises. Max $2,000 of
@@ -1428,6 +1547,9 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     eitc = _compute_eitc(ret, agi, rules, rec)
     aotc_nonref, aotc_ref, llc = _compute_education_credits(ret, agi, rules, rec)
     savers = _compute_savers_credit(ret, agi, rules, rec)
+    dcc_nonref, dcc_ref = _compute_dependent_care_credit(ret, agi, rules, rec)
+    rce_credit = _compute_residential_clean_energy_credit(ret, rules, rec)
+    cvc_credit = _compute_clean_vehicle_credit(ret, agi, rules, rec)
     net_ptc, aptc_repayment = _compute_ptc(ret, agi, rules, rec)
     ftc_used, ftc_carry_out = _compute_ftc(ret, pre_amt_regular, agi, rec)
     amt_credit_used, amt_credit_carry_out = _compute_amt_credit(ret, pre_amt_regular, amt, rec)
@@ -1435,7 +1557,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     # ── ACTC (Form 8812) — refundable portion of CTC ──
     # Compute tax available to absorb the nonrefundable CTC: it stacks after
     # other nonrefundable credits but before ACTC.
-    other_nonref = ftc_used + amt_credit_used + aotc_nonref + llc + savers
+    other_nonref = (ftc_used + amt_credit_used + aotc_nonref + llc + savers
+                    + dcc_nonref + rce_credit + cvc_credit)
     tax_after_other_nonref = max(ZERO, pre_amt_regular + amt - other_nonref)
     ctc_nonref_used = min(ctc, tax_after_other_nonref)
     ctc_leftover = ctc - ctc_nonref_used
@@ -1461,7 +1584,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
             actc,
         )
 
-    credits = ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
+    credits = (ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
+               + dcc_nonref + rce_credit + cvc_credit)
 
     # §72(t) — 10% additional tax on early (pre-59½) retirement-plan distributions.
     ewp_rate = rules.early_withdrawal_penalty_rate
@@ -1497,7 +1621,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     # Refundable credits are treated like payments on Form 1040.
     payments = (ret.federal_withholding + ret.estimated_payments
-                + eitc + aotc_ref + actc + net_ptc)
+                + eitc + aotc_ref + actc + net_ptc + dcc_ref)
     refund = payments - total_tax
     rec.add(
         "Refund (+) / owed (−)",
@@ -1566,6 +1690,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         ira_deduction_disallowed=_money(getattr(rec, "_ira_deduction_disallowed", ZERO)),
         student_loan_interest_deduction=_money(getattr(rec, "_sli_deduction", ZERO)),
         educator_expense_deduction=_money(getattr(rec, "_educator_deduction", ZERO)),
+        dependent_care_credit=dcc_nonref,
+        dependent_care_credit_refundable=dcc_ref,
+        residential_clean_energy_credit=rce_credit,
+        clean_vehicle_credit=cvc_credit,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

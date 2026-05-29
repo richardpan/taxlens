@@ -287,3 +287,45 @@ student_loan_interest:
 # Educator expense deduction (§62(a)(2)(D)).
 educator_expense:
   per_educator_cap: 300
+
+# Child & Dependent Care Credit (Form 2441).
+dependent_care_credit:
+  expense_cap_one:      3000
+  expense_cap_two_plus: 6000
+  refundable: false
+  rate_tiers:
+    - [15000, 0.35]
+    - [17000, 0.34]
+    - [19000, 0.33]
+    - [21000, 0.32]
+    - [23000, 0.31]
+    - [25000, 0.30]
+    - [27000, 0.29]
+    - [29000, 0.28]
+    - [31000, 0.27]
+    - [33000, 0.26]
+    - [35000, 0.25]
+    - [37000, 0.24]
+    - [39000, 0.23]
+    - [41000, 0.22]
+    - [43000, 0.21]
+    - [45000, 0.20]
+    - [99999999, 0.20]
+# Residential Clean Energy Credit (Form 5695 Part I).
+residential_clean_energy:
+  rate: 0.30
+# Clean Vehicle Credit (Form 8936) — MAGI cap only enforced 2023+.
+clean_vehicle:
+  enforce: true
+  new_magi_cap:
+    single: 150000
+    hoh:    225000
+    mfj:    300000
+    qss:    300000
+    mfs:    150000
+  used_magi_cap:
+    single: 75000
+    hoh:    112500
+    mfj:    150000
+    qss:    150000
+    mfs:    75000
