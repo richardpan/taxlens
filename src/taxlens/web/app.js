@@ -157,11 +157,17 @@ function renderDashboard() {
   const totalIncome = RETURNS.reduce((s, r) => s + Number(r.agi || 0), 0);
   const totalTax = RETURNS.reduce((s, r) => s + Number(r.total_tax || 0), 0);
   const latest = RETURNS[RETURNS.length - 1];
+  const prior  = RETURNS.length > 1 ? RETURNS[RETURNS.length - 2] : null;
   const effective = totalIncome > 0 ? totalTax / totalIncome : 0;
+  const latestEff = Number(latest.agi) > 0 ? Number(latest.total_tax) / Number(latest.agi) : 0;
+  const priorEff  = prior && Number(prior.agi) > 0 ? Number(prior.total_tax) / Number(prior.agi) : null;
+  const dAgi  = prior ? Number(latest.agi)       - Number(prior.agi)       : null;
+  const dTax  = prior ? Number(latest.total_tax) - Number(prior.total_tax) : null;
+  const dEff  = priorEff != null ? (latestEff - priorEff) * 100 : null;
   $('#kpis').innerHTML = `
-    ${kpi('Total AGI', fmt(totalIncome), `${RETURNS.length} year(s)`)}
-    ${kpi('Total federal tax', fmt(totalTax), fmtPct(effective) + ' avg effective')}
-    ${kpi('Latest year', String(latest.tax_year), latest.filing_status.toUpperCase())}
+    ${kpi('Total AGI', fmt(totalIncome), `${RETURNS.length} year(s) · latest ${fmt(latest.agi)}`, dAgi, fmt)}
+    ${kpi('Total federal tax', fmt(totalTax), `latest ${fmt(latest.total_tax)} · ${fmtPct(latestEff)} eff.`, dTax, fmt, true)}
+    ${kpi('Latest effective rate', fmtPct(latestEff), `lifetime avg ${fmtPct(effective)}`, dEff, v => (v >= 0 ? '+' : '') + v.toFixed(2) + 'pp', true)}
     ${kpi('Latest refund/owed', fmt(latest.refund_or_owed), Number(latest.refund_or_owed) >= 0 ? 'refund' : 'owed')}
   `;
 
@@ -187,14 +193,27 @@ function renderDashboard() {
     drawRateLine(fulls);
     drawTaxDonut(fulls[fulls.length - 1]);
     drawTaxStack(fulls);
+    drawCarryforwards(fulls);
   });
 }
 
-function kpi(label, big, small) {
+function kpi(label, big, small, delta, deltaFmt, inverse) {
+  // `inverse=true` flips the color polarity (tax/effective-rate going UP is bad).
+  let deltaHtml = '';
+  if (delta != null && Number.isFinite(delta) && delta !== 0) {
+    const goodWhenNegative = !!inverse;
+    const isGood = goodWhenNegative ? delta < 0 : delta > 0;
+    const color = isGood ? 'text-emerald-600' : 'text-rose-600';
+    const arrow = delta > 0 ? '▲' : '▼';
+    const txt = deltaFmt ? deltaFmt(delta) : String(delta);
+    deltaHtml = `<div class="text-xs ${color} mt-1">${arrow} ${txt} vs prior year</div>`;
+  }
   return `<div class="bg-white rounded-2xl border border-slate-200 p-5">
     <div class="text-xs text-slate-500">${label}</div>
     <div class="text-2xl font-bold mt-1">${big}</div>
-    <div class="text-xs text-slate-500 mt-1">${small}</div></div>`;
+    <div class="text-xs text-slate-500 mt-1">${small}</div>
+    ${deltaHtml}
+  </div>`;
 }
 
 window.pickYear = (id) => {
@@ -380,6 +399,48 @@ function drawTaxStack(fulls) {
   });
 }
 
+function drawCarryforwards(fulls) {
+  const years = fulls.map(f => f.tax_year);
+  const series = {
+    'Capital loss':       fulls.map(f => Number(f.result.capital_loss_carryforward_out || 0)),
+    'NOL':                fulls.map(f => Number(f.result.nol_carryforward_out || 0)),
+    'AMT credit':         fulls.map(f => Number(f.result.amt_credit_carryforward_out || 0)),
+    'Foreign tax credit': fulls.map(f => Number(f.result.ftc_carryforward_out || 0)),
+    'Charitable':         fulls.map(f => Number(f.result.charitable_carryover_out || 0)),
+  };
+  for (const k of Object.keys(series)) {
+    if (series[k].every(v => v === 0)) delete series[k];
+  }
+  const card = document.getElementById('carryCard');
+  if (Object.keys(series).length === 0) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const palette = {
+    'Capital loss':       '#ef4444',
+    'NOL':                '#f97316',
+    'AMT credit':         '#a78bfa',
+    'Foreign tax credit': '#0ea5e9',
+    'Charitable':         '#10b981',
+  };
+  const datasets = Object.entries(series).map(([label, data]) => ({
+    label, data,
+    borderColor: palette[label] || '#94a3b8',
+    backgroundColor: (palette[label] || '#94a3b8') + '33',
+    fill: true, tension: 0.25, pointRadius: 3,
+  }));
+  recreate('carryChart', {
+    type: 'line',
+    data: { labels: years, datasets },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10 } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } }
+      },
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } } }
+    }
+  });
+}
+
 // ─── year detail ───────────────────────────────────────────────────────────
 $('#yearPicker').addEventListener('change', renderYearDetail);
 async function renderYearDetail() {
@@ -426,6 +487,52 @@ async function renderYearDetail() {
     if (r2 <= 0.35) return '#ef4444';
     return '#be123c';
   };
+  // Find the last bracket that actually has dollars in it — that's where
+  // the marginal dollar of taxable income lands.
+  let marginalIdx = -1;
+  for (let i = fills.length - 1; i >= 0; i--) {
+    if (Number(fills[i].amount_in_bracket) > 0) { marginalIdx = i; break; }
+  }
+  const marginalRate = marginalIdx >= 0 ? Number(fills[marginalIdx].rate) : 0;
+  const marginalPlugin = {
+    id: 'marginalMarker',
+    afterDatasetsDraw(chart) {
+      if (marginalIdx < 0) return;
+      const meta = chart.getDatasetMeta(0);
+      const bar = meta.data[marginalIdx];
+      if (!bar) return;
+      const { x, y } = bar.getProps(['x','y'], true);
+      const ctx = chart.ctx;
+      ctx.save();
+      // Marker arrow pointing down at the top of the marginal bar
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y - 14);
+      ctx.lineTo(x + 6, y - 14);
+      ctx.lineTo(x, y - 4);
+      ctx.closePath();
+      ctx.fill();
+      // Pill label above the arrow
+      const txt = `marginal ${(marginalRate*100).toFixed(0)}%`;
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+      const w = ctx.measureText(txt).width + 12;
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      const px = x - w/2, py = y - 32;
+      const rr = 8;
+      ctx.moveTo(px + rr, py);
+      ctx.arcTo(px + w, py, px + w, py + 18, rr);
+      ctx.arcTo(px + w, py + 18, px, py + 18, rr);
+      ctx.arcTo(px, py + 18, px, py, rr);
+      ctx.arcTo(px, py, px + w, py, rr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, x, py + 13);
+      ctx.restore();
+    }
+  };
   recreate('brackets', {
     type: 'bar',
     data: {
@@ -439,6 +546,7 @@ async function renderYearDetail() {
     },
     options: {
       maintainAspectRatio: false,
+      layout: { padding: { top: 36 } },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -463,7 +571,8 @@ async function renderYearDetail() {
         }
       },
       scales: { y: { ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } } }
-    }
+    },
+    plugins: [marginalPlugin],
   });
 
   // Tax breakdown cards

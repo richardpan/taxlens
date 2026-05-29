@@ -2,6 +2,30 @@
 
 All notable changes to TaxLens.
 
+## [0.24.0] — 2026
+
+### Added — Three more visualizations
+
+- **KPI year-over-year deltas** — the dashboard KPI ribbon now shows
+  the change vs the immediately prior year on AGI, total federal tax,
+  and effective rate (▲/▼ arrows, green when the move is favorable,
+  rose when it's adverse — inverse polarity for tax & rate KPIs).
+  The "Latest year" tile was repurposed into "Latest effective rate"
+  for higher information density.
+- **Carryforward balances by year** — new dashboard line chart that
+  plots end-of-year balances for capital-loss (§1212(b)), NOL (§172),
+  AMT credit (Form 8801), foreign tax credit (§904), and charitable
+  carryover (§170(d)). Card auto-hides when every series is zero, so
+  it never shows up empty for users who don't have carries.
+- **Marginal-dollar marker on the bracket-fill chart** — a custom
+  Chart.js plugin draws a downward-pointing arrow + dark pill labeled
+  `marginal NN%` on top of the bar where the user's last dollar of
+  taxable income lands. Makes "your marginal rate is X%" visually
+  unmistakable.
+
+### Tests
+- 270 still passing (visualization-only changes).
+
 ## [0.23.0] — 2026
 
 ### Added — Two new visualizations

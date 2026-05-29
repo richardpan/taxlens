@@ -86,6 +86,13 @@
         </div>
         <canvas id="taxStack" height="120"></canvas>
       </div>
+      <div id="carryCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
+        <div class="flex items-baseline justify-between mb-3">
+          <div class="font-semibold">Carryforward balances by year</div>
+          <div class="text-xs text-slate-500">Capital loss · NOL · AMT credit · Foreign tax credit · Charitable — end-of-year balances</div>
+        </div>
+        <canvas id="carryChart" height="120"></canvas>
+      </div>
       <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 overflow-x-auto">
         <div class="font-semibold mb-3">All returns</div>
         <table class="w-full text-sm">
@@ -284,7 +291,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.23.0
+  TaxLens · local-first · v0.24.0
 </footer>
 
 <script src="/static/app.js"></script>
