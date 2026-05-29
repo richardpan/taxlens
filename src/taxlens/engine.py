@@ -205,7 +205,60 @@ def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Deci
     return se_tax_rounded, _money(deductible)
 
 
-def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+def _compute_taxable_ss(
+    ret: Return, gross_excl_ss: Decimal, rules: Rules, rec: _StepRecorder
+) -> Decimal:
+    """§86 Social Security benefits taxability.
+
+    Provisional income = gross_income (excl. SS) + tax_exempt_interest + ½ × SS.
+    Below the base threshold: 0% taxable.
+    Between base and second: lesser of (½ × SS) or (½ × excess over base).
+    Above second: 85% × SS, capped at base-tier + 85% × (PI − second).
+    """
+    benefits = ret.social_security_benefits
+    if benefits <= 0:
+        return ZERO
+
+    cfg = rules.social_security or {}
+    status = _status(ret)
+    base = Decimal(str((cfg.get("base_threshold") or {}).get(status, 0)))
+    second = Decimal(str((cfg.get("second_threshold") or {}).get(status, 0)))
+    first_rate = Decimal(str(cfg.get("first_tier_rate", "0.50")))
+    second_rate = Decimal(str(cfg.get("second_tier_rate", "0.85")))
+
+    if base == 0 and second == 0:
+        # No rules configured (e.g. pre-1984 or YAML missing) → leave untaxed.
+        return ZERO
+
+    provisional = gross_excl_ss + ret.tax_exempt_interest + (benefits * Decimal("0.5"))
+
+    if provisional <= base:
+        taxable = ZERO
+    elif provisional <= second:
+        taxable = min(benefits * first_rate, (provisional - base) * first_rate)
+    else:
+        tier1_max = (second - base) * first_rate
+        taxable = min(
+            benefits * second_rate,
+            tier1_max + (provisional - second) * second_rate,
+        )
+
+    rec.add(
+        "Social Security benefits — taxable portion (§86)",
+        "tiered 0%/50%/85% on provisional income",
+        {
+            "benefits": benefits,
+            "tax_exempt_interest": ret.tax_exempt_interest,
+            "provisional_income": provisional,
+            "base_threshold": base,
+            "second_threshold": second,
+        },
+        taxable,
+    )
+    return _money(taxable)
+
+
+def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: Rules, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
     """Returns (AGI, capital_loss_carryforward_out)."""
     # Net capital gain/loss with the §1211(b) $3,000 ordinary-income cap on
     # net losses. Excess carries forward indefinitely (§1212(b)).
@@ -237,7 +290,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _St
     else:
         net_cap = raw_cap
 
-    gross = (
+    gross_excl_ss = (
         ret.wages
         + ret.interest_income + ret.k1_interest
         + ret.ordinary_dividends + ret.k1_ordinary_dividends
@@ -245,10 +298,16 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _St
         + ret.se_income
         + ret.other_ordinary_income
         + sch_e_net
+        + ret.pension_distributions_taxable
+        + ret.ira_distributions_taxable
     )
+    # §86 — Social Security taxability depends on the rest of gross income.
+    taxable_ss = _compute_taxable_ss(ret, gross_excl_ss, rules, rec)
+    gross = gross_excl_ss + taxable_ss
     rec.add(
         "Gross income",
-        "wages + interest(+k1) + ord_div(+k1) + net_cap + se + sch_e + other",
+        "wages + interest(+k1) + ord_div(+k1) + net_cap + se + sch_e + other"
+        " + pension + ira + taxable_ss",
         {
             "wages": ret.wages,
             "interest": ret.interest_income, "k1_interest": ret.k1_interest,
@@ -257,9 +316,14 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _St
             "se": ret.se_income,
             "sch_e": sch_e_net,
             "other": ret.other_ordinary_income,
+            "pension_taxable": ret.pension_distributions_taxable,
+            "ira_taxable": ret.ira_distributions_taxable,
+            "taxable_ss": taxable_ss,
         },
         gross,
     )
+    # Stash for TaxResult so the UI / math view can show retirement-income breakdown.
+    rec._taxable_ss = taxable_ss  # type: ignore[attr-defined]
     # Traditional IRA contributions are above-the-line (we ignore the active-participant
     # deductibility phaseout here — the Advisor warns about it explicitly).
     adjustments = (
@@ -1159,7 +1223,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
     sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
-    agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rec)
+    agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rules, rec)
     taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
     charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
     pe_used = getattr(rec, "_pe_used", ZERO)
@@ -1216,16 +1280,34 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     credits = ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
 
-    total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit + aptc_repayment) - credits
+    # §72(t) — 10% additional tax on early (pre-59½) retirement-plan distributions.
+    ewp_rate = rules.early_withdrawal_penalty_rate
+    early_withdrawal_penalty = _money(
+        max(ZERO, ret.early_withdrawal_subject_to_penalty) * ewp_rate
+    )
+    if early_withdrawal_penalty > 0:
+        rec.add(
+            "Early withdrawal penalty (§72(t) / Form 5329)",
+            f"taxable_early_distribution × {ewp_rate}",
+            {"taxable_early_distribution": ret.early_withdrawal_subject_to_penalty,
+             "rate": ewp_rate},
+            early_withdrawal_penalty,
+        )
+
+    total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit
+                 + aptc_repayment + early_withdrawal_penalty) - credits
     total_tax = max(ZERO, total_tax)
     rec.add(
         "Total tax",
-        "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit + APTC_repay − credits",
+        "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit"
+        " + APTC_repay + early_wd_penalty − credits",
         {
             "ordinary": ord_tax, "qualified": qual_tax,
             "collectibles": coll_tax, "unrecaptured_1250": unrec_tax,
             "amt": amt, "se": se_tax, "addl_medicare": addl_medicare,
-            "niit": niit, "aptc_repayment": aptc_repayment, "credits": credits,
+            "niit": niit, "aptc_repayment": aptc_repayment,
+            "early_wd_penalty": early_withdrawal_penalty,
+            "credits": credits,
         },
         total_tax,
     )
@@ -1293,6 +1375,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         ptc_excess_aptc_repayment=aptc_repayment,
         personal_exemption_used=_money(pe_used),
         pease_reduction=_money(pease_reduction),
+        social_security_taxable=_money(getattr(rec, "_taxable_ss", ZERO)),
+        pension_taxable=_money(ret.pension_distributions_taxable),
+        ira_taxable=_money(ret.ira_distributions_taxable),
+        early_withdrawal_penalty=early_withdrawal_penalty,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

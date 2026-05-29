@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.17.0] — 2026
+
+### Added — Retirement income (federal coverage gap)
+
+Five new optional `Return` inputs and full engine handling:
+
+- **`social_security_benefits`** — taxability computed under IRC §86 with
+  the canonical two-tier provisional-income test (base 25k single /
+  32k MFJ; second 34k / 44k). Tax-exempt interest is included in
+  provisional income even though it stays out of AGI. MFS thresholds
+  are $0 (always 85%).
+- **`tax_exempt_interest`** — feeds §86 PI only, never AGI.
+- **`pension_distributions_taxable`** (1099-R box 2a — qualified plans).
+- **`ira_distributions_taxable`** (1099-R IRA distributions).
+- **`early_withdrawal_subject_to_penalty`** — drives the §72(t) 10%
+  additional tax (Form 5329 short form). Added to `total_tax` and
+  surfaced as a separate audit-trail step.
+
+New `TaxResult` fields: `social_security_taxable`, `pension_taxable`,
+`ira_taxable`, `early_withdrawal_penalty`.
+
+YAML: every federal year (2015-2024) now ships a `social_security:`
+block. Thresholds have been statutory since 1993, so the same numbers
+apply across the entire decade of coverage.
+
+Tests: **+10 retirement-income tests** (227 total, all passing) covering
+all three tiers of SS taxability for both single and MFJ, the
+tax-exempt-interest interaction, mixed retiree round-trip, and the
+early-withdrawal penalty.
+
 ## [0.16.1] — 2026
 
 ### Fixed — "No federal rules for tax year" in packaged builds

@@ -144,3 +144,21 @@ contribution_limits:
     mfs:    10000
     hoh:    144000
     qss:    214000
+
+# Social Security taxability (§86) - thresholds unchanged since 1993.
+social_security:
+  base_threshold:
+    single: 25000
+    mfj:    32000
+    mfs:    0
+    hoh:    25000
+    qss:    25000
+  second_threshold:
+    single: 34000
+    mfj:    44000
+    mfs:    0
+    hoh:    34000
+    qss:    34000
+  first_tier_rate:  0.50
+  second_tier_rate: 0.85
+
