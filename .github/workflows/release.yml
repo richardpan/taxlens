@@ -116,8 +116,31 @@ jobs:
         shell: bash
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
-          # Create release if missing (workflow_dispatch path) — ignore failure if it exists.
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --notes "Automated build."
+          # Extract the matching CHANGELOG.md section for this tag into notes.md.
+          # Falls back to "Automated build." if the section isn't found.
+          python - <<PY
+          import re, sys, pathlib
+          tag = "${tag#v}"
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Match: '## [x.y.z]' line, capture until the next '## [' or EOF.
+          pat = re.compile(
+              rf"^##\s*\[{re.escape(tag)}\][^\n]*\n(.*?)(?=^##\s*\[|\Z)",
+              re.DOTALL | re.MULTILINE,
+          )
+          m = pat.search(text)
+          body = m.group(1).strip() if m else "Automated build."
+          pathlib.Path("notes.md").write_text(body, encoding="utf-8")
+          PY
+          # Create release if missing — first matrix job wins, others fall through.
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --notes-file notes.md
+          else
+            # Backfill notes if the existing release still has the placeholder.
+            current=$(gh release view "$tag" --json body --jq .body)
+            if [ "$current" = "Automated build." ] || [ -z "$current" ]; then
+              gh release edit "$tag" --notes-file notes.md
+            fi
+          fi
           shopt -s nullglob
           for f in ${{ matrix.artifact_glob }} ${{ matrix.artifact_glob }}.sha256; do
             echo "Uploading $f"

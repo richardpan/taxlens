@@ -125,6 +125,23 @@ class Return(BaseModel):
     tax_exempt_interest: Decimal = Decimal(0)
     early_withdrawal_subject_to_penalty: Decimal = Decimal(0)
 
+    # Form 8606 — Nondeductible Traditional IRA basis tracking.
+    #   - ira_basis_in:        Line 2 — total basis carried forward from prior years.
+    #                          Auto-threaded by the service from the prior year's
+    #                          TaxResult.ira_basis_out. Includes any nondeductible
+    #                          contribution made during the year that was disallowed
+    #                          under §219(g) (the engine adds that to basis_out).
+    #   - ira_year_end_value:  Line 6 — total FMV of ALL traditional, SEP, and
+    #                          SIMPLE IRAs as of Dec 31. Required for the pro-rata
+    #                          rule on distributions; otherwise we cannot tell what
+    #                          fraction of a distribution is a recovery of basis.
+    # When `ira_year_end_value > 0` AND `ira_basis_in + nondeductible_contribution
+    # this year > 0`, the engine applies Form 8606 lines 6-13 to split the year's
+    # `ira_distributions_taxable` between taxable (taxed as ordinary income) and
+    # nontaxable (basis recovered, reduces basis_out).
+    ira_basis_in: Decimal = Decimal(0)
+    ira_year_end_value: Decimal = Decimal(0)
+
     # IRA deductibility (§219). The deduction for Traditional IRA contributions
     # phases out by MAGI when the taxpayer (or spouse, for MFJ) is an active
     # participant in an employer retirement plan (W-2 box 13).
@@ -301,6 +318,13 @@ class TaxResult(BaseModel):
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
     ftc_carryforward_out: Decimal = Decimal(0)           # §904 — to use in a future year (10y)
     charitable_carryover_out: Decimal = Decimal(0)       # §170(d) — to use in a future year (5y)
+    # Form 8606 — nondeductible IRA basis. `ira_basis_out` is what carries to next year.
+    # `ira_distribution_nontaxable` is the portion of this year's IRA distribution that
+    # was treated as a recovery of basis (line 13 of Form 8606), and is subtracted from
+    # the reported `ira_taxable` figure to produce `ira_taxable_after_basis`.
+    ira_basis_out: Decimal = Decimal(0)
+    ira_distribution_nontaxable: Decimal = Decimal(0)
+    ira_taxable_after_basis: Decimal = Decimal(0)
     credits: Decimal
     total_tax: Decimal
 

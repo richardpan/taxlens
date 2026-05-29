@@ -2,6 +2,28 @@
 
 All notable changes to TaxLens.
 
+## [0.24.1] — 2026
+
+### Fixed — Charts growing vertically forever on load
+
+The dashboard "Income composition by year" and the year-detail
+"Federal bracket fill" charts had `maintainAspectRatio: false` but no
+height-constrained parent, so each resize event grew the canvas
+unboundedly. Same latent bug affected the new "Tax composition by
+year" and "Carryforward balances by year" charts. Each affected
+canvas is now wrapped in a `relative h-XX` container per Chart.js's
+recommended layout pattern.
+
+### Changed — Release notes pulled from CHANGELOG
+
+The `release.yml` workflow now extracts the matching `## [x.y.z]`
+section from `CHANGELOG.md` and uses it as the release body (instead
+of the previous hardcoded "Automated build." placeholder). Existing
+releases with the placeholder are also backfilled on the next push.
+
+Past releases v0.18.0 through v0.24.0 were backfilled manually with
+their CHANGELOG sections.
+
 ## [0.24.0] — 2026
 
 ### Added — Three more visualizations

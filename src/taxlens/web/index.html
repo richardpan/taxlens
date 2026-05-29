@@ -69,7 +69,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
         <div class="font-semibold mb-3">Income composition by year</div>
-        <canvas id="incomeStack" height="120"></canvas>
+        <div class="relative h-64"><canvas id="incomeStack"></canvas></div>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-5">
         <div class="font-semibold mb-3">Effective vs. marginal rate</div>
@@ -84,14 +84,14 @@
           <div class="font-semibold">Tax composition by year</div>
           <div class="text-xs text-slate-500">Stacked: every dollar of federal + state liability, year over year</div>
         </div>
-        <canvas id="taxStack" height="120"></canvas>
+        <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
       <div id="carryCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
         <div class="flex items-baseline justify-between mb-3">
           <div class="font-semibold">Carryforward balances by year</div>
           <div class="text-xs text-slate-500">Capital loss · NOL · AMT credit · Foreign tax credit · Charitable — end-of-year balances</div>
         </div>
-        <canvas id="carryChart" height="120"></canvas>
+        <div class="relative h-64"><canvas id="carryChart"></canvas></div>
       </div>
       <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 overflow-x-auto">
         <div class="font-semibold mb-3">All returns</div>
@@ -120,7 +120,7 @@
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
       <div class="font-semibold mb-3">Federal bracket fill</div>
-      <canvas id="brackets" height="180"></canvas>
+      <div class="relative h-56"><canvas id="brackets"></canvas></div>
       <div class="text-xs text-slate-500 mt-2">Each bar shows how much taxable income sits in that bracket and the tax owed on it.</div>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
@@ -291,7 +291,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.24.0
+  TaxLens · local-first · v0.24.1
 </footer>
 
 <script src="/static/app.js"></script>
