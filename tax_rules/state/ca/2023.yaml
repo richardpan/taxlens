@@ -66,3 +66,8 @@ ordinary_brackets:
     - [698274,   0.103]
     - [837922,   0.113]
     - [1396542,  0.123]
+
+mental_health_services_tax:
+  rate: 0.01
+  threshold: 1000000
+

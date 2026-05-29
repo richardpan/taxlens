@@ -39,4 +39,7 @@ def import_path(path: Path) -> Imported:
     if suffix in (".yaml", ".yml", ".json"):
         from taxlens.importers.manual import import_manual
         return import_manual(path)
+    if suffix == ".csv":
+        from taxlens.importers.broker_csv import import_csv
+        return import_csv(path)
     raise ValueError(f"unsupported file type: {suffix} ({path})")

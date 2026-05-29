@@ -1,22 +1,12 @@
-# Single filer 2023 with self-employment income — exercises SE tax + ½ SE adjustment.
-# SE base       = 60000 × 0.9235 = 55410
-# SS portion    = min(55410, 160200) × 0.124 = 6870.84
-# Medicare      = 55410 × 0.029 = 1606.89
-# SE tax        = 8477.73
-# ½ SE tax      = 4238.865 → 4238.87 (HALF_UP)
-#
-# Gross income  = 0 wages + 60000 SE = 60000
-# Adjustments   = ½ SE = 4238.87
-# AGI           = 55761.13
-# Std deduction (Single 2023) = 13850
-# Taxable income = 41911.13
-#
-# Ordinary tax (Single 2023):
-#   10% on 11000                                = 1100.00
-#   12% on (41911.13 - 11000) = 30911.13       = 3709.3356 → 3709.34
-# Ordinary tax = 4809.34
-#
-# Total tax = 4809.34 + 0 + 8477.73 + 0 + 0 − 0 = 13287.07
+# Single filer 2023 with self-employment income — exercises SE tax + ½ SE adjustment
+# AND the QBI deduction (SE income is qualified business income under §199A).
+# SE tax = 60000 × 0.9235 × (0.124 + 0.029) = 8477.73; ½ = 4238.87 (HALF_UP)
+# AGI    = 60000 − 4238.87 = 55761.13
+# Std ded (Single 2023) = 13850 → taxable_pre_qbi = 41911.13
+# QBI ded = min(60000 × 20%, 41911.13 × 20%) = 8382.23
+# Taxable = 33528.90
+# Ordinary tax: 10% × 11000 + 12% × 22528.90 = 1100 + 2703.47 = 3803.47
+# Total tax = 3803.47 + 8477.73 = 12281.20
 tax_year: 2023
 filing_status: single
 wages: 0
@@ -24,11 +14,11 @@ se_income: 60000
 
 expected:
   agi: 55761.13
-  taxable_income: 41911.13
-  ordinary_tax: 4809.34
+  taxable_income: 33528.90
+  ordinary_tax: 3803.47
   qualified_tax: 0.00
   se_tax: 8477.73
   additional_medicare_tax: 0.00
   niit: 0.00
   credits: 0.00
-  total_tax: 13287.07
+  total_tax: 12281.20

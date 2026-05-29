@@ -1,0 +1,25 @@
+# Illinois personal income tax — TY 2024.
+# Flat 4.95% on net income; LTCG taxed as ordinary income.
+# Source: IL-1040 instructions, 35 ILCS 5/201.
+# IL standard deduction is essentially $0; the personal exemption ($2,775)
+# is modeled here in the std_deduction slot for engine compatibility.
+
+state: IL
+year: 2024
+notes: |
+  Flat tax. The $2,775 personal exemption is modeled as a standard deduction
+  (close enough; spousal exemption for MFJ doubled).
+
+standard_deduction:
+  single: 2775
+  mfj:    5550
+  mfs:    2775
+  hoh:    2775
+  qss:    5550
+
+ordinary_brackets:
+  single: [[0, 0.0495]]
+  mfj:    [[0, 0.0495]]
+  mfs:    [[0, 0.0495]]
+  hoh:    [[0, 0.0495]]
+  qss:    [[0, 0.0495]]

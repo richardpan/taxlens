@@ -29,6 +29,7 @@
       <button data-tab="math"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Show the math</button>
       <button data-tab="whatif"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">What-if</button>
       <button data-tab="compare"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Compare</button>
+      <button data-tab="advisor"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Advisor ✨</button>
     </nav>
     <div class="text-xs text-slate-500">PDFs never leave this machine</div>
   </div>
@@ -43,8 +44,13 @@
   <div id="dropzone" class="grid-bg border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center bg-white cursor-pointer hover:border-emerald-400">
     <div class="text-5xl mb-3">📄</div>
     <div class="text-lg font-medium">Drop tax return files here</div>
-    <div class="text-slate-500 text-sm mt-1">or <span class="text-emerald-600 underline">browse</span></div>
-    <input id="fileInput" type="file" class="hidden" multiple accept=".pdf,.txf,.json,.yaml,.yml" />
+    <div class="text-slate-500 text-sm mt-1">or <span class="text-emerald-600 underline">browse</span> · PDF · TXF · JSON · YAML · 1099-B CSV</div>
+    <input id="fileInput" type="file" class="hidden" multiple accept=".pdf,.txf,.json,.yaml,.yml,.csv" />
+  </div>
+  <div class="mt-4 text-center">
+    <button id="loadDemoBtn" class="text-sm px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
+      ✨ Try demo with 3 sample returns
+    </button>
   </div>
   <div id="importList" class="mt-6 bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 hidden"></div>
 </section>
@@ -172,10 +178,31 @@
   </div>
 </section>
 
+<!-- ─── Advisor ─── -->
+<section id="tab-advisor" class="tab-panel hidden">
+  <div class="flex items-baseline justify-between mb-1">
+    <h2 class="text-2xl font-bold">Tax Savings Advisor ✨</h2>
+    <div class="text-sm text-slate-500">Pattern-matched recommendations from your returns</div>
+  </div>
+  <p class="text-slate-500 mb-6">Each suggestion shows an estimated annual savings. <strong>Not tax advice</strong> — review with a CPA before acting.</p>
+
+  <div id="advisorSummary" class="grid grid-cols-3 gap-4 mb-6"></div>
+
+  <div class="mb-8">
+    <h3 class="text-lg font-semibold mb-3 text-slate-700">Multi-year patterns</h3>
+    <div id="advisorCross" class="grid md:grid-cols-2 gap-4"></div>
+  </div>
+
+  <div>
+    <h3 class="text-lg font-semibold mb-3 text-slate-700">By year</h3>
+    <div id="advisorPerYear" class="space-y-6"></div>
+  </div>
+</section>
+
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.0.1
+  TaxLens · local-first · v0.3.0
 </footer>
 
 <script src="/static/app.js"></script>

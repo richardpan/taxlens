@@ -1,0 +1,11 @@
+# Texas — no state personal income tax. Engine returns 0 across the board.
+state: TX
+year: 2024
+notes: "Texas levies no personal income tax."
+standard_deduction: { single: 0, mfj: 0, mfs: 0, hoh: 0, qss: 0 }
+ordinary_brackets:
+  single: [[0, 0]]
+  mfj:    [[0, 0]]
+  mfs:    [[0, 0]]
+  hoh:    [[0, 0]]
+  qss:    [[0, 0]]

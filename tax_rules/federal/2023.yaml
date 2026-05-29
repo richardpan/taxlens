@@ -110,3 +110,36 @@ amt:
 
 collectibles_rate: 0.28
 unrecaptured_1250_rate: 0.25
+
+qbi:
+  rate: 0.20
+  threshold:
+    single: 232100
+    mfj:    464200
+    mfs:    232100
+    hoh:    232100
+    qss:    464200
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+contribution_limits:
+  k401_elective_deferral:      22500
+  k401_catchup_50plus:          7500
+  ira_contribution:             6500
+  ira_catchup_50plus:           1000
+  hsa_self:                     3850
+  hsa_family:                   7750
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 138000
+    mfj:    218000
+    mfs:    0
+    hoh:    138000
+    qss:    218000
+  roth_ira_phaseout_end:
+    single: 153000
+    mfj:    228000
+    mfs:    10000
+    hoh:    153000
+    qss:    228000
+

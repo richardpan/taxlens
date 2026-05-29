@@ -16,6 +16,7 @@ function showTab(name) {
   else if (name === 'math')     renderMath();
   else if (name === 'whatif')   renderWhatif();
   else if (name === 'compare')  renderCompare();
+  else if (name === 'advisor')  renderAdvisor();
 }
 window.showTab = showTab;
 
@@ -429,3 +430,110 @@ async function renderCompare() {
 
 // ─── boot ──────────────────────────────────────────────────────────────────
 refreshAll();
+
+
+// --- advisor -------------------------------------------------------------
+const SEV_COLOR = {
+  high:      'bg-rose-100 text-rose-700',
+  suggested: 'bg-amber-100 text-amber-700',
+  info:      'bg-sky-100 text-sky-700',
+};
+const CAT_ICON = {
+  retirement: '🏖️', deductions: '🧾', investments: '📈',
+  structure: '🏛️',  compliance: '⚠️',
+};
+
+async function renderAdvisor() {
+  const data = await api('/api/advisor');
+
+  const allRecs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
+  const totalSavings = allRecs.reduce((s, r) => s + Number(r.est_annual_savings || 0), 0);
+  const highCount = allRecs.filter(r => r.severity === 'high').length;
+
+  $('#advisorSummary').innerHTML = [
+    advTile('Total opportunities', allRecs.length, 'across all returns'),
+    advTile('High-priority items', highCount, 'flagged for immediate action'),
+    advTile('Est. annual savings', '$' + Math.round(totalSavings).toLocaleString(), 'rough headline number'),
+  ].join('');
+
+  $('#advisorCross').innerHTML = data.cross_year.length
+    ? data.cross_year.map(recCard).join('')
+    : '<div class="text-sm text-slate-500 italic md:col-span-2">No cross-year patterns yet — import at least 2 years.</div>';
+
+  $('#advisorPerYear').innerHTML = data.per_year.length
+    ? data.per_year.map(p => {
+        const count = p.recommendations.length;
+        const body = count
+          ? '<div class="grid md:grid-cols-2 gap-4">' + p.recommendations.map(recCard).join('') + '</div>'
+          : '<div class="text-sm text-slate-500 italic">No opportunities found for this year. Nicely optimized!</div>';
+        return [
+          '<div class="bg-white border border-slate-200 rounded-2xl p-5">',
+          '  <div class="flex items-center justify-between mb-3">',
+          '    <h4 class="font-semibold text-slate-800">Tax year ' + p.tax_year + '</h4>',
+          '    <span class="text-xs text-slate-500">' + count + ' suggestion' + (count === 1 ? '' : 's') + '</span>',
+          '  </div>',
+          body,
+          '</div>',
+        ].join('');
+      }).join('')
+    : '<div class="text-sm text-slate-500 italic">Import a return to see year-specific advice.</div>';
+}
+
+function advTile(label, value, sub) {
+  return [
+    '<div class="bg-white border border-slate-200 rounded-2xl p-4">',
+    '  <div class="text-xs uppercase tracking-wide text-slate-500">' + label + '</div>',
+    '  <div class="text-2xl font-bold mt-1">' + value + '</div>',
+    '  <div class="text-xs text-slate-500 mt-1">' + sub + '</div>',
+    '</div>',
+  ].join('');
+}
+
+function recCard(r) {
+  const savings = Number(r.est_annual_savings || 0);
+  const sevClass = SEV_COLOR[r.severity] || 'bg-slate-100 text-slate-700';
+  const icon = CAT_ICON[r.category] || '💡';
+  const refs = (r.references || []).join(' · ');
+  const savingsStr = savings > 0 ? '$' + Math.round(savings).toLocaleString() : '—';
+  return [
+    '<div class="border border-slate-200 rounded-xl p-4 bg-white">',
+    '  <div class="flex items-start gap-3">',
+    '    <div class="text-2xl">' + icon + '</div>',
+    '    <div class="flex-1">',
+    '      <div class="flex items-center gap-2 flex-wrap">',
+    '        <h5 class="font-semibold text-slate-800">' + r.title + '</h5>',
+    '        <span class="text-[10px] px-2 py-0.5 rounded-full ' + sevClass + ' uppercase font-bold tracking-wide">' + r.severity + '</span>',
+    '      </div>',
+    '      <div class="text-sm text-slate-600 mt-2">' + r.rationale + '</div>',
+    '      <div class="text-sm mt-2"><span class="font-semibold text-emerald-700">Action:</span> <span class="text-slate-700">' + r.action + '</span></div>',
+    '      <div class="flex items-baseline justify-between mt-3 pt-3 border-t border-slate-100">',
+    '        <div class="text-xs text-slate-500">' + refs + '</div>',
+    '        <div class="text-right">',
+    '          <div class="text-[10px] uppercase tracking-wide text-slate-400">Est. annual savings</div>',
+    '          <div class="font-mono font-bold text-emerald-600">' + savingsStr + '</div>',
+    '        </div>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('');
+}
+
+// --- demo loader ---------------------------------------------------------
+const demoBtn = document.getElementById('loadDemoBtn');
+if (demoBtn) {
+  demoBtn.addEventListener('click', async () => {
+    demoBtn.disabled = true;
+    demoBtn.textContent = 'Loading 3 sample returns…';
+    try {
+      const out = await api('/api/demo/load', { method: 'POST' });
+      demoBtn.textContent = `✓ Loaded ${out.count} demo returns — switching to Dashboard`;
+      await refreshAll();
+      setTimeout(() => showTab('dashboard'), 600);
+    } catch (e) {
+      demoBtn.disabled = false;
+      demoBtn.textContent = '❌ Demo load failed — see console';
+      console.error(e);
+    }
+  });
+}

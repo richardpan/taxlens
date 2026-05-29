@@ -1,0 +1,21 @@
+tax_year: 2024
+filing_status: mfj
+state: CA
+
+wages: 320000
+interest_income: 4500
+ordinary_dividends: 7200
+qualified_dividends: 6800
+long_term_capital_gains: 22000
+short_term_capital_gains: 0
+
+qualifying_children: 2
+
+traditional_401k_contributions: 23000
+hsa_deduction: 8300
+charitable_contributions: 9000
+mortgage_interest: 18000
+salt_paid: 10000
+
+federal_withholding: 64000
+estimated_payments: 0

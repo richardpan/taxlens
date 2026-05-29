@@ -105,6 +105,44 @@ class TaxLensService:
                 return None
             return self._full(row)
 
+    def advise_return(self, return_id: int) -> dict[str, Any] | None:
+        """Run the single-year advisor on one stored return."""
+        from taxlens.advisor import advise
+        with self.sessionmaker_() as s:
+            row = s.get(StoredReturn, return_id)
+            if row is None:
+                return None
+            ret = Return(**self._decimalize(json.loads(row.return_json)))
+            result = compute(ret)
+            recs = advise(ret, result)
+            return {
+                "return_id": return_id,
+                "tax_year": ret.tax_year,
+                "recommendations": [r.to_dict() for r in recs],
+            }
+
+    def advise_all(self) -> dict[str, Any]:
+        """Run single-year + multi-year advisors across every stored return."""
+        from taxlens.advisor import advise
+        from taxlens.advisor_multi import advise_multi
+        per_year: list[dict[str, Any]] = []
+        history: list[tuple[Return, TaxResult]] = []
+        with self.sessionmaker_() as s:
+            rows = s.execute(
+                select(StoredReturn).order_by(StoredReturn.tax_year.asc())
+            ).scalars().all()
+            for row in rows:
+                ret = Return(**self._decimalize(json.loads(row.return_json)))
+                result = compute(ret)
+                history.append((ret, result))
+                per_year.append({
+                    "return_id": row.id,
+                    "tax_year": ret.tax_year,
+                    "recommendations": [r.to_dict() for r in advise(ret, result)],
+                })
+        cross = [r.to_dict() for r in advise_multi(history)]
+        return {"per_year": per_year, "cross_year": cross}
+
     def delete_return(self, return_id: int) -> bool:
         with self.sessionmaker_() as s:
             row = s.get(StoredReturn, return_id)

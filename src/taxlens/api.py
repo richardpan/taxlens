@@ -98,6 +98,36 @@ def dashboard() -> dict[str, Any]:
     return {"returns": returns}
 
 
+@app.get("/api/advisor")
+def advisor() -> dict[str, Any]:
+    """All recommendations across every stored return."""
+    return service.advise_all()
+
+
+@app.get("/api/returns/{return_id}/advisor")
+def advisor_one(return_id: int) -> dict[str, Any]:
+    out = service.advise_return(return_id)
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
+@app.post("/api/demo/load")
+def load_demo() -> dict[str, Any]:
+    """Bulk-import the bundled demo returns (idempotent: re-importing replaces)."""
+    from taxlens.demo import demo_files
+    loaded: list[dict[str, Any]] = []
+    for path in demo_files():
+        row, result, warnings = service.import_file(path)
+        loaded.append({
+            "id": row.id, "tax_year": row.tax_year,
+            "filing_status": row.filing_status,
+            "total_tax": str(result.total_tax),
+            "warnings": warnings,
+        })
+    return {"loaded": loaded, "count": len(loaded)}
+
+
 # Static UI ───────────────────────────────────────────────────────────────────
 
 if WEB_DIR.exists():

@@ -62,6 +62,106 @@ class _StepRecorder:
 
 # ────────────────────────── individual computation stages ──────────────────────────
 
+def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal]:
+    """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward).
+
+    Simplified Form 8582 model:
+      - Rentals are passive by default. Up to $25,000 of rental losses are
+        allowed against non-passive income for active participants (phased
+        out 50¢/$1 over modified AGI $100k, fully gone at $150k — we apply
+        the phaseout against gross income proxy = wages, since we haven't
+        computed AGI yet at this stage; it's a defensible simplification).
+      - Royalties are non-passive.
+      - K-1 ordinary business income is treated as non-passive here (most
+        active S-corp/LLC owners). Passive K-1 is a v1.x refinement.
+      - Suspended losses from prior years are released up to the allowance.
+    """
+    royalties = ret.royalty_income
+    k1_active = ret.k1_ordinary_business_income
+    rental = ret.rental_net_income
+    suspended_in = ret.suspended_passive_losses_carryforward
+
+    rental_for_offset = rental - suspended_in  # negative = additional loss
+    if rental_for_offset >= 0:
+        # Net positive: prior suspended losses fully absorbed; nothing carries.
+        allowed_loss = ZERO
+        new_carry = ZERO
+        net_passive = rental_for_offset
+    else:
+        # We have a passive loss. Apply $25k active-participation allowance with phaseout.
+        loss = -rental_for_offset
+        if ret.is_active_real_estate_participant:
+            magi_proxy = ret.wages + ret.k1_ordinary_business_income
+            phaseout_start = Decimal(100_000)
+            phaseout_end = Decimal(150_000)
+            if magi_proxy <= phaseout_start:
+                allowance = Decimal(25_000)
+            elif magi_proxy >= phaseout_end:
+                allowance = ZERO
+            else:
+                allowance = Decimal(25_000) - (magi_proxy - phaseout_start) * Decimal("0.5")
+        else:
+            allowance = ZERO
+        allowed_loss = min(loss, allowance)
+        new_carry = loss - allowed_loss
+        net_passive = -allowed_loss
+
+    net_e = royalties + k1_active + net_passive
+    rec.add(
+        "Schedule E net (rental + royalty + K-1 active)",
+        "royalty + k1_obi + min(rental_net_after_carryover, allowed_passive_loss)",
+        {
+            "royalty": royalties, "k1_obi": k1_active, "rental_net": rental,
+            "suspended_in": suspended_in, "new_carry": new_carry,
+        },
+        net_e,
+    )
+    return net_e, _money(new_carry), _money(new_carry)
+
+
+def _compute_qbi(ret: Return, taxable_before_qbi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
+    """Form 8995 simplified — 20% of qualified business income, capped at 20%
+    of (taxable income − net capital gain). SSTB phaseouts use the income
+    thresholds in rules.qbi.threshold; below threshold, SSTBs qualify too."""
+    qbi_eligible = (
+        ret.k1_section_199a_qbi
+        + (ret.se_income if ret.se_income > 0 else ZERO)
+        + (ret.rental_net_income if ret.rental_net_income > 0 else ZERO)
+    )
+    if qbi_eligible <= 0:
+        return ZERO
+
+    cfg = rules.qbi or {}
+    rate = Decimal(cfg.get("rate", "0.20"))
+    thresholds = cfg.get("threshold", {})
+    threshold = Decimal(thresholds.get(_status(ret), 0)) if thresholds else ZERO
+    phaseout = Decimal(cfg.get("phaseout", 50_000)) if _status(ret) != "mfj" \
+        else Decimal(cfg.get("phaseout_mfj", 100_000))
+
+    # SSTB phaseout
+    if ret.k1_is_sstb and threshold > 0:
+        if taxable_before_qbi >= threshold + phaseout:
+            qbi_eligible = ZERO
+        elif taxable_before_qbi > threshold:
+            scale = (threshold + phaseout - taxable_before_qbi) / phaseout
+            qbi_eligible = qbi_eligible * scale
+
+    net_cap_gain = (
+        ret.long_term_capital_gains + ret.qualified_dividends + ret.k1_long_term_gains
+        + ret.k1_qualified_dividends
+    )
+    cap1 = qbi_eligible * rate
+    cap2 = max(ZERO, (taxable_before_qbi - net_cap_gain)) * rate
+    qbi_ded = min(cap1, cap2)
+    rec.add(
+        "QBI deduction (Section 199A)",
+        "min(0.20 × QBI, 0.20 × (taxable − net cap gain))",
+        {"qbi_eligible": qbi_eligible, "taxable": taxable_before_qbi, "net_cap_gain": net_cap_gain},
+        qbi_ded,
+    )
+    return _money(qbi_ded)
+
+
 def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
     """Returns (se_tax, deductible_half) — half of SE tax is an above-the-line adjustment."""
     if ret.se_income <= 0:
@@ -104,35 +204,49 @@ def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Deci
     return se_tax_rounded, _money(deductible)
 
 
-def _compute_agi(ret: Return, half_se_tax: Decimal, rec: _StepRecorder) -> Decimal:
+def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _StepRecorder) -> Decimal:
     gross = (
         ret.wages
-        + ret.interest_income
-        + ret.ordinary_dividends
-        + ret.long_term_capital_gains
-        + ret.short_term_capital_gains
+        + ret.interest_income + ret.k1_interest
+        + ret.ordinary_dividends + ret.k1_ordinary_dividends
+        + ret.long_term_capital_gains + ret.k1_long_term_gains
+        + ret.short_term_capital_gains + ret.k1_short_term_gains
         + ret.se_income
         + ret.other_ordinary_income
+        + sch_e_net
     )
     rec.add(
         "Gross income",
-        "wages + interest + ord_div + ltcg + stcg + se + other",
+        "wages + interest(+k1) + ord_div(+k1) + ltcg(+k1) + stcg(+k1) + se + sch_e + other",
         {
             "wages": ret.wages,
-            "interest": ret.interest_income,
-            "ord_div": ret.ordinary_dividends,
-            "ltcg": ret.long_term_capital_gains,
-            "stcg": ret.short_term_capital_gains,
+            "interest": ret.interest_income, "k1_interest": ret.k1_interest,
+            "ord_div": ret.ordinary_dividends, "k1_ord_div": ret.k1_ordinary_dividends,
+            "ltcg": ret.long_term_capital_gains, "k1_ltcg": ret.k1_long_term_gains,
+            "stcg": ret.short_term_capital_gains, "k1_stcg": ret.k1_short_term_gains,
             "se": ret.se_income,
+            "sch_e": sch_e_net,
             "other": ret.other_ordinary_income,
         },
         gross,
     )
-    adjustments = ret.hsa_deduction + ret.other_adjustments + half_se_tax
+    # Traditional IRA contributions are above-the-line (we ignore the active-participant
+    # deductibility phaseout here — the Advisor warns about it explicitly).
+    adjustments = (
+        ret.hsa_deduction
+        + ret.traditional_ira_contributions
+        + ret.other_adjustments
+        + half_se_tax
+    )
     rec.add(
         "Above-the-line adjustments",
-        "hsa + other + ½ se_tax",
-        {"hsa": ret.hsa_deduction, "other": ret.other_adjustments, "half_se_tax": half_se_tax},
+        "hsa + trad_ira + other + ½ se_tax",
+        {
+            "hsa": ret.hsa_deduction,
+            "trad_ira": ret.traditional_ira_contributions,
+            "other": ret.other_adjustments,
+            "half_se_tax": half_se_tax,
+        },
         adjustments,
     )
     agi = gross - adjustments
@@ -184,7 +298,8 @@ def _compute_income_tax(
     ordinary_brackets = rules.ordinary_brackets[status]
     qualified_brackets = rules.qualified_brackets[status]
 
-    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains
+    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
+        + ret.k1_qualified_dividends + ret.k1_long_term_gains
     unrec_1250 = ret.unrecaptured_1250_gains
     collectibles = ret.collectibles_gains
 
@@ -286,8 +401,15 @@ def _compute_amt(
     status = _status(ret)
     amt = rules.amt
 
-    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains
-    amti = taxable_income + ret.amt_preferences + ret.amt_adjustments
+    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
+        + ret.k1_qualified_dividends + ret.k1_long_term_gains
+    # ISO bargain element is one of the most common AMT preference items.
+    amti = (
+        taxable_income
+        + ret.amt_preferences
+        + ret.amt_adjustments
+        + ret.iso_bargain_element
+    )
     amti = max(ZERO, amti)
 
     exemption = Decimal(amt["exemption"][status])
@@ -387,6 +509,21 @@ def _compute_state_with(ret: Return, agi: Decimal, srules: StateRules) -> StateR
                 "bracket walk on full taxable income",
                 {"taxable": taxable, "brackets": len(fills)}, tax)
 
+    # Optional surcharges (e.g. CA Mental Health Services Tax — 1% over $1M).
+    if srules.mental_health_services_tax:
+        s = srules.mental_health_services_tax
+        thr = Decimal(s["threshold"])
+        rate = Decimal(s["rate"])
+        if taxable > thr:
+            surcharge = (taxable - thr) * rate
+            tax = tax + surcharge
+            rec.add(
+                f"{srules.state} Mental Health Services Tax",
+                f"({taxable} − {thr}) × {rate}",
+                {"taxable": taxable, "threshold": thr, "rate": rate},
+                surcharge,
+            )
+
     return StateResult(
         state=srules.state,
         state_agi=_money(state_agi),
@@ -418,10 +555,12 @@ def _compute_niit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -
     threshold = Decimal(cfg["threshold"][_status(ret)])
     rate = Decimal(cfg["rate"])
     investment_income = (
-        ret.interest_income
-        + ret.ordinary_dividends
-        + ret.long_term_capital_gains
-        + ret.short_term_capital_gains
+        ret.interest_income + ret.k1_interest
+        + ret.ordinary_dividends + ret.k1_ordinary_dividends
+        + ret.long_term_capital_gains + ret.k1_long_term_gains
+        + ret.short_term_capital_gains + ret.k1_short_term_gains
+        + max(ZERO, ret.rental_net_income)        # passive rental net positive only
+        + ret.royalty_income
     )
     magi_excess = max(ZERO, agi - threshold)
     niit_base = min(investment_income, magi_excess)
@@ -477,8 +616,15 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     rec = _StepRecorder()
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
-    agi = _compute_agi(ret, half_se_tax, rec)
-    taxable, deduction, deduction_kind = _compute_taxable_income(ret, agi, rules, rec)
+    sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
+    agi = _compute_agi(ret, half_se_tax, sch_e_net, rec)
+    taxable_pre_qbi, deduction, deduction_kind = _compute_taxable_income(ret, agi, rules, rec)
+    qbi_ded = _compute_qbi(ret, taxable_pre_qbi, rules, rec)
+    taxable = max(ZERO, taxable_pre_qbi - qbi_ded)
+    if qbi_ded > 0:
+        rec.add("Taxable income after QBI deduction",
+                "max(0, taxable_pre_qbi − qbi_ded)",
+                {"taxable_pre_qbi": taxable_pre_qbi, "qbi_ded": qbi_ded}, taxable)
     ord_tax, qual_tax, coll_tax, unrec_tax, ord_fills, qual_fills = _compute_income_tax(
         ret, taxable, rules, rec
     )
@@ -546,6 +692,9 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         qualified_bracket_fills=qual_fills,
         steps=rec.steps,
         state_result=state_result,
+        qbi_deduction=qbi_ded,
+        schedule_e_income=_money(sch_e_net),
+        passive_loss_disallowed=pal_carry,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )

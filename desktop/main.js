@@ -36,15 +36,26 @@ async function waitForBackend(timeoutMs = 15000) {
 }
 
 function startBackend() {
-  const cmd = process.platform === "win32" ? "taxlens.exe" : "taxlens";
+  // Prefer the PyInstaller-bundled backend (no Python install required); fall
+  // back to a globally-installed `taxlens` CLI on PATH (dev mode).
+  const path = require("path");
+  const fs = require("fs");
+  const bundledName = process.platform === "win32" ? "taxlens-backend.exe" : "taxlens-backend";
+  const bundledCandidates = [
+    path.join(process.resourcesPath || "", "bin", bundledName),
+    path.join(__dirname, "bin", bundledName),
+  ];
+  const bundled = bundledCandidates.find(p => p && fs.existsSync(p));
+  const cmd = bundled || (process.platform === "win32" ? "taxlens.exe" : "taxlens");
   const args = ["serve", "--no-open", "--port", String(PORT)];
   backend = spawn(cmd, args, { stdio: "inherit", shell: false });
   backend.on("error", (err) => {
     dialog.showErrorBox(
       "TaxLens backend failed to start",
       `Could not launch \`${cmd}\`.\n\n` +
-      "Make sure the TaxLens Python CLI is installed and on your PATH " +
-      "(e.g. `pip install -e .` in the project root).\n\n" +
+      "If you are running from source, make sure the TaxLens Python CLI is " +
+      "installed and on your PATH (e.g. `pip install -e .` in the project root). " +
+      "Production builds should include desktop/bin/" + bundledName + ".\n\n" +
       `Underlying error: ${err.message}`
     );
     app.quit();

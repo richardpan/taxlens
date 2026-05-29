@@ -122,3 +122,38 @@ amt:
 # Schedule D worksheet cap rates (can override per-year if statute changes).
 collectibles_rate: 0.28
 unrecaptured_1250_rate: 0.25
+
+# QBI deduction (Section 199A) — Form 8995/8995-A. Simplified phaseout model:
+qbi:
+  rate: 0.20
+  threshold:
+    single: 241950
+    mfj:    483900
+    mfs:    241950
+    hoh:    241950
+    qss:    483900
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+# Annual contribution / deferral limits used by the Tax Savings Advisor.
+contribution_limits:
+  k401_elective_deferral:      23000
+  k401_catchup_50plus:          7500
+  ira_contribution:             7000
+  ira_catchup_50plus:           1000
+  hsa_self:                     4150
+  hsa_family:                   8300
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 146000
+    mfj:    230000
+    mfs:    0
+    hoh:    146000
+    qss:    230000
+  roth_ira_phaseout_end:
+    single: 161000
+    mfj:    240000
+    mfs:    10000
+    hoh:    161000
+    qss:    240000
+

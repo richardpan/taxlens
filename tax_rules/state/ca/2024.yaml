@@ -70,3 +70,9 @@ ordinary_brackets:
     - [721318,   0.103]
     - [865574,   0.113]
     - [1442628,  0.123]
+
+# Mental Health Services Tax (Prop. 63) — 1% surcharge on taxable income over .
+mental_health_services_tax:
+  rate: 0.01
+  threshold: 1000000
+

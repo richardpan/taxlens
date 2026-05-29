@@ -1,0 +1,21 @@
+tax_year: 2024
+filing_status: single
+state: CA
+
+wages: 240000
+interest_income: 2100
+ordinary_dividends: 3000
+qualified_dividends: 2700
+long_term_capital_gains: 18000
+short_term_capital_gains: 0
+
+iso_bargain_element: 180000
+
+traditional_401k_contributions: 21000
+hsa_deduction: 4150
+charitable_contributions: 4500
+mortgage_interest: 12000
+salt_paid: 10000
+
+federal_withholding: 48000
+estimated_payments: 0

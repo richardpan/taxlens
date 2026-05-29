@@ -23,7 +23,8 @@ taxlens/
 - [x] Phase 3 — SQLite persistence, FastAPI sidecar, single-page web UI
 - [x] Phase 4 — Multi-year dashboard, year detail, math view, what-if editor, compare view
 - [x] Phase 5 (v0.2) — AMT (Form 6251), Schedule D 28%/25% worksheet, CA state module, at-rest DB encryption (Fernet), Electron desktop shell
-- [ ] v1.x — OCR fallback for scanned PDFs, signed installers, more states, Schedule E (rentals)
+- [x] v0.3 — Schedule E + K-1 + §199A QBI + ISO/AMT, CA Mental Health Services Tax, **Tax Savings Advisor** (single-year + cross-year rules), NY/IL/TX/FL/WA state stubs, broker 1099-B CSV importer, OCR fallback (Tesseract), demo mode, PyInstaller-bundled desktop backend, signing/notarization docs
+- [ ] v0.4 — Signed Win/Mac installers, more state-year backfills, Roth/TLH multi-year simulators, WA 7% capital-gains tax
 
 See `tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
 
@@ -34,8 +35,8 @@ cd taxlens
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest                              # 39 tests, ~10s
-taxlens import path\to\1040.pdf     # also accepts .txf / .json / .yaml
+pytest                              # 72 tests, ~10s
+taxlens import path\to\1040.pdf     # also accepts .txf / .json / .yaml / .csv (1099-B)
 taxlens list
 taxlens serve                       # opens http://127.0.0.1:8765 in your browser
 taxlens lock                        # encrypt local DB with a passphrase

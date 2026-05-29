@@ -75,12 +75,39 @@ STATUS_PATTERNS = [
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
 
 
-def _extract_text_per_page(path: Path) -> list[str]:
+def _extract_text_per_page(path: Path) -> tuple[list[str], bool]:
+    """Returns (pages, ocr_used). When pdfplumber finds no text on most pages,
+    we fall back to Tesseract OCR via `pytesseract` + `pdf2image` (if installed)."""
     pages: list[str] = []
     with pdfplumber.open(str(path)) as pdf:
         for p in pdf.pages:
             pages.append(p.extract_text() or "")
-    return pages
+
+    nonempty = sum(1 for p in pages if p.strip())
+    if nonempty >= max(1, len(pages) // 2):
+        return pages, False
+
+    # Fallback to OCR. Soft-deps: pytesseract + pdf2image + Poppler binaries +
+    # Tesseract binary. If any are missing we keep the empty result and let the
+    # caller surface a warning rather than crashing the import.
+    try:
+        import pdf2image                          # type: ignore[import-not-found]
+        import pytesseract                        # type: ignore[import-not-found]
+    except Exception:
+        return pages, False
+
+    try:
+        images = pdf2image.convert_from_path(str(path), dpi=300)
+    except Exception:
+        return pages, False
+
+    ocr_pages: list[str] = []
+    for img in images:
+        try:
+            ocr_pages.append(pytesseract.image_to_string(img))
+        except Exception:
+            ocr_pages.append("")
+    return ocr_pages, True
 
 
 def _detect_year(pages: list[str]) -> int | None:
@@ -127,7 +154,7 @@ def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str
 
 
 def import_pdf(path: Path) -> Imported:
-    pages = _extract_text_per_page(path)
+    pages, ocr_used = _extract_text_per_page(path)
     tax_year = _detect_year(pages)
     filing_status = _detect_status(pages)
     fields, children, warnings = _extract_fields(pages)
@@ -152,9 +179,11 @@ def import_pdf(path: Path) -> Imported:
         reported_total_tax=reported_total_tax,
         **fields,
     )
+    if ocr_used:
+        warnings.insert(0, "PDF appeared to be scanned; used OCR fallback. Results may be approximate — please double-check.")
     return Imported(
         ret=ret,
-        source="pdf",
+        source="pdf-ocr" if ocr_used else "pdf",
         source_hash=sha256_file(path),
         source_filename=path.name,
         warnings=warnings,

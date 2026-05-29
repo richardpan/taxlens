@@ -1,0 +1,19 @@
+tax_year: 2023
+filing_status: single
+state: CA
+
+wages: 185000
+interest_income: 1200
+ordinary_dividends: 2400
+qualified_dividends: 2200
+long_term_capital_gains: 6800
+short_term_capital_gains: -1200
+
+traditional_401k_contributions: 19000
+hsa_deduction: 3200
+charitable_contributions: 2000
+mortgage_interest: 0
+salt_paid: 10000
+
+federal_withholding: 32000
+estimated_payments: 0

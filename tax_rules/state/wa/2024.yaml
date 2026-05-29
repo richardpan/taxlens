@@ -1,0 +1,12 @@
+# Washington — no state personal income tax on wages.
+# WA does have a 7% capital-gains tax over $262k (2024) — NOT modeled in v0.3.
+state: WA
+year: 2024
+notes: "Washington has no wage income tax. 7% capital-gains tax (over ~$262k) not yet modeled."
+standard_deduction: { single: 0, mfj: 0, mfs: 0, hoh: 0, qss: 0 }
+ordinary_brackets:
+  single: [[0, 0]]
+  mfj:    [[0, 0]]
+  mfs:    [[0, 0]]
+  hoh:    [[0, 0]]
+  qss:    [[0, 0]]

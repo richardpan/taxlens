@@ -42,6 +42,35 @@ class Return(BaseModel):
     se_income: Decimal = Decimal(0)              # Schedule C net profit
     other_ordinary_income: Decimal = Decimal(0)
 
+    # Schedule E (rentals + royalties + passthrough)
+    rental_net_income: Decimal = Decimal(0)        # net of expenses & depreciation; can be < 0
+    royalty_income: Decimal = Decimal(0)
+    is_active_real_estate_participant: bool = False  # gates the $25k PAL allowance
+    suspended_passive_losses_carryforward: Decimal = Decimal(0)
+
+    # K-1 passthroughs (1065, 1120-S, 1041) — aggregated; engine treats by character
+    k1_ordinary_business_income: Decimal = Decimal(0)
+    k1_interest: Decimal = Decimal(0)
+    k1_ordinary_dividends: Decimal = Decimal(0)
+    k1_qualified_dividends: Decimal = Decimal(0)
+    k1_long_term_gains: Decimal = Decimal(0)
+    k1_short_term_gains: Decimal = Decimal(0)
+    k1_section_199a_qbi: Decimal = Decimal(0)      # for QBI deduction (Form 8995)
+    k1_is_sstb: bool = False                       # specified service trade/business flag
+
+    # Retirement / health contributions — used both for AGI math and the advisor
+    traditional_401k_contributions: Decimal = Decimal(0)   # already excluded from W-2 box 1
+    roth_401k_contributions: Decimal = Decimal(0)
+    traditional_ira_contributions: Decimal = Decimal(0)    # above-the-line if deductible
+    roth_ira_contributions: Decimal = Decimal(0)
+    hsa_contributions: Decimal = Decimal(0)                # employee + employer (info)
+    charitable_contributions: Decimal = Decimal(0)         # for itemize/bunch advisor
+    mortgage_interest: Decimal = Decimal(0)                # for itemize advisor
+    salt_paid: Decimal = Decimal(0)                        # state+local taxes, $10k SALT cap
+
+    # ISO exercise (bargain element) — feeds AMT preferences & the advisor
+    iso_bargain_element: Decimal = Decimal(0)
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -110,6 +139,9 @@ class TaxResult(BaseModel):
     additional_medicare_tax: Decimal
     niit: Decimal
     amt: Decimal = Decimal(0)                     # excess of tentative AMT over regular tax
+    qbi_deduction: Decimal = Decimal(0)           # Form 8995 / 8995-A
+    schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
+    passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
     credits: Decimal
     total_tax: Decimal
 
@@ -150,6 +182,10 @@ class Rules(BaseModel):
     # Schedule D worksheet cap rates — optional; defaults applied in engine.
     collectibles_rate: Decimal = Decimal("0.28")
     unrecaptured_1250_rate: Decimal = Decimal("0.25")
+    # QBI deduction (Section 199A) — optional, defaults below if absent.
+    qbi: dict[str, Any] | None = None
+    # 401(k) / IRA / HSA limits used by the Advisor.
+    contribution_limits: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):
@@ -174,6 +210,8 @@ class StateRules(BaseModel):
     ordinary_brackets: dict[str, list[tuple[Decimal, Decimal]]]
     # CA-style: capital gains taxed as ordinary income. Override per-state when needed.
     qualified_brackets: dict[str, list[tuple[Decimal, Decimal]]] | None = None
+    # Optional state surcharges (e.g. CA Mental Health Services Tax).
+    mental_health_services_tax: dict[str, Any] | None = None
     notes: str | None = None
 
 
