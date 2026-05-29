@@ -157,3 +157,63 @@ contribution_limits:
     hoh:    161000
     qss:    240000
 
+# Earned Income Tax Credit (Schedule EIC). Refundable.
+# Source: Rev. Proc. 2023-34 §3.06. MFS not allowed (we return 0).
+eitc:
+  investment_income_limit: 11600
+  parameters:
+    "0":
+      earned_income_amount: 8260
+      max_credit: 632
+      phaseout_rate: 0.0765
+      phaseout_start: 10330
+      phaseout_start_joint: 17250
+      completed_phaseout: 18591
+      completed_phaseout_joint: 25511
+    "1":
+      earned_income_amount: 12390
+      max_credit: 4213
+      phaseout_rate: 0.1598
+      phaseout_start: 22720
+      phaseout_start_joint: 29640
+      completed_phaseout: 49084
+      completed_phaseout_joint: 56004
+    "2":
+      earned_income_amount: 17400
+      max_credit: 6960
+      phaseout_rate: 0.2106
+      phaseout_start: 22720
+      phaseout_start_joint: 29640
+      completed_phaseout: 55768
+      completed_phaseout_joint: 62688
+    "3":
+      earned_income_amount: 17400
+      max_credit: 7830
+      phaseout_rate: 0.2106
+      phaseout_start: 22720
+      phaseout_start_joint: 29640
+      completed_phaseout: 59899
+      completed_phaseout_joint: 66819
+
+# Education credits (Form 8863). Phaseouts are MAGI-based.
+# AOTC: 100% of first $2,000 + 25% of next $2,000 = $2,500 max per student,
+#       40% refundable, 60% nonrefundable. MFS disallowed.
+# LLC: 20% of expenses up to $10,000 = $2,000 max per return, nonrefundable.
+# Both share the same phaseout window for TY 2024 (per Form 8863 instructions).
+education_credits:
+  aotc:
+    max_expenses_per_student: 4000
+    first_tier_rate: 1.00
+    first_tier_cap: 2000
+    second_tier_rate: 0.25
+    refundable_fraction: 0.40
+  llc:
+    rate: 0.20
+    expense_cap: 10000
+  phaseout:
+    single: [80000, 90000]
+    mfj:    [160000, 180000]
+    mfs:    [0, 0]               # MFS not allowed
+    hoh:    [80000, 90000]
+    qss:    [160000, 180000]
+

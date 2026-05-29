@@ -2,6 +2,49 @@
 
 All notable changes to TaxLens.
 
+## [0.10.0] — 2026
+
+### Added — refundable credits (EITC + AOTC)
+TaxLens now does the two biggest refundable credits:
+
+- **Earned Income Tax Credit (Schedule EIC)** — refundable. Trapezoid by
+  number of qualifying children (0/1/2/3+), with phase-in / plateau /
+  phase-out. Phase-out is against the **greater of** earned income or AGI
+  (per IRS Pub. 596 to prevent gaming with investment income).
+  Disqualifiers: filing MFS, or investment income above the annual limit
+  ($11,600 for TY 2024; $11,000 for TY 2023).
+- **American Opportunity Tax Credit (AOTC, Form 8863)** — per qualifying
+  student (max 4). 100% of first $2,000 + 25% of next $2,000 = $2,500
+  max per student. **40% refundable** ($1,000), 60% nonrefundable. MFS
+  disallowed. MAGI phaseout: single $80–90k / MFJ $160–180k.
+- **Lifetime Learning Credit (LLC, Form 8863)** — nonrefundable. 20% of
+  qualified expenses (capped at $10,000 pool per return) = $2,000 max.
+  Same MAGI window as AOTC.
+
+### Added — Return inputs
+- `aotc_qualified_expenses: list[Decimal]` — one entry per qualifying student
+- `llc_qualified_expenses: Decimal` — single per-return pool
+
+### Added — TaxResult outputs
+- `eitc`, `aotc_nonrefundable`, `aotc_refundable`, `llc_credit`
+
+### Engine
+- Refundable credits now flow into the payments side of the refund
+  computation (just like Form 1040 line 27 EITC and line 29 AOTC), so
+  they can push `refund_or_owed` positive even when total tax is $0.
+
+### UI
+- New cards on the Year detail page for EITC, AOTC (refundable + nonrefundable
+  shown separately), and LLC — visible only when non-zero.
+
+### Tests
+- 156 passing (was 132). 24 new tests: 11 EITC (phase-in, plateau,
+  phase-out, full phaseout, MFS disqualifier, investment income limit,
+  zero earned income, childless plateau, refundability, 2023 sanity,
+  3-kid MFJ plateau), 13 education credit (AOTC tiered math, multi-student,
+  per-student cap, LLC math, expense cap, phaseout midpoint, MFJ window,
+  MFS disqualifier, refundability, EITC stacking).
+
 ## [0.9.0] — 2026
 
 ### Added — Schedule E MACRS depreciation (Form 4562)

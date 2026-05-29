@@ -15,6 +15,7 @@ from taxlens.brackets import walk_brackets
 from taxlens.models import (
     BracketFill,
     ComputationStep,
+    FilingStatus,
     Return,
     Rules,
     StateResult,
@@ -807,6 +808,148 @@ def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) ->
     return _money(credit)
 
 
+def _compute_eitc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
+    """Earned Income Tax Credit (Schedule EIC). Refundable.
+
+    Form is a trapezoid per #-of-children:
+      - Phase-in:   credit = earned × phase_in_rate, up to max_credit
+      - Plateau:    credit = max_credit
+      - Phase-out:  credit = max_credit − (income_for_phaseout − ph_start) × ph_rate
+
+    Phase-out is applied against the **greater of** earned income or AGI
+    (IRS rule: this prevents gaming the credit with investment income).
+    Disqualifiers: filing MFS, or investment income above the annual limit.
+    """
+    cfg = rules.eitc
+    if not cfg:
+        return ZERO
+    if ret.filing_status == FilingStatus.MFS:
+        return ZERO
+    earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
+    investment = (
+        max(ZERO, ret.interest_income)
+        + max(ZERO, ret.ordinary_dividends)
+        + max(ZERO, ret.long_term_capital_gains)
+        + max(ZERO, ret.short_term_capital_gains)
+        + max(ZERO, ret.royalty_income)
+    )
+    inv_limit = Decimal(cfg["investment_income_limit"])
+    if investment > inv_limit:
+        rec.add("EITC disallowed — investment income over limit",
+                "investment_income > eitc.investment_income_limit",
+                {"investment_income": investment, "limit": inv_limit}, ZERO)
+        return ZERO
+    if earned <= ZERO:
+        return ZERO
+
+    n = min(max(0, ret.qualifying_children), 3)
+    params = cfg["parameters"][str(n)]
+    joint = ret.filing_status in (FilingStatus.MFJ, FilingStatus.QSS)
+    earned_inc_amount = Decimal(str(params["earned_income_amount"]))
+    max_credit = Decimal(str(params["max_credit"]))
+    ph_rate = Decimal(str(params["phaseout_rate"]))
+    ph_start = Decimal(str(params["phaseout_start_joint" if joint else "phaseout_start"]))
+    comp = Decimal(str(params["completed_phaseout_joint" if joint else "completed_phaseout"]))
+
+    # Phase-in (linear): tentative credit grows with earned income.
+    phase_in_rate = max_credit / earned_inc_amount
+    tentative = min(earned * phase_in_rate, max_credit)
+
+    # Phase-out: against greater of earned or AGI.
+    income_for_phaseout = max(earned, agi)
+    if income_for_phaseout >= comp:
+        credit = ZERO
+    elif income_for_phaseout > ph_start:
+        phaseout_reduction = (income_for_phaseout - ph_start) * ph_rate
+        credit = min(tentative, max(ZERO, max_credit - phaseout_reduction))
+    else:
+        credit = tentative
+
+    rec.add(
+        "Earned Income Tax Credit (Schedule EIC) — refundable",
+        "trapezoid by # qualifying children; phase-out uses max(earned, AGI)",
+        {
+            "qualifying_children": n,
+            "earned_income": earned,
+            "investment_income": investment,
+            "phase_in_rate": phase_in_rate,
+            "max_credit": max_credit,
+            "phaseout_start": ph_start,
+            "completed_phaseout": comp,
+            "income_for_phaseout": income_for_phaseout,
+        },
+        credit,
+    )
+    return _money(credit)
+
+
+def _compute_education_credits(
+    ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Form 8863 — AOTC + LLC.
+
+    Returns (aotc_nonrefundable, aotc_refundable, llc_nonrefundable). MFS is
+    disallowed for both. Both share the same MAGI phaseout window.
+    """
+    cfg = rules.education_credits
+    if not cfg:
+        return ZERO, ZERO, ZERO
+    if ret.filing_status == FilingStatus.MFS:
+        return ZERO, ZERO, ZERO
+
+    ph = cfg["phaseout"][_status(ret)]
+    ph_start = Decimal(str(ph[0]))
+    ph_end = Decimal(str(ph[1]))
+    if ph_end <= ZERO:
+        return ZERO, ZERO, ZERO
+    if agi >= ph_end:
+        phase_factor = ZERO
+    elif agi <= ph_start:
+        phase_factor = Decimal(1)
+    else:
+        phase_factor = (ph_end - agi) / (ph_end - ph_start)
+
+    # ── AOTC ── per qualifying student, up to 4 (Form 8863 part 1)
+    aotc_cfg = cfg["aotc"]
+    max_exp = Decimal(str(aotc_cfg["max_expenses_per_student"]))
+    first_cap = Decimal(str(aotc_cfg["first_tier_cap"]))
+    first_rate = Decimal(str(aotc_cfg["first_tier_rate"]))
+    second_rate = Decimal(str(aotc_cfg["second_tier_rate"]))
+    refund_frac = Decimal(str(aotc_cfg["refundable_fraction"]))
+    aotc_raw = ZERO
+    for expenses in (ret.aotc_qualified_expenses or [])[:4]:
+        e = min(max(ZERO, expenses), max_exp)
+        first_tier = min(e, first_cap) * first_rate
+        second_tier = max(ZERO, e - first_cap) * second_rate
+        aotc_raw += first_tier + second_tier
+    aotc_total = aotc_raw * phase_factor
+    aotc_refundable = aotc_total * refund_frac
+    aotc_nonrefundable = aotc_total - aotc_refundable
+
+    # ── LLC ── single bucket per return (Form 8863 part 2)
+    llc_cfg = cfg["llc"]
+    llc_cap = Decimal(str(llc_cfg["expense_cap"]))
+    llc_rate = Decimal(str(llc_cfg["rate"]))
+    llc_raw = min(max(ZERO, ret.llc_qualified_expenses), llc_cap) * llc_rate
+    llc_credit = llc_raw * phase_factor
+
+    if aotc_raw + llc_raw > ZERO:
+        rec.add(
+            "Education credits (Form 8863) — AOTC + LLC",
+            "per-student AOTC (100% / 25% / 40% refundable) + LLC (20% of cap) × MAGI phaseout",
+            {
+                "aotc_students": len(ret.aotc_qualified_expenses or []),
+                "aotc_raw": aotc_raw,
+                "llc_expenses": ret.llc_qualified_expenses,
+                "llc_raw": llc_raw,
+                "phase_factor": phase_factor,
+                "phaseout_start": ph_start, "phaseout_end": ph_end,
+            },
+            aotc_total + llc_credit,
+        )
+    return _money(aotc_nonrefundable), _money(aotc_refundable), _money(llc_credit)
+
+
 # ────────────────────────── public entry point ──────────────────────────
 
 def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
@@ -868,9 +1011,11 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     addl_medicare = _compute_additional_medicare(ret, rules, rec)
     niit = _compute_niit(ret, agi, rules, rec)
     ctc = _compute_ctc(ret, agi, rules, rec)
+    eitc = _compute_eitc(ret, agi, rules, rec)
+    aotc_nonref, aotc_ref, llc = _compute_education_credits(ret, agi, rules, rec)
     ftc_used, ftc_carry_out = _compute_ftc(ret, pre_amt_regular, agi, rec)
     amt_credit_used, amt_credit_carry_out = _compute_amt_credit(ret, pre_amt_regular, amt, rec)
-    credits = ctc + ftc_used + amt_credit_used
+    credits = ctc + ftc_used + amt_credit_used + aotc_nonref + llc
 
     total_tax = (pre_amt_regular + amt + se_tax + addl_medicare + niit) - credits
     total_tax = max(ZERO, total_tax)
@@ -886,12 +1031,14 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         total_tax,
     )
 
-    payments = ret.federal_withholding + ret.estimated_payments
+    # Refundable credits are treated like payments on Form 1040.
+    payments = ret.federal_withholding + ret.estimated_payments + eitc + aotc_ref
     refund = payments - total_tax
     rec.add(
         "Refund (+) / owed (−)",
-        "withholding + estimated_payments − total_tax",
-        {"withholding": ret.federal_withholding, "estimated": ret.estimated_payments, "total_tax": total_tax},
+        "withholding + estimated_payments + EITC + AOTC_refundable − total_tax",
+        {"withholding": ret.federal_withholding, "estimated": ret.estimated_payments,
+         "eitc": eitc, "aotc_refundable": aotc_ref, "total_tax": total_tax},
         refund,
     )
 
@@ -935,6 +1082,10 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         passive_loss_disallowed=pal_carry,
         depreciation_current_year=_money(total_depreciation),
         depreciation_accumulated_out=accumulated_map,
+        eitc=eitc,
+        aotc_nonrefundable=aotc_nonref,
+        aotc_refundable=aotc_ref,
+        llc_credit=llc,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

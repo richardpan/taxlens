@@ -120,6 +120,13 @@ class Return(BaseModel):
     # Foreign taxes paid (for FTC) and itemized charitable already above.
     foreign_taxes_paid: Decimal = Decimal(0)
 
+    # Education credits (Form 8863).
+    #   - aotc_qualified_expenses: one entry per qualifying student (max 4),
+    #     each amount up to $4,000 used. Refundable portion = 40%.
+    #   - llc_qualified_expenses: aggregate per return (max $10,000 used).
+    aotc_qualified_expenses: list[Decimal] = Field(default_factory=list)
+    llc_qualified_expenses: Decimal = Decimal(0)
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -195,6 +202,10 @@ class TaxResult(BaseModel):
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
     depreciation_current_year: Decimal = Decimal(0)        # total MACRS deduction this year
     depreciation_accumulated_out: dict[str, Decimal] = Field(default_factory=dict)  # per-property running total
+    eitc: Decimal = Decimal(0)                             # Schedule EIC (refundable)
+    aotc_nonrefundable: Decimal = Decimal(0)               # Form 8863 line 19
+    aotc_refundable: Decimal = Decimal(0)                  # Form 8863 line 8 (40%)
+    llc_credit: Decimal = Decimal(0)                       # Form 8863 line 19 (LLC piece)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -244,6 +255,10 @@ class Rules(BaseModel):
     qbi: dict[str, Any] | None = None
     # 401(k) / IRA / HSA limits used by the Advisor.
     contribution_limits: dict[str, Any] | None = None
+    # EITC (Schedule EIC) parameters — optional, defaults to no-EITC if absent.
+    eitc: dict[str, Any] | None = None
+    # Education credits (Form 8863) — optional.
+    education_credits: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

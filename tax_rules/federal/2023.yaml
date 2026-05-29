@@ -143,3 +143,59 @@ contribution_limits:
     hoh:    153000
     qss:    228000
 
+# Earned Income Tax Credit (Schedule EIC). Refundable.
+# Source: Rev. Proc. 2022-38. MFS not allowed (we return 0).
+eitc:
+  investment_income_limit: 11000
+  parameters:
+    "0":
+      earned_income_amount: 7840
+      max_credit: 600
+      phaseout_rate: 0.0765
+      phaseout_start: 9800
+      phaseout_start_joint: 16370
+      completed_phaseout: 17640
+      completed_phaseout_joint: 24210
+    "1":
+      earned_income_amount: 11750
+      max_credit: 3995
+      phaseout_rate: 0.1598
+      phaseout_start: 21560
+      phaseout_start_joint: 28120
+      completed_phaseout: 46560
+      completed_phaseout_joint: 53120
+    "2":
+      earned_income_amount: 16510
+      max_credit: 6604
+      phaseout_rate: 0.2106
+      phaseout_start: 21560
+      phaseout_start_joint: 28120
+      completed_phaseout: 52918
+      completed_phaseout_joint: 59478
+    "3":
+      earned_income_amount: 16510
+      max_credit: 7430
+      phaseout_rate: 0.2106
+      phaseout_start: 21560
+      phaseout_start_joint: 28120
+      completed_phaseout: 56838
+      completed_phaseout_joint: 63398
+
+# Education credits (Form 8863). Same windows as TY 2024.
+education_credits:
+  aotc:
+    max_expenses_per_student: 4000
+    first_tier_rate: 1.00
+    first_tier_cap: 2000
+    second_tier_rate: 0.25
+    refundable_fraction: 0.40
+  llc:
+    rate: 0.20
+    expense_cap: 10000
+  phaseout:
+    single: [80000, 90000]
+    mfj:    [160000, 180000]
+    mfs:    [0, 0]
+    hoh:    [80000, 90000]
+    qss:    [160000, 180000]
+

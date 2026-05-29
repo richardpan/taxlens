@@ -301,6 +301,14 @@ async function renderYearDetail() {
     ['Additional Medicare', r.additional_medicare_tax],
     ['NIIT', r.niit],
     ['Credits', '-' + r.credits],
+    ...(Number(r.eitc || 0) > 0
+        ? [['Earned Income Tax Credit (refundable)', '-' + r.eitc]] : []),
+    ...(Number(r.aotc_refundable || 0) > 0
+        ? [['AOTC refundable portion (Form 8863)', '-' + r.aotc_refundable]] : []),
+    ...(Number(r.aotc_nonrefundable || 0) > 0
+        ? [['AOTC nonrefundable portion', '-' + r.aotc_nonrefundable]] : []),
+    ...(Number(r.llc_credit || 0) > 0
+        ? [['Lifetime Learning Credit', '-' + r.llc_credit]] : []),
     ['Total federal tax', r.total_tax],
     ...(Number(r.capital_loss_carryforward_out || 0) > 0
         ? [['Cap-loss carried to next year', r.capital_loss_carryforward_out]] : []),
