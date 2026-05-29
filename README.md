@@ -22,7 +22,8 @@ taxlens/
 - [x] Phase 2 — Import pipeline (PDF via pdfplumber, TXF, JSON/YAML manual)
 - [x] Phase 3 — SQLite persistence, FastAPI sidecar, single-page web UI
 - [x] Phase 4 — Multi-year dashboard, year detail, math view, what-if editor, compare view
-- [ ] Phase 5 (post-MVP) — More schedules (D, SE, 8959/8960 deep), OCR fallback for scanned PDFs, encrypted DB (SQLCipher), signed installers, CA state module
+- [x] Phase 5 (v0.2) — AMT (Form 6251), Schedule D 28%/25% worksheet, CA state module, at-rest DB encryption (Fernet), Electron desktop shell
+- [ ] v1.x — OCR fallback for scanned PDFs, signed installers, more states, Schedule E (rentals)
 
 See `tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
 
@@ -33,11 +34,22 @@ cd taxlens
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest                              # 27 tests, ~4s
+pytest                              # 39 tests, ~10s
 taxlens import path\to\1040.pdf     # also accepts .txf / .json / .yaml
 taxlens list
 taxlens serve                       # opens http://127.0.0.1:8765 in your browser
+taxlens lock                        # encrypt local DB with a passphrase
+taxlens unlock                      # decrypt; serve auto-prompts if locked
 ```
+
+### Desktop (Electron) shell
+
+```powershell
+cd desktop
+npm install
+npm start                           # spawns the sidecar + opens a native window
+```
+See `desktop/README.md`.
 
 The web UI has six screens: Import (drag-drop), Dashboard (multi-year), Year detail (waterfall + bracket fill), Show the math (audit trail), What-if editor (live recompute), Compare.
 

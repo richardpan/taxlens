@@ -95,8 +95,23 @@ def serve_cmd(
     host: str = "127.0.0.1",
     port: int = 8765,
     open_browser: bool = typer.Option(True, "--open/--no-open"),
+    passphrase: Optional[str] = typer.Option(
+        None, "--passphrase", "-p",
+        help="If the DB is locked, decrypt it with this passphrase before serving.",
+    ),
 ) -> None:
     """Run the local FastAPI server + web UI."""
+    from taxlens import secure_db
+    if secure_db.is_locked():
+        if not passphrase:
+            passphrase = typer.prompt("Passphrase", hide_input=True)
+        try:
+            secure_db.unlock(passphrase)
+            console.print("[green]✓ Database unlocked.[/]")
+        except ValueError as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(code=1)
+
     url = f"http://{host}:{port}/"
     if open_browser:
         try:
@@ -105,6 +120,34 @@ def serve_cmd(
             pass
     console.print(f"[green]TaxLens UI:[/] {url}")
     uvicorn.run("taxlens.api:app", host=host, port=port, log_level="info")
+
+
+@app.command("lock")
+def lock_cmd(
+    passphrase: Optional[str] = typer.Option(None, "--passphrase", "-p"),
+) -> None:
+    """Encrypt the local SQLite DB at rest."""
+    from taxlens import secure_db
+    if not passphrase:
+        passphrase = typer.prompt("New passphrase", hide_input=True, confirmation_prompt=True)
+    blob = secure_db.lock(passphrase)
+    console.print(f"[green]✓ Locked[/] → {blob}")
+
+
+@app.command("unlock")
+def unlock_cmd(
+    passphrase: Optional[str] = typer.Option(None, "--passphrase", "-p"),
+) -> None:
+    """Decrypt the local SQLite DB."""
+    from taxlens import secure_db
+    if not passphrase:
+        passphrase = typer.prompt("Passphrase", hide_input=True)
+    try:
+        plain = secure_db.unlock(passphrase)
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]✓ Unlocked[/] → {plain}")
 
 
 if __name__ == "__main__":

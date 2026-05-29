@@ -1,0 +1,29 @@
+{
+  "name": "taxlens-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Electron shell that hosts the TaxLens local sidecar + web UI.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "author": "Richard Pan",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.richardpan.taxlens",
+    "productName": "TaxLens",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": { "target": ["nsis"] },
+    "mac": { "target": ["dmg"] },
+    "linux": { "target": ["AppImage"] }
+  }
+}

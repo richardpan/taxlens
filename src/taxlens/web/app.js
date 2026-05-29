@@ -220,15 +220,19 @@ function drawTaxDonut(full) {
   const data = [
     ['Ordinary income', Number(r.ordinary_tax)],
     ['Qualified inc.',  Number(r.qualified_tax)],
+    ['Collectibles',    Number(r.collectibles_tax || 0)],
+    ['Unrecap. §1250',  Number(r.unrecaptured_1250_tax || 0)],
+    ['AMT',             Number(r.amt || 0)],
     ['SE tax',          Number(r.se_tax)],
     ['Add\'l Medicare', Number(r.additional_medicare_tax)],
     ['NIIT',            Number(r.niit)],
+    ['State',           Number(r.state_result ? r.state_result.state_tax : 0)],
   ].filter(([_, v]) => v > 0);
   recreate('taxDonut', {
     type: 'doughnut',
     data: { labels: data.map(d => d[0]), datasets: [{
       data: data.map(d => d[1]),
-      backgroundColor: ['#0f172a','#60a5fa','#f472b6','#fbbf24','#a78bfa']
+      backgroundColor: ['#0f172a','#60a5fa','#f97316','#10b981','#ef4444','#f472b6','#fbbf24','#a78bfa','#14b8a6']
     }]},
     options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }
   });
@@ -287,11 +291,15 @@ async function renderYearDetail() {
   $('#taxBreakdown').innerHTML = [
     ['Ordinary income tax', r.ordinary_tax],
     ['Qualified income tax', r.qualified_tax],
+    ['Collectibles tax (28% cap)', r.collectibles_tax || '0'],
+    ['Unrecaptured §1250 tax (25% cap)', r.unrecaptured_1250_tax || '0'],
+    ['AMT (Form 6251)', r.amt || '0'],
     ['SE tax', r.se_tax],
     ['Additional Medicare', r.additional_medicare_tax],
     ['NIIT', r.niit],
     ['Credits', '-' + r.credits],
-    ['Total tax', r.total_tax],
+    ['Total federal tax', r.total_tax],
+    ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
     ['Withholding + estimated', String(Number(ret.federal_withholding) + Number(ret.estimated_payments))],
     ['Refund/owed', r.refund_or_owed],
   ].map(([k,v]) => `<div class="border border-slate-200 rounded-lg p-3">
@@ -399,6 +407,9 @@ async function renderCompare() {
     ['Taxable income',           L.result.taxable_income,           R.result.taxable_income],
     ['Ordinary tax',             L.result.ordinary_tax,             R.result.ordinary_tax],
     ['Qualified tax',            L.result.qualified_tax,            R.result.qualified_tax],
+    ['Collectibles tax',         L.result.collectibles_tax || 0,    R.result.collectibles_tax || 0],
+    ['Unrecap. §1250 tax',       L.result.unrecaptured_1250_tax || 0, R.result.unrecaptured_1250_tax || 0],
+    ['AMT',                      L.result.amt || 0,                 R.result.amt || 0],
     ['SE tax',                   L.result.se_tax,                   R.result.se_tax],
     ['NIIT',                     L.result.niit,                     R.result.niit],
     ['Credits',                  L.result.credits,                  R.result.credits],
