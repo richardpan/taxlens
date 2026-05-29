@@ -2,6 +2,27 @@
 
 All notable changes to TaxLens.
 
+## [0.13.0] — 2026
+
+### Added — multi-year trend visualizations
+
+The **Trends** tab now includes two new sections in addition to the
+existing AGI/tax line chart, effective-vs-marginal rate chart, and
+income-composition stacked bars:
+
+- **Tax composition by year** — stacked bars breaking out what drives
+  total tax each year: ordinary + qualified tax, AMT add-on, SE tax,
+  NIIT (3.8%), Additional Medicare (0.9%), excess APTC repayment.
+- **Year-over-year change table** — side-by-side metrics across all
+  imported years with per-step deltas (AGI, taxable income, total
+  tax, effective rate in percentage points, refund/owed, wages, LTCG,
+  total credits). Increases in tax are red, decreases green.
+
+### Housekeeping
+
+- **httpx2 added to dev dependencies** to clear the Starlette
+  TestClient deprecation warning. No production dependency change.
+
 ## [0.12.0] — 2026
 
 ### Added — 8 more state YAMLs (21 states total)

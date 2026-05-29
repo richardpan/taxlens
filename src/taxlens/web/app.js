@@ -644,6 +644,8 @@ async function renderTrends() {
       '<text x="20" y="40" font-size="14" fill="#94a3b8">Import returns to see trends.</text>';
     document.getElementById('trendsRates').innerHTML = '';
     document.getElementById('trendsStack').innerHTML = '';
+    document.getElementById('trendsTaxStack').innerHTML = '';
+    document.getElementById('trendsYoyTable').innerHTML = '';
     return;
   }
   const fulls = await Promise.all(RETURNS.map(r => loadFull(r.id)));
@@ -683,6 +685,52 @@ async function renderTrends() {
     data: fulls.map(f => Math.max(0, Number(f.return[b.key] || 0))),
   }));
   drawStackedBars('trendsStack', years, series);
+
+  // Stacked tax composition (positive = tax owed pieces; reflects what drove total_tax)
+  const taxBuckets = [
+    { key: 'tax_before_credits',      label: 'Ordinary + qual',    color: '#0ea5e9' },
+    { key: 'amt_tax',                 label: 'AMT add-on',         color: '#f59e0b' },
+    { key: 'self_employment_tax',     label: 'SE tax',             color: '#ec4899' },
+    { key: 'niit',                    label: 'NIIT 3.8%',          color: '#a855f7' },
+    { key: 'additional_medicare_tax', label: 'Addl Medicare',      color: '#f97316' },
+    { key: 'ptc_excess_aptc_repayment', label: 'Excess APTC',      color: '#dc2626' },
+  ];
+  const taxSeries = taxBuckets.map(b => ({
+    label: b.label,
+    color: b.color,
+    data: fulls.map(f => Math.max(0, Number(f.result[b.key] || 0))),
+  }));
+  drawStackedBars('trendsTaxStack', years, taxSeries);
+
+  // YoY delta table
+  const yoyRows = [
+    { label: 'AGI',           pick: f => Number(f.result.agi) },
+    { label: 'Taxable income',pick: f => Number(f.result.taxable_income) },
+    { label: 'Total tax',     pick: f => Number(f.result.total_tax) },
+    { label: 'Effective rate',pick: f => { const a = Number(f.result.agi) || 1; return Number(f.result.total_tax) / a * 100; }, isPct: true },
+    { label: 'Refund / owed', pick: f => Number(f.result.refund_or_owed) },
+    { label: 'Wages',         pick: f => Number(f.return.wages || 0) },
+    { label: 'Cap gains (LT)',pick: f => Number(f.return.long_term_capital_gains || 0) },
+    { label: 'Credits',       pick: f => Number(f.result.credits || 0) },
+  ];
+  const head = '<tr class="text-slate-500"><th class="text-left py-1 pr-3">Metric</th>' +
+    years.map(y => `<th class="text-right pr-3">${y}</th>`).join('') +
+    years.slice(1).map((y, i) => `<th class="text-right pr-3">Δ ${years[i]}→${y}</th>`).join('') +
+    '</tr>';
+  const body = yoyRows.map(row => {
+    const vals = fulls.map(row.pick);
+    const cells = vals.map(v => `<td class="text-right pr-3">${row.isPct ? v.toFixed(2)+'%' : fmt(v)}</td>`);
+    const deltas = vals.slice(1).map((v, i) => {
+      const d = v - vals[i];
+      const cls = d > 0 ? 'text-rose-600' : d < 0 ? 'text-emerald-600' : 'text-slate-400';
+      const sign = d > 0 ? '+' : '';
+      const txt = row.isPct ? `${sign}${d.toFixed(2)} pp` : `${sign}${fmt(d)}`;
+      return `<td class="text-right pr-3 ${cls}">${txt}</td>`;
+    });
+    return `<tr class="border-t border-slate-100"><td class="py-1 pr-3 font-medium">${row.label}</td>${cells.join('')}${deltas.join('')}</tr>`;
+  }).join('');
+  document.getElementById('trendsYoyTable').innerHTML =
+    `<table class="w-full"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 function drawLineChart(svgId, xs, series, opts = {}) {
