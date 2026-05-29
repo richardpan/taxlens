@@ -2,6 +2,27 @@
 
 All notable changes to TaxLens.
 
+## [0.5.0] — 2026
+
+### Added
+- **Multi-year capital-loss carryforward** — when consecutive years are
+  imported, §1212(b) losses now flow forward automatically. Each return
+  surfaces `capital_loss_carryforward_out`, and the service re-flows the
+  chain on every import (resets on year gaps >1).
+- **NYC and Yonkers locality income tax** — set `locality: "NYC"` or
+  `"YONKERS"` on a NY return. NYC uses its own bracket table; Yonkers
+  applies the 16.75% resident surcharge to NY state tax. Locality tax is
+  added to `state_result.state_tax` and broken out in
+  `state_result.locality_tax`.
+- **5 more state YAMLs (2024)**: Massachusetts (5% + 4% millionaire surtax),
+  Oregon (graduated to 9.9%), New Jersey (8-bracket graduated to 10.75%),
+  Virginia (graduated to 5.75%), Georgia (flat 5.39%).
+- **Trends tab** in the web UI — three new visualizations: AGI vs total
+  tax over time, effective vs marginal rate, and stacked income
+  composition by year. Pure SVG, no chart library dependency.
+- 10 new tests covering carryforward chaining, NYC/Yonkers, and the new
+  state YAMLs. **88 tests total, all passing.**
+
 ## [0.4.0] — 2026
 
 ### Added

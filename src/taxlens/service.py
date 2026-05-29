@@ -77,7 +77,38 @@ class TaxLensService:
             s.add(row)
             s.commit()
             s.refresh(row)
+            # After any import, recompute the carryforward chain so the new
+            # return inherits prior-year losses (and propagates its own).
+            self._reflow_carryforwards()
             return row, result, imp.warnings
+
+    # ── multi-year carryforward chain ────────────────────────────────────────
+
+    def _reflow_carryforwards(self) -> None:
+        """Recompute every stored return in tax-year order, threading capital-loss
+        carryforward from each year into the next. Idempotent."""
+        with self.sessionmaker_() as s:
+            rows = s.execute(
+                select(StoredReturn).order_by(StoredReturn.tax_year, StoredReturn.imported_at)
+            ).scalars().all()
+            carry_in = Decimal("0")
+            prev_year: int | None = None
+            for row in rows:
+                # Only carry across consecutive years; reset on gaps.
+                if prev_year is not None and row.tax_year - prev_year > 1:
+                    carry_in = Decimal("0")
+                data = json.loads(row.return_json)
+                data["capital_loss_carryforward_in"] = str(carry_in)
+                ret = Return(**self._decimalize(data))
+                result = compute(ret)
+                row.return_json = dumps(ret.model_dump(mode="json"))
+                if row.cache is None:
+                    row.cache = ComputationCache(result_json=dumps(result.model_dump(mode="json")))
+                else:
+                    row.cache.result_json = dumps(result.model_dump(mode="json"))
+                carry_in = result.capital_loss_carryforward_out or Decimal("0")
+                prev_year = row.tax_year
+            s.commit()
 
     # ── query ────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,42 @@
+# Oregon personal income tax — TY 2024.
+# Source: Oregon Form OR-40 instructions, ORS 316.037.
+# Graduated brackets; LTCG taxed as ordinary income (no preferential rate).
+# The "kicker" credit is not modeled (it's a credit applied in subsequent
+# filing years when state revenue exceeds projections).
+
+state: OR
+year: 2024
+
+standard_deduction:
+  single: 2745
+  mfj:    5495
+  mfs:    2745
+  hoh:    4420
+  qss:    5495
+
+ordinary_brackets:
+  single:
+    - [0,     0.0475]
+    - [4300,  0.0675]
+    - [10750, 0.0875]
+    - [125000, 0.099]
+  mfj:
+    - [0,     0.0475]
+    - [8600,  0.0675]
+    - [21500, 0.0875]
+    - [250000, 0.099]
+  mfs:
+    - [0,     0.0475]
+    - [4300,  0.0675]
+    - [10750, 0.0875]
+    - [125000, 0.099]
+  hoh:
+    - [0,     0.0475]
+    - [8600,  0.0675]
+    - [21500, 0.0875]
+    - [250000, 0.099]
+  qss:
+    - [0,     0.0475]
+    - [8600,  0.0675]
+    - [21500, 0.0875]
+    - [250000, 0.099]

@@ -18,6 +18,7 @@ function showTab(name) {
   else if (name === 'compare')  renderCompare();
   else if (name === 'advisor')  renderAdvisor();
   else if (name === 'plan')     renderPlan();
+  else if (name === 'trends')   renderTrends();
 }
 window.showTab = showTab;
 
@@ -603,3 +604,130 @@ const _rothBtn = document.getElementById('rothRun');
 if (_rothBtn) _rothBtn.addEventListener('click', runRoth);
 const _tlhBtn = document.getElementById('tlhRun');
 if (_tlhBtn) _tlhBtn.addEventListener('click', runTLH);
+
+// ─── Trends ─────────────────────────────────────────────────────────────────
+async function renderTrends() {
+  if (RETURNS.length === 0) {
+    document.getElementById('trendsAgiTax').innerHTML =
+      '<text x="20" y="40" font-size="14" fill="#94a3b8">Import returns to see trends.</text>';
+    document.getElementById('trendsRates').innerHTML = '';
+    document.getElementById('trendsStack').innerHTML = '';
+    return;
+  }
+  const fulls = await Promise.all(RETURNS.map(r => loadFull(r.id)));
+  const years = fulls.map(f => f.return.tax_year);
+
+  const agi = fulls.map(f => Number(f.result.agi));
+  const tax = fulls.map(f => Number(f.result.total_tax));
+  drawLineChart('trendsAgiTax', years, [
+    { label: 'AGI',       data: agi, color: '#0ea5e9' },
+    { label: 'Total tax', data: tax, color: '#ef4444' },
+  ], { yfmt: fmt });
+
+  const eff = fulls.map(f => {
+    const a = Number(f.result.agi) || 1;
+    return Number(f.result.total_tax) / a * 100;
+  });
+  const marg = fulls.map(f => Number(f.result.marginal_rate || 0) * 100);
+  drawLineChart('trendsRates', years, [
+    { label: 'Effective %', data: eff,  color: '#0ea5e9' },
+    { label: 'Marginal %',  data: marg, color: '#f59e0b' },
+  ], { yfmt: v => v.toFixed(1) + '%' });
+
+  // Stacked income composition
+  const buckets = [
+    { key: 'wages',                     label: 'Wages',       color: '#0ea5e9' },
+    { key: 'interest_income',           label: 'Interest',    color: '#22c55e' },
+    { key: 'ordinary_dividends',        label: 'Div (ord)',   color: '#84cc16' },
+    { key: 'qualified_dividends',       label: 'Div (qual)',  color: '#10b981' },
+    { key: 'short_term_capital_gains',  label: 'STCG',        color: '#f97316' },
+    { key: 'long_term_capital_gains',   label: 'LTCG',        color: '#a855f7' },
+    { key: 'self_employment_income',    label: 'SE',          color: '#ec4899' },
+    { key: 'rental_real_estate_income', label: 'Rental',      color: '#14b8a6' },
+  ];
+  const series = buckets.map(b => ({
+    label: b.label,
+    color: b.color,
+    data: fulls.map(f => Math.max(0, Number(f.return[b.key] || 0))),
+  }));
+  drawStackedBars('trendsStack', years, series);
+}
+
+function drawLineChart(svgId, xs, series, opts = {}) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const W = 600, H = 280, P = { l: 60, r: 20, t: 20, b: 40 };
+  const innerW = W - P.l - P.r, innerH = H - P.t - P.b;
+  const all = series.flatMap(s => s.data);
+  const ymin = Math.min(0, ...all);
+  const ymax = Math.max(...all, 1);
+  const xpos = i => P.l + (xs.length === 1 ? innerW / 2 : (i / (xs.length - 1)) * innerW);
+  const ypos = v => P.t + innerH - ((v - ymin) / (ymax - ymin)) * innerH;
+  const yfmt = opts.yfmt || (v => String(v));
+  let html = '';
+  // Y gridlines
+  for (let i = 0; i <= 4; i++) {
+    const v = ymin + (ymax - ymin) * (i / 4);
+    const y = ypos(v);
+    html += `<line x1="${P.l}" y1="${y}" x2="${W - P.r}" y2="${y}" stroke="#e2e8f0"/>`;
+    html += `<text x="${P.l - 6}" y="${y + 4}" font-size="10" fill="#64748b" text-anchor="end">${yfmt(v)}</text>`;
+  }
+  // X labels
+  xs.forEach((x, i) => {
+    html += `<text x="${xpos(i)}" y="${H - P.b + 16}" font-size="11" fill="#475569" text-anchor="middle">${x}</text>`;
+  });
+  // Lines
+  series.forEach(s => {
+    const d = s.data.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xpos(i)} ${ypos(v)}`).join(' ');
+    html += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+    s.data.forEach((v, i) => {
+      html += `<circle cx="${xpos(i)}" cy="${ypos(v)}" r="3" fill="${s.color}"/>`;
+    });
+  });
+  // Legend
+  series.forEach((s, i) => {
+    const x = P.l + i * 140, y = P.t - 4;
+    html += `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}"/>`;
+    html += `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155">${s.label}</text>`;
+  });
+  svg.innerHTML = html;
+}
+
+function drawStackedBars(svgId, xs, series) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const W = 800, H = 320, P = { l: 70, r: 140, t: 20, b: 40 };
+  const innerW = W - P.l - P.r, innerH = H - P.t - P.b;
+  const totals = xs.map((_, i) => series.reduce((s, ser) => s + (ser.data[i] || 0), 0));
+  const ymax = Math.max(1, ...totals);
+  const barW = innerW / Math.max(xs.length, 1) * 0.6;
+  const slot  = innerW / Math.max(xs.length, 1);
+  const ypos = v => P.t + innerH - (v / ymax) * innerH;
+  let html = '';
+  // Y gridlines
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * (i / 4);
+    const y = ypos(v);
+    html += `<line x1="${P.l}" y1="${y}" x2="${W - P.r}" y2="${y}" stroke="#e2e8f0"/>`;
+    html += `<text x="${P.l - 6}" y="${y + 4}" font-size="10" fill="#64748b" text-anchor="end">${fmt(v)}</text>`;
+  }
+  xs.forEach((x, i) => {
+    const cx = P.l + slot * (i + 0.5);
+    let acc = 0;
+    series.forEach(s => {
+      const v = s.data[i] || 0;
+      if (v <= 0) return;
+      const y0 = ypos(acc + v), y1 = ypos(acc);
+      html += `<rect x="${cx - barW / 2}" y="${y0}" width="${barW}" height="${Math.max(0, y1 - y0)}" fill="${s.color}"><title>${s.label}: ${fmt(v)}</title></rect>`;
+      acc += v;
+    });
+    html += `<text x="${cx}" y="${H - P.b + 16}" font-size="11" fill="#475569" text-anchor="middle">${x}</text>`;
+  });
+  // Legend
+  series.forEach((s, i) => {
+    const x = W - P.r + 10, y = P.t + i * 18;
+    html += `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}"/>`;
+    html += `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155">${s.label}</text>`;
+  });
+  svg.innerHTML = html;
+}

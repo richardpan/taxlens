@@ -1,0 +1,23 @@
+# Georgia individual income tax — TY 2024.
+# Source: GA Form 500 instructions, O.C.G.A. §48-7-20.
+# 2024: flat 5.39% under HB 1015 (down from 5.49% in 2023).
+# LTCG taxed as ordinary income.
+
+state: GA
+year: 2024
+notes: |
+  Flat 5.39% for TY 2024 (further reductions scheduled in future years).
+
+standard_deduction:
+  single: 12000
+  mfj:    24000
+  mfs:    12000
+  hoh:    12000
+  qss:    24000
+
+ordinary_brackets:
+  single: [[0, 0.0539]]
+  mfj:    [[0, 0.0539]]
+  mfs:    [[0, 0.0539]]
+  hoh:    [[0, 0.0539]]
+  qss:    [[0, 0.0539]]

@@ -21,7 +21,7 @@ from taxlens.models import (
     StateRules,
     TaxResult,
 )
-from taxlens.rules import load_rules, load_state_rules
+from taxlens.rules import load_rules, load_state_rules, load_locality_rules
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
@@ -204,20 +204,33 @@ def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Deci
     return se_tax_rounded, _money(deductible)
 
 
-def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _StepRecorder) -> Decimal:
+def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _StepRecorder) -> tuple[Decimal, Decimal]:
+    """Returns (AGI, capital_loss_carryforward_out)."""
     # Net capital gain/loss with the §1211(b) $3,000 ordinary-income cap on
-    # net losses. Excess carries forward indefinitely (not yet modeled).
+    # net losses. Excess carries forward indefinitely (§1212(b)).
     raw_cap = (
         ret.long_term_capital_gains + ret.k1_long_term_gains
         + ret.short_term_capital_gains + ret.k1_short_term_gains
     )
+    # Apply prior-year carryforward (treated as additional LT loss for simplicity).
+    carryforward_in = ret.capital_loss_carryforward_in or ZERO
+    if carryforward_in > 0:
+        raw_cap = raw_cap - carryforward_in
+        rec.add(
+            "Apply prior-year capital-loss carryforward",
+            "raw_cap − carryforward_in",
+            {"carryforward_in": carryforward_in},
+            raw_cap,
+        )
+
+    carryforward_out = ZERO
     if raw_cap < Decimal("-3000"):
         net_cap = Decimal("-3000")
-        carryforward = raw_cap - net_cap
+        carryforward_out = -(raw_cap - net_cap)  # positive
         rec.add(
             "Capital loss limitation (§1211(b))",
-            "net loss capped at -$3,000 against ordinary income; excess carries forward",
-            {"raw_cap": raw_cap, "carryforward": carryforward},
+            "net loss capped at -$3,000; excess carries forward (§1212(b))",
+            {"raw_cap": raw_cap, "carryforward_out": carryforward_out},
             net_cap,
         )
     else:
@@ -266,7 +279,8 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _St
         adjustments,
     )
     agi = gross - adjustments
-    return rec.add("AGI", "gross − adjustments", {"gross": gross, "adjustments": adjustments}, agi)
+    rec.add("AGI", "gross − adjustments", {"gross": gross, "adjustments": adjustments}, agi)
+    return agi, carryforward_out
 
 
 def _compute_taxable_income(
@@ -560,6 +574,32 @@ def _compute_state_with(ret: Return, agi: Decimal, srules: StateRules) -> StateR
                 cg_tax,
             )
 
+    # Optional locality (NYC, Yonkers) layered on top of state tax.
+    locality_tax = ZERO
+    locality_name: str | None = None
+    if ret.locality:
+        loc = load_locality_rules(ret.locality, ret.tax_year)
+        locality_name = str(loc.get("locality", ret.locality)).upper()
+        if loc.get("surcharge_of_state_tax"):
+            rate = Decimal(loc["surcharge_of_state_tax"])
+            locality_tax = tax * rate
+            rec.add(
+                f"{locality_name} surcharge",
+                f"state_tax × {rate}",
+                {"state_tax": tax, "rate": rate},
+                locality_tax,
+            )
+        elif loc.get("ordinary_brackets"):
+            loc_brackets = loc["ordinary_brackets"][status]
+            locality_tax, loc_fills = walk_brackets(taxable, loc_brackets)
+            rec.add(
+                f"{locality_name} income tax",
+                "bracket walk on state taxable income",
+                {"taxable": taxable, "brackets": len(loc_fills)},
+                locality_tax,
+            )
+        tax = tax + locality_tax
+
     return StateResult(
         state=srules.state,
         state_agi=_money(state_agi),
@@ -567,6 +607,8 @@ def _compute_state_with(ret: Return, agi: Decimal, srules: StateRules) -> StateR
         state_tax=_money(tax),
         state_bracket_fills=fills,
         steps=rec.steps,
+        locality=locality_name,
+        locality_tax=_money(locality_tax),
     )
 
 
@@ -653,7 +695,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
     sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
-    agi = _compute_agi(ret, half_se_tax, sch_e_net, rec)
+    agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rec)
     taxable_pre_qbi, deduction, deduction_kind = _compute_taxable_income(ret, agi, rules, rec)
     qbi_ded = _compute_qbi(ret, taxable_pre_qbi, rules, rec)
     taxable = max(ZERO, taxable_pre_qbi - qbi_ded)
@@ -731,6 +773,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         qbi_deduction=qbi_ded,
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,
+        capital_loss_carryforward_out=_money(capital_loss_carry_out),
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )

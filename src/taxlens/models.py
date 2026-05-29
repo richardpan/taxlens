@@ -71,6 +71,10 @@ class Return(BaseModel):
     # ISO exercise (bargain element) — feeds AMT preferences & the advisor
     iso_bargain_element: Decimal = Decimal(0)
 
+    # Multi-year capital-loss carryforward (§1212(b)). Set by the user (or auto-
+    # computed by the service from a prior year's TaxResult.capital_loss_carryforward_out).
+    capital_loss_carryforward_in: Decimal = Decimal(0)   # positive number = available loss
+
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
@@ -84,6 +88,8 @@ class Return(BaseModel):
 
     # State (optional). When set, the engine also produces a `state_result` slot.
     state: str | None = None                     # ISO-3166-2 subdivision, e.g. "CA"
+    # Optional sub-state locality (currently: NYC, YONKERS). Layered on top of state.
+    locality: str | None = None
 
     # Withholding & estimated payments (for refund/owed calc)
     federal_withholding: Decimal = Decimal(0)
@@ -142,6 +148,7 @@ class TaxResult(BaseModel):
     qbi_deduction: Decimal = Decimal(0)           # Form 8995 / 8995-A
     schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
+    capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     credits: Decimal
     total_tax: Decimal
 
@@ -198,6 +205,9 @@ class StateResult(BaseModel):
     state_tax: Decimal
     state_bracket_fills: list[BracketFill]
     steps: list[ComputationStep]
+    # Optional locality (NYC, Yonkers) on top of state tax.
+    locality: str | None = None
+    locality_tax: Decimal = Decimal(0)
 
 
 class StateRules(BaseModel):

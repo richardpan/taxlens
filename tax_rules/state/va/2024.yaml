@@ -1,0 +1,40 @@
+# Virginia individual income tax — TY 2024.
+# Source: Virginia Form 760 instructions, Va. Code §58.1-320.
+# LTCG taxed as ordinary income. Top bracket is 5.75% over $17,000.
+
+state: VA
+year: 2024
+
+standard_deduction:
+  single: 8500
+  mfj:    17000
+  mfs:    8500
+  hoh:    8500
+  qss:    17000
+
+ordinary_brackets:
+  single:
+    - [0,     0.02]
+    - [3000,  0.03]
+    - [5000,  0.05]
+    - [17000, 0.0575]
+  mfj:
+    - [0,     0.02]
+    - [3000,  0.03]
+    - [5000,  0.05]
+    - [17000, 0.0575]
+  mfs:
+    - [0,     0.02]
+    - [3000,  0.03]
+    - [5000,  0.05]
+    - [17000, 0.0575]
+  hoh:
+    - [0,     0.02]
+    - [3000,  0.03]
+    - [5000,  0.05]
+    - [17000, 0.0575]
+  qss:
+    - [0,     0.02]
+    - [3000,  0.03]
+    - [5000,  0.05]
+    - [17000, 0.0575]

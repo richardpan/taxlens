@@ -75,3 +75,27 @@ def load_state_rules(state: str, year: int, rules_dir: Path | None = None) -> "S
                 for status, brackets in raw[key].items()
             }
     return StateRules(**raw)
+
+
+LOCALITY_RULES_DIR = _REPO_ROOT / "tax_rules" / "locality"
+
+
+@lru_cache(maxsize=None)
+def load_locality_rules(locality: str, year: int, rules_dir: Path | None = None) -> dict:
+    """Load `tax_rules/locality/{locality}/{year}.yaml`. Returns a raw dict
+    (locality rules vary widely; no shared Pydantic model yet)."""
+    base = rules_dir or LOCALITY_RULES_DIR
+    path = base / locality.lower() / f"{year}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No {locality} locality rules for {year} (looked at {path})."
+        )
+    with path.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+    raw = _to_decimal(raw)
+    if "ordinary_brackets" in raw and raw["ordinary_brackets"]:
+        raw["ordinary_brackets"] = {
+            status: [(Decimal(low), Decimal(rate)) for low, rate in brackets]
+            for status, brackets in raw["ordinary_brackets"].items()
+        }
+    return raw

@@ -31,6 +31,7 @@
       <button data-tab="compare"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Compare</button>
       <button data-tab="advisor"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Advisor ✨</button>
       <button data-tab="plan"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Planner</button>
+      <button data-tab="trends"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">Trends 📈</button>
     </nav>
     <div class="text-xs text-slate-500">PDFs never leave this machine</div>
   </div>
@@ -227,10 +228,31 @@
   </div>
 </section>
 
+<section id="tab-trends" class="tab-panel hidden">
+  <div class="flex items-baseline justify-between mb-4">
+    <h2 class="text-xl font-semibold">Trends · multi-year</h2>
+    <div class="text-xs text-slate-500">All figures from currently-imported returns.</div>
+  </div>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="font-semibold mb-2">AGI &amp; Total Tax</div>
+      <svg id="trendsAgiTax" viewBox="0 0 600 280" class="w-full h-64"></svg>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="font-semibold mb-2">Effective vs Marginal Rate</div>
+      <svg id="trendsRates" viewBox="0 0 600 280" class="w-full h-64"></svg>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
+      <div class="font-semibold mb-2">Income composition by year</div>
+      <svg id="trendsStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.4.0
+  TaxLens · local-first · v0.5.0
 </footer>
 
 <script src="/static/app.js"></script>
