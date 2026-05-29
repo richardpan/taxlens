@@ -817,6 +817,38 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     rec = _StepRecorder()
 
+    # ── Schedule E MACRS depreciation (Form 4562) ──
+    # Compute per-property MACRS depreciation and any disposition gain/recapture,
+    # then fold the results into an "effective" Return that downstream stages see.
+    from .depreciation import compute_all as _dep_compute_all
+    prop_results = _dep_compute_all(ret.rental_properties, ret.tax_year)
+    total_depreciation = sum((p.current_year_deduction for p in prop_results), ZERO)
+    total_recapture_1250 = sum((p.sale_recapture_1250 for p in prop_results), ZERO)
+    total_excess_ltcg = sum(
+        (max(ZERO, p.sale_total_gain - p.sale_recapture_1250) for p in prop_results), ZERO
+    )
+    accumulated_map = {p.property_id: p.accumulated_after for p in prop_results}
+
+    if prop_results and (total_depreciation or total_recapture_1250 or total_excess_ltcg):
+        rec.add(
+            "MACRS depreciation (Form 4562) + §1250 recapture on disposition",
+            "Σ per-property mid-month SL deduction; sale gain → unrecaptured §1250 (25%) + LTCG excess",
+            {
+                "properties": len(ret.rental_properties),
+                "current_year_dep": total_depreciation,
+                "recapture_1250": total_recapture_1250,
+                "ltcg_excess": total_excess_ltcg,
+            },
+            total_depreciation,
+        )
+
+    if total_depreciation or total_recapture_1250 or total_excess_ltcg:
+        ret = ret.model_copy(update={
+            "rental_net_income": ret.rental_net_income - total_depreciation,
+            "unrecaptured_1250_gains": ret.unrecaptured_1250_gains + total_recapture_1250,
+            "long_term_capital_gains": ret.long_term_capital_gains + total_excess_ltcg,
+        })
+
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
     sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rec)
@@ -901,6 +933,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         qbi_deduction=qbi_ded,
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,
+        depreciation_current_year=_money(total_depreciation),
+        depreciation_accumulated_out=accumulated_map,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

@@ -2,6 +2,45 @@
 
 All notable changes to TaxLens.
 
+## [0.9.0] — 2026
+
+### Added — Schedule E MACRS depreciation (Form 4562)
+TaxLens now does per-property depreciation for rental real-estate. Each
+`RentalProperty` carries cost basis (land excluded), property type,
+in-service year/month, and prior accumulated depreciation. The engine:
+
+- Computes current-year **straight-line mid-month** depreciation for
+  **residential** (27.5y) and **nonresidential** (39y) real property.
+- Supports **5-year** (appliances, 200%DB→SL) and **15-year** (land
+  improvements, 150%DB→SL) personal-property classes via the exact
+  Rev. Proc. 87-57 half-year-convention tables.
+- Subtracts depreciation from `rental_net_income` **before** the Form 8582
+  passive-loss logic — so depreciation losses can be absorbed by the
+  $25k active-participation allowance.
+- On disposal (`disposed_year` == tax_year), prorates the exit-year
+  deduction mid-month, computes total realized gain, and routes the
+  accumulated-depreciation portion into **unrecaptured §1250 gain**
+  (taxed at the 25% cap rate via the existing Sch D worksheet stack);
+  any excess flows into long-term capital gains.
+- Threads per-property `prior_accumulated_depreciation` across years in
+  the service-level carryforward reflow (just like NOL/PAL/etc).
+
+### Added — new `TaxResult` fields
+- `depreciation_current_year` — total MACRS deduction this year
+- `depreciation_accumulated_out` — per-property accumulated total, used
+  by the next year's reflow to update each property's prior accumulated
+  depreciation automatically.
+
+### UI
+- New "MACRS depreciation (Form 4562)" card on the Year detail page,
+  shown only when non-zero.
+
+### Tests
+- 132 passing (was 122). 10 new tests cover residential mid-month
+  (Jan / Jul edges, full middle year), nonresidential 39y, the 5-year
+  HY table (years 0 and 1), disposal recapture math, and engine
+  integration for single property / multiple properties / no-op.
+
 ## [0.8.0] — 2026
 
 ### Added — realistic multi-page PDF golden fixtures

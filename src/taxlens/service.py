@@ -111,13 +111,23 @@ class TaxLensService:
                 select(StoredReturn).order_by(StoredReturn.tax_year, StoredReturn.imported_at)
             ).scalars().all()
             carry_state: dict[str, Decimal] = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
+            # Per-property accumulated depreciation, keyed by property id, threaded
+            # forward across years like the scalar carryforwards above.
+            prop_accum: dict[str, Decimal] = {}
             prev_year: int | None = None
             for row in rows:
                 if prev_year is not None and row.tax_year - prev_year > 1:
                     carry_state = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
+                    prop_accum = {}
                 data = json.loads(row.return_json)
                 for in_k, _ in carryforward_keys:
                     data[in_k] = str(carry_state[in_k])
+                # Update prior_accumulated_depreciation on each rental property
+                # from the running per-property accumulator.
+                for p in data.get("rental_properties", []) or []:
+                    pid = p.get("id")
+                    if pid and pid in prop_accum:
+                        p["prior_accumulated_depreciation"] = str(prop_accum[pid])
                 ret = Return(**self._decimalize(data))
                 result = compute(ret)
                 row.return_json = dumps(ret.model_dump(mode="json"))
@@ -128,6 +138,8 @@ class TaxLensService:
                 # Propagate each chain forward.
                 for in_k, out_k in carryforward_keys:
                     carry_state[in_k] = getattr(result, out_k, None) or Decimal("0")
+                for pid, accum in (result.depreciation_accumulated_out or {}).items():
+                    prop_accum[pid] = Decimal(str(accum))
                 prev_year = row.tax_year
             s.commit()
 

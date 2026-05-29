@@ -20,6 +20,33 @@ class FilingStatus(str, Enum):
     QSS = "qss"     # qualifying surviving spouse
 
 
+class RentalProperty(BaseModel):
+    """One Schedule E rental real-estate property with MACRS depreciation.
+
+    Land basis must be excluded from `cost_basis` (land is not depreciable).
+    We support the two big real-property classes (mid-month SL):
+      - "residential"     → 27.5-year straight-line
+      - "nonresidential"  → 39-year straight-line
+    Personal-property classes (5y appliances, 15y land improvements) use a
+    half-year convention with the 200/150% DB tables; if needed, set
+    `property_type` to one of "personal_5y" / "personal_15y".
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    property_type: str = "residential"
+    cost_basis: Decimal = Decimal(0)            # depreciable basis (no land)
+    in_service_year: int = 0
+    in_service_month: int = 1                   # 1..12
+    prior_accumulated_depreciation: Decimal = Decimal(0)
+    # Disposition. When disposed_year == tax_year, depreciation prorates
+    # via mid-month on the way out and any unrecaptured §1250 gain is
+    # added to the year's unrecaptured_1250 stack.
+    disposed_year: int | None = None
+    disposed_month: int | None = None
+    sale_price: Decimal = Decimal(0)            # gross sale proceeds
+
+
 class Return(BaseModel):
     """Inputs for one tax year. All values default to 0 if absent."""
     model_config = ConfigDict(frozen=True)
@@ -50,6 +77,12 @@ class Return(BaseModel):
     royalty_income: Decimal = Decimal(0)
     is_active_real_estate_participant: bool = False  # gates the $25k PAL allowance
     suspended_passive_losses_carryforward: Decimal = Decimal(0)
+
+    # Per-property MACRS depreciation. When non-empty, the engine subtracts
+    # the computed current-year depreciation from rental_net_income BEFORE
+    # running the Schedule E passive-loss logic. Disposals also feed
+    # unrecaptured §1250 gain into the cap-gains stack.
+    rental_properties: list[RentalProperty] = Field(default_factory=list)
 
     # K-1 passthroughs (1065, 1120-S, 1041) — aggregated; engine treats by character
     k1_ordinary_business_income: Decimal = Decimal(0)
@@ -160,6 +193,8 @@ class TaxResult(BaseModel):
     qbi_deduction: Decimal = Decimal(0)           # Form 8995 / 8995-A
     schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
+    depreciation_current_year: Decimal = Decimal(0)        # total MACRS deduction this year
+    depreciation_accumulated_out: dict[str, Decimal] = Field(default_factory=dict)  # per-property running total
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year

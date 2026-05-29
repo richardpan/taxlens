@@ -312,6 +312,8 @@ async function renderYearDetail() {
         ? [['Foreign tax credit carried', r.ftc_carryforward_out]] : []),
     ...(Number(r.charitable_carryover_out || 0) > 0
         ? [['Charitable carryover to next year', r.charitable_carryover_out]] : []),
+    ...(Number(r.depreciation_current_year || 0) > 0
+        ? [['MACRS depreciation (Form 4562)', '-' + r.depreciation_current_year]] : []),
     ...(Number(r.passive_loss_disallowed || 0) > 0
         ? [['Passive loss carried (Form 8582)', r.passive_loss_disallowed]] : []),
     ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
