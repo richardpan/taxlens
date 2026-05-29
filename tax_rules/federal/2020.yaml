@@ -1,0 +1,148 @@
+# Federal tax rules for TY 2020.
+# Sources: IRS Rev. Proc. 2019-44.
+# CARES Act items: $300 above-line charitable (single)/$600 (MFJ); $10,200
+# UI exclusion (ARPA, retroactive); EIPs not income. Not modeled at engine
+# level — user should supply pre-adjusted figures or use the Advisor's notes.
+
+year: 2020
+
+standard_deduction:
+  single: 12400
+  mfj: 24800
+  mfs: 12400
+  hoh: 18650
+  qss: 24800
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [9875,     0.12]
+    - [40125,    0.22]
+    - [85525,    0.24]
+    - [163300,   0.32]
+    - [207350,   0.35]
+    - [518400,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [19750,    0.12]
+    - [80250,    0.22]
+    - [171050,   0.24]
+    - [326600,   0.32]
+    - [414700,   0.35]
+    - [622050,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [9875,     0.12]
+    - [40125,    0.22]
+    - [85525,    0.24]
+    - [163300,   0.32]
+    - [207350,   0.35]
+    - [311025,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [14100,    0.12]
+    - [53700,    0.22]
+    - [85500,    0.24]
+    - [163300,   0.32]
+    - [207350,   0.35]
+    - [518400,   0.37]
+
+qualified_brackets:
+  single: [[0, 0.00], [40000, 0.15], [441450, 0.20]]
+  mfj:    [[0, 0.00], [80000, 0.15], [496600, 0.20]]
+  mfs:    [[0, 0.00], [40000, 0.15], [248300, 0.20]]
+  hoh:    [[0, 0.00], [53600, 0.15], [469050, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 137700
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+ctc:
+  per_qualifying_child: 2000
+  refundable_per_child: 1400
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 197900
+    mfj:    197900
+    mfs:    98950
+    hoh:    197900
+    qss:    197900
+  exemption:
+    single: 72900
+    mfj:    113400
+    mfs:    56700
+    hoh:    72900
+    qss:    113400
+  exemption_phaseout_start:
+    single: 518400
+    mfj:    1036800
+    mfs:    518400
+    hoh:    518400
+    qss:    1036800
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+qbi:
+  rate: 0.20
+  threshold:
+    single: 163300
+    mfj:    326600
+    mfs:    163300
+    hoh:    163300
+    qss:    326600
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+contribution_limits:
+  k401_elective_deferral:      19500
+  k401_catchup_50plus:          6500
+  ira_contribution:             6000
+  ira_catchup_50plus:           1000
+  hsa_self:                     3550
+  hsa_family:                   7100
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 124000
+    mfj:    196000
+    mfs:    0
+    hoh:    124000
+    qss:    196000
+  roth_ira_phaseout_end:
+    single: 139000
+    mfj:    206000
+    mfs:    10000
+    hoh:    139000
+    qss:    206000

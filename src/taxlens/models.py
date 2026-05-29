@@ -219,6 +219,8 @@ class TaxResult(BaseModel):
     actc: Decimal = Decimal(0)                             # Additional CTC (refundable)
     ptc_net: Decimal = Decimal(0)                          # net PTC (positive = refundable credit)
     ptc_excess_aptc_repayment: Decimal = Decimal(0)        # additional tax owed (Form 8962)
+    personal_exemption_used: Decimal = Decimal(0)          # pre-TCJA only
+    pease_reduction: Decimal = Decimal(0)                  # pre-TCJA only
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -276,6 +278,15 @@ class Rules(BaseModel):
     savers_credit: dict[str, Any] | None = None
     # Premium Tax Credit (Form 8962) — optional.
     ptc: dict[str, Any] | None = None
+    # Personal exemption (TY2017 and earlier). When set:
+    #   {amount: 4050, phaseout_start: {...}, phaseout_complete: {...}}
+    # Engine subtracts amount × (1 + spouse + dependents) from AGI.
+    personal_exemption: dict[str, Any] | None = None
+    # Pease limitation on itemized deductions (TY2017 and earlier).
+    #   {threshold: {...}, rate: 0.03, max_reduction: 0.80}
+    pease: dict[str, Any] | None = None
+    # NOL pre-TCJA could offset 100% of taxable income; post-2017 capped at 80%.
+    nol_full_offset: bool = False
 
 
 class StateResult(BaseModel):

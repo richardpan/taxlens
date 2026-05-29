@@ -1,0 +1,157 @@
+# Federal tax rules for TY 2021.
+# Sources: IRS Rev. Proc. 2020-45 + ARPA (P.L. 117-2).
+#
+# CAVEAT — ARPA expanded the CTC for 2021 only: $3,600 for children under 6,
+# $3,000 for children ages 6-17 (age 17 newly eligible). Fully refundable.
+# Two-stage phaseout: the "expansion" above $2k phases at $75k single / $150k
+# MFJ ($50 per $1k); the base $2k phases at $200k / $400k.
+#
+# This file models the SIMPLE case (no kids under 6): $3,000/kid fully refundable,
+# with the base phaseout window only. Returns with under-6 children will need
+# manual adjustment of `qualifying_children` count to approximate the bonus,
+# or the user should cross-check against their actual Schedule 8812.
+
+year: 2021
+
+standard_deduction:
+  single: 12550
+  mfj: 25100
+  mfs: 12550
+  hoh: 18800
+  qss: 25100
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [9950,     0.12]
+    - [40525,    0.22]
+    - [86375,    0.24]
+    - [164925,   0.32]
+    - [209425,   0.35]
+    - [523600,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [19900,    0.12]
+    - [81050,    0.22]
+    - [172750,   0.24]
+    - [329850,   0.32]
+    - [418850,   0.35]
+    - [628300,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [9950,     0.12]
+    - [40525,    0.22]
+    - [86375,    0.24]
+    - [164925,   0.32]
+    - [209425,   0.35]
+    - [314150,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [14200,    0.12]
+    - [54200,    0.22]
+    - [86350,    0.24]
+    - [164900,   0.32]
+    - [209400,   0.35]
+    - [523600,   0.37]
+
+qualified_brackets:
+  single: [[0, 0.00], [40400, 0.15], [445850, 0.20]]
+  mfj:    [[0, 0.00], [80800, 0.15], [501600, 0.20]]
+  mfs:    [[0, 0.00], [40400, 0.15], [250800, 0.20]]
+  hoh:    [[0, 0.00], [54100, 0.15], [473750, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 142800
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# ARPA-expanded CTC (simplified — assumes no kids under 6; see file header).
+ctc:
+  per_qualifying_child: 3000
+  refundable_per_child: 3000     # fully refundable in 2021
+  actc_full_refund: true         # ARPA: no earnings test, no per-kid cap
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 199900
+    mfj:    199900
+    mfs:    99950
+    hoh:    199900
+    qss:    199900
+  exemption:
+    single: 73600
+    mfj:    114600
+    mfs:    57300
+    hoh:    73600
+    qss:    114600
+  exemption_phaseout_start:
+    single: 523600
+    mfj:    1047200
+    mfs:    523600
+    hoh:    523600
+    qss:    1047200
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+qbi:
+  rate: 0.20
+  threshold:
+    single: 164900
+    mfj:    329800
+    mfs:    164925
+    hoh:    164900
+    qss:    329800
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+contribution_limits:
+  k401_elective_deferral:      19500
+  k401_catchup_50plus:          6500
+  ira_contribution:             6000
+  ira_catchup_50plus:           1000
+  hsa_self:                     3600
+  hsa_family:                   7200
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 125000
+    mfj:    198000
+    mfs:    0
+    hoh:    125000
+    qss:    198000
+  roth_ira_phaseout_end:
+    single: 140000
+    mfj:    208000
+    mfs:    10000
+    hoh:    140000
+    qss:    208000

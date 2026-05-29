@@ -293,6 +293,7 @@ def _compute_taxable_income(
     itemizing carry forward up to 5 years."""
     std = rules.standard_deduction[_status(ret)]
     charitable_carry_out = ZERO
+    pease_reduction = ZERO
     if ret.itemized_deductions is not None and ret.itemized_deductions > std:
         # Layer in prior-year charitable carryover, capped at 60% of AGI for cash gifts.
         carry_in = ret.charitable_carryover_in or ZERO
@@ -320,6 +321,24 @@ def _compute_taxable_income(
                  "carry_out": charitable_carry_out},
                 itemized_used,
             )
+        # Pease limitation (pre-TCJA): cut itemized deductions by 3% of AGI above
+        # threshold, capped at 80% reduction. Excludes medical, investment interest,
+        # casualty, gambling losses — we approximate against the full itemized total.
+        if rules.pease:
+            ptab = rules.pease
+            pthr = Decimal(ptab["threshold"][_status(ret)])
+            if agi > pthr:
+                prate = Decimal(str(ptab.get("rate", "0.03")))
+                pmax = Decimal(str(ptab.get("max_reduction", "0.80")))
+                gross_cut = (agi - pthr) * prate
+                pease_reduction = min(gross_cut, itemized_used * pmax).quantize(Decimal("0.01"))
+                itemized_used = itemized_used - pease_reduction
+                rec.add(
+                    "Pease limitation on itemized",
+                    "min(3% × (AGI − threshold), 80% × itemized)",
+                    {"threshold": pthr, "agi": agi, "reduction": pease_reduction},
+                    itemized_used,
+                )
         if itemized_used > std:
             deduction = itemized_used
             kind = "itemized"
@@ -328,6 +347,7 @@ def _compute_taxable_income(
             kind = "standard"
             # If we fell back to standard, the carryover wasn't actually used.
             charitable_carry_out = (ret.charitable_carryover_in or ZERO)
+            pease_reduction = ZERO
     else:
         deduction = std
         kind = "standard"
@@ -339,22 +359,58 @@ def _compute_taxable_income(
         {"kind": kind, "amount": deduction, "standard": std, "itemized": ret.itemized_deductions},
         deduction,
     )
-    taxable = max(ZERO, agi - deduction)
+    # Personal exemption (TY2017 and earlier). Subtract amount × (1 + spouse + dependents).
+    # PEP phaseout: amount fully phased out by phaseout_complete, partial in between.
+    pe_used = ZERO
+    if rules.personal_exemption:
+        pe = rules.personal_exemption
+        per = Decimal(pe["amount"])
+        spouse = 1 if ret.filing_status in (FilingStatus.MFJ, FilingStatus.QSS) else 0
+        deps = ret.qualifying_children + ret.other_dependents
+        count = 1 + spouse + deps
+        raw_pe = per * count
+        # PEP: 2% reduction per $2,500 (or fraction) over threshold, fully phased
+        # out at threshold + $122,500 (single) / etc — supplied via phaseout_complete.
+        scale = Decimal("1.0")
+        pstart_tab = pe.get("phaseout_start")
+        pcomp_tab = pe.get("phaseout_complete")
+        if pstart_tab and pcomp_tab:
+            pstart = Decimal(pstart_tab[_status(ret)])
+            pcomp = Decimal(pcomp_tab[_status(ret)])
+            if agi >= pcomp:
+                scale = Decimal("0")
+            elif agi > pstart:
+                # 2% per $2,500 (or fraction). Step function.
+                steps = ((agi - pstart) / Decimal("2500")).to_integral_value(rounding="ROUND_CEILING")
+                scale = max(Decimal("0"), Decimal("1") - steps * Decimal("0.02"))
+        pe_used = (raw_pe * scale).quantize(Decimal("0.01"))
+        rec.add(
+            "Personal exemption",
+            "amount × (1 + spouse + dependents) × PEP_scale",
+            {"per": per, "count": count, "raw": raw_pe, "scale": scale},
+            pe_used,
+        )
+    taxable = max(ZERO, agi - deduction - pe_used)
 
     # NOL §172: post-TCJA, NOL offsets up to 80% of pre-NOL taxable income.
+    # Pre-TCJA (rules.nol_full_offset = True): can fully offset taxable income.
     # Excess NOL carries forward indefinitely.
     nol_in = ret.nol_carryforward_in or ZERO
     nol_used = ZERO
     nol_out = ZERO
     if nol_in > 0 and taxable > 0:
-        cap = (taxable * Decimal("0.80")).quantize(Decimal("0.01"))
+        if rules.nol_full_offset:
+            cap = taxable
+        else:
+            cap = (taxable * Decimal("0.80")).quantize(Decimal("0.01"))
         nol_used = min(nol_in, cap)
         nol_out = nol_in - nol_used
         taxable = taxable - nol_used
         rec.add(
             "NOL §172 applied",
-            "min(nol_in, 80% × taxable); excess carries forward",
-            {"nol_in": nol_in, "cap_80pct": cap, "nol_used": nol_used, "nol_out": nol_out},
+            "min(nol_in, cap × taxable); excess carries forward",
+            {"nol_in": nol_in, "cap": cap, "nol_used": nol_used, "nol_out": nol_out,
+             "full_offset_pre_tcja": rules.nol_full_offset},
             taxable,
         )
     elif nol_in > 0:
@@ -363,14 +419,16 @@ def _compute_taxable_income(
 
     rec.add(
         "Taxable income",
-        "max(0, agi − deduction − nol_used)",
-        {"agi": agi, "deduction": deduction, "nol_used": nol_used},
+        "max(0, agi − deduction − personal_exemption − nol_used)",
+        {"agi": agi, "deduction": deduction, "personal_exemption": pe_used, "nol_used": nol_used},
         taxable,
     )
-    # Stash nol_out + charitable_carry_out as attributes on the recorder so
-    # compute() can pluck them without changing the return tuple shape too much.
+    # Stash nol_out + charitable_carry_out + pe + pease on the recorder so
+    # compute() can pluck them without changing the return tuple shape.
     rec._nol_out = nol_out  # type: ignore[attr-defined]
     rec._charitable_out = charitable_carry_out  # type: ignore[attr-defined]
+    rec._pe_used = pe_used  # type: ignore[attr-defined]
+    rec._pease_reduction = pease_reduction  # type: ignore[attr-defined]
     return taxable, deduction, kind, nol_out
 
 
@@ -1104,6 +1162,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rec)
     taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
     charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
+    pe_used = getattr(rec, "_pe_used", ZERO)
+    pease_reduction = getattr(rec, "_pease_reduction", ZERO)
     qbi_ded = _compute_qbi(ret, taxable_pre_qbi, rules, rec)
     taxable = max(ZERO, taxable_pre_qbi - qbi_ded)
     if qbi_ded > 0:
@@ -1134,8 +1194,17 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     ctc_leftover = ctc - ctc_nonref_used
     actc_kid_cap = Decimal(rules.ctc.get("refundable_per_child", 1700)) * ret.qualifying_children
     earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
-    earnings_test = max(ZERO, (earned - Decimal(2500)) * Decimal("0.15"))
-    actc = min(ctc_leftover, actc_kid_cap, earnings_test)
+    actc_earned_threshold = Decimal(rules.ctc.get("actc_earned_threshold", 2500))
+    actc_rate = Decimal(str(rules.ctc.get("actc_rate", "0.15")))
+    earnings_test = max(ZERO, (earned - actc_earned_threshold) * actc_rate)
+    if rules.ctc.get("actc_full_refund", False):
+        # ARPA 2021: fully refundable, no earnings test, no per-kid cap.
+        actc = ctc_leftover
+    elif rules.ctc.get("actc_no_kid_cap", False):
+        # Pre-TCJA: 15% × (earned − $3k), no per-kid cap.
+        actc = min(ctc_leftover, earnings_test)
+    else:
+        actc = min(ctc_leftover, actc_kid_cap, earnings_test)
     if actc > ZERO:
         rec.add(
             "Additional Child Tax Credit (Form 8812) — refundable",
@@ -1222,6 +1291,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         actc=actc,
         ptc_net=net_ptc,
         ptc_excess_aptc_repayment=aptc_repayment,
+        personal_exemption_used=_money(pe_used),
+        pease_reduction=_money(pease_reduction),
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

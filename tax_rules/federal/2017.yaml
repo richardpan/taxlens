@@ -1,0 +1,176 @@
+# Federal tax rules for TY 2017 — LAST PRE-TCJA YEAR.
+# Sources: IRS Rev. Proc. 2016-55.
+#
+# Pre-TCJA distinctions:
+#   - Personal exemption $4,050 per taxpayer + spouse + dependent (with PEP phaseout)
+#   - Pease limitation on itemized deductions (3% over threshold, max 80%)
+#   - 7-bracket schedule ending at 39.6%
+#   - No SALT cap (user-supplied itemized_deductions reflects pre-cap reality)
+#   - No QBI / §199A
+#   - CTC: $1,000/kid, $3,000 earned-income threshold for refundable portion,
+#         no $1,400 per-kid refundable cap (refundable amount = 15% × (earned − $3k))
+#   - NOL can fully offset taxable income (no 80% cap)
+
+year: 2017
+nol_full_offset: true
+
+standard_deduction:
+  single: 6350
+  mfj: 12700
+  mfs: 6350
+  hoh: 9350
+  qss: 12700
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [9325,     0.15]
+    - [37950,    0.25]
+    - [91900,    0.28]
+    - [191650,   0.33]
+    - [416700,   0.35]
+    - [418400,   0.396]
+  mfj:
+    - [0,        0.10]
+    - [18650,    0.15]
+    - [75900,    0.25]
+    - [153100,   0.28]
+    - [233350,   0.33]
+    - [416700,   0.35]
+    - [470700,   0.396]
+  mfs:
+    - [0,        0.10]
+    - [9325,     0.15]
+    - [37950,    0.25]
+    - [76550,    0.28]
+    - [116675,   0.33]
+    - [208350,   0.35]
+    - [235350,   0.396]
+  hoh:
+    - [0,        0.10]
+    - [13350,    0.15]
+    - [50800,    0.25]
+    - [131200,   0.28]
+    - [212500,   0.33]
+    - [416700,   0.35]
+    - [444550,   0.396]
+
+# Pre-TCJA LTCG/qualified-dividend rates: 0% in 10/15% brackets,
+# 15% in 25-35% brackets, 20% above 39.6% threshold.
+qualified_brackets:
+  single: [[0, 0.00], [37950, 0.15], [418400, 0.20]]
+  mfj:    [[0, 0.00], [75900, 0.15], [470700, 0.20]]
+  mfs:    [[0, 0.00], [37950, 0.15], [235350, 0.20]]
+  hoh:    [[0, 0.00], [50800, 0.15], [444550, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 127200
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+ctc:
+  per_qualifying_child: 1000
+  per_other_dependent: 0           # ODC didn't exist pre-TCJA
+  refundable_per_child: 1000       # no per-kid refundable cap pre-2018
+  actc_no_kid_cap: true            # refundable = 15% × (earned − $3k), uncapped per kid
+  actc_earned_threshold: 3000
+  actc_rate: 0.15
+  phaseout_start:
+    single: 75000
+    mfj:    110000
+    mfs:    55000
+    hoh:    75000
+    qss:    110000
+  phaseout_per_1000_agi: 50
+
+personal_exemption:
+  amount: 4050
+  phaseout_start:
+    single: 261500
+    mfj:    313800
+    mfs:    156900
+    hoh:    287650
+    qss:    313800
+  phaseout_complete:
+    single: 384000
+    mfj:    436300
+    mfs:    218150
+    hoh:    410150
+    qss:    436300
+
+pease:
+  threshold:
+    single: 261500
+    mfj:    313800
+    mfs:    156900
+    hoh:    287650
+    qss:    313800
+  rate: 0.03
+  max_reduction: 0.80
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 187800
+    mfj:    187800
+    mfs:    93900
+    hoh:    187800
+    qss:    187800
+  exemption:
+    single: 54300
+    mfj:    84500
+    mfs:    42250
+    hoh:    54300
+    qss:    84500
+  exemption_phaseout_start:
+    single: 120700
+    mfj:    160900
+    mfs:    80450
+    hoh:    120700
+    qss:    160900
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+contribution_limits:
+  k401_elective_deferral:      18000
+  k401_catchup_50plus:          6000
+  ira_contribution:             5500
+  ira_catchup_50plus:           1000
+  hsa_self:                     3400
+  hsa_family:                   6750
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 118000
+    mfj:    186000
+    mfs:    0
+    hoh:    118000
+    qss:    186000
+  roth_ira_phaseout_end:
+    single: 133000
+    mfj:    196000
+    mfs:    10000
+    hoh:    133000
+    qss:    196000

@@ -2,6 +2,72 @@
 
 All notable changes to TaxLens.
 
+## [0.14.0] — 2026
+
+### Added — Historical accuracy: 10 years of federal rules (TY2015-2024)
+
+TaxLens can now compute federal tax for any year from 2015 through 2024.
+Each year ships its own `tax_rules/federal/{year}.yaml` with the exact IRS
+brackets, standard deductions, AMT/QBI thresholds, SS wage bases, CTC
+parameters, and contribution limits published in the corresponding Rev. Proc.
+
+**New historical-year files** (8 added):
+- TY2015, TY2016, TY2017 — **pre-TCJA**
+- TY2018, TY2019, TY2020, TY2021, TY2022 — **post-TCJA**
+
+### Added — Pre-TCJA engine path
+
+For TY2015-2017, the engine now applies three pre-TCJA features that the
+prior code didn't model. These are gated entirely by the rules YAML, so
+post-TCJA years are unaffected.
+
+- **Personal exemption** (§151) — $4,000 (2015) / $4,050 (2016, 2017)
+  multiplied by (1 + spouse + dependents), with PEP step-phaseout (2% per
+  $2,500 over threshold, fully phased out at threshold + $122,500).
+- **Pease limitation** (§68) on itemized deductions — 3% of AGI over the
+  Pease threshold, capped at 80% of itemized.
+- **CTC at $1,000/kid** with a $3,000 earned-income threshold for ACTC
+  (no $1,400 per-kid refundable cap; refundable portion = 15% × (earned − $3k)
+  capped at total CTC).
+
+### Added — ARPA-expanded 2021 CTC (simplified)
+
+TY2021 models the post-ARPA fully-refundable CTC at $3,000/child with no
+earnings test and no per-kid cap. **Caveat:** ARPA also paid $3,600 for
+children under 6, which requires an age field we don't track per-kid;
+users with under-6 kids should cross-check against their actual Schedule 8812.
+
+### Added — TaxResult fields
+
+- `personal_exemption_used` — Decimal, surfaces the pre-TCJA exemption amount
+- `pease_reduction` — Decimal, surfaces the pre-TCJA Pease cut
+
+### Added — `Rules` schema fields (all optional)
+
+- `personal_exemption: {amount, phaseout_start, phaseout_complete}`
+- `pease: {threshold, rate, max_reduction}`
+- `nol_full_offset: bool` — pre-TCJA NOL could fully offset taxable income;
+  post-2017 capped at 80% (existing default)
+- `ctc.actc_no_kid_cap` — pre-TCJA ACTC has no per-kid cap
+- `ctc.actc_full_refund` — ARPA 2021 path (no earnings test, no per-kid cap)
+- `ctc.actc_earned_threshold` / `ctc.actc_rate` — pre-TCJA was $3,000 / 15%
+
+### Tests
+
+18 new tests in `test_v14_historical_years.py` lock the bracket walk,
+standard deduction, and personal exemption for every year 2015-2022
+against hand-calculated values. TCJA boundary, pre-TCJA Pease, pre-TCJA
+$3k ACTC threshold, ARPA fully-refundable CTC, and SS wage base drift
+are all individually verified. **198 tests passing.**
+
+### Caveats
+
+- State YAMLs only exist for TY2024. Computing historical-year state tax
+  requires multi-year state rule files (deferred — large surface area).
+- Pre-TCJA EITC, Saver's, and education credits weren't backfilled into
+  the historical YAMLs (the engine gates these as optional; they simply
+  return 0 if absent). Federal regular tax math is fully accurate.
+
 ## [0.13.0] — 2026
 
 ### Added — multi-year trend visualizations

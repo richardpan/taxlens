@@ -1,0 +1,146 @@
+# Federal tax rules for TY 2022.
+# Sources: IRS Rev. Proc. 2021-45 (inflation adjustments).
+# ARPA's expanded CTC was 2021-only; 2022 reverts to TCJA baseline.
+
+year: 2022
+
+standard_deduction:
+  single: 12950
+  mfj: 25900
+  mfs: 12950
+  hoh: 19400
+  qss: 25900
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [10275,    0.12]
+    - [41775,    0.22]
+    - [89075,    0.24]
+    - [170050,   0.32]
+    - [215950,   0.35]
+    - [539900,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [20550,    0.12]
+    - [83550,    0.22]
+    - [178150,   0.24]
+    - [340100,   0.32]
+    - [431900,   0.35]
+    - [647850,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [10275,    0.12]
+    - [41775,    0.22]
+    - [89075,    0.24]
+    - [170050,   0.32]
+    - [215950,   0.35]
+    - [323925,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [14650,    0.12]
+    - [55900,    0.22]
+    - [89050,    0.24]
+    - [170050,   0.32]
+    - [215950,   0.35]
+    - [539900,   0.37]
+
+qualified_brackets:
+  single: [[0, 0.00], [41675, 0.15], [459750, 0.20]]
+  mfj:    [[0, 0.00], [83350, 0.15], [517200, 0.20]]
+  mfs:    [[0, 0.00], [41675, 0.15], [258600, 0.20]]
+  hoh:    [[0, 0.00], [55800, 0.15], [488500, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 147000
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+ctc:
+  per_qualifying_child: 2000
+  refundable_per_child: 1500
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 206100
+    mfj:    206100
+    mfs:    103050
+    hoh:    206100
+    qss:    206100
+  exemption:
+    single: 75900
+    mfj:    118100
+    mfs:    59050
+    hoh:    75900
+    qss:    118100
+  exemption_phaseout_start:
+    single: 539900
+    mfj:    1079800
+    mfs:    539900
+    hoh:    539900
+    qss:    1079800
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+qbi:
+  rate: 0.20
+  threshold:
+    single: 170050
+    mfj:    340100
+    mfs:    170050
+    hoh:    170050
+    qss:    340100
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+contribution_limits:
+  k401_elective_deferral:      20500
+  k401_catchup_50plus:          6500
+  ira_contribution:             6000
+  ira_catchup_50plus:           1000
+  hsa_self:                     3650
+  hsa_family:                   7300
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 129000
+    mfj:    204000
+    mfs:    0
+    hoh:    129000
+    qss:    204000
+  roth_ira_phaseout_end:
+    single: 144000
+    mfj:    214000
+    mfs:    10000
+    hoh:    144000
+    qss:    214000
