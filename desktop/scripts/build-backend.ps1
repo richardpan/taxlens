@@ -14,7 +14,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
   --noconfirm --clean --onefile `
   --name taxlens-backend `
   --paths src `
-  --add-data "tax_rules;tax_rules" `
+  --add-data "src/taxlens/tax_rules;taxlens/tax_rules" `
   --add-data "src/taxlens/web;taxlens/web" `
   --add-data "src/taxlens/demo;taxlens/demo" `
   --collect-submodules taxlens `

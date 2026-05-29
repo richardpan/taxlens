@@ -104,6 +104,26 @@ class Return(BaseModel):
     mortgage_interest: Decimal = Decimal(0)                # for itemize advisor
     salt_paid: Decimal = Decimal(0)                        # state+local taxes, $10k SALT cap
 
+    # Retirement income — 1099-R (pensions, IRA distributions) + SSA-1099.
+    #   - pension_distributions_taxable: 1099-R box 2a for pensions/annuities
+    #     (boxes 1 minus any non-taxable basis recovery). Flows directly into
+    #     gross income on 1040 line 5b.
+    #   - ira_distributions_taxable:    1099-R box 2a for IRA distributions
+    #     (1040 line 4b). Tracked separately because the Roth/basis math
+    #     differs and the Advisor uses it for RMD-style nudges.
+    #   - social_security_benefits:     SSA-1099 box 5 (gross). Engine applies
+    #     the 0%/50%/85% taxability formula (§86) using provisional income.
+    #   - tax_exempt_interest:          1040 line 2a. Doesn't hit AGI directly
+    #     but DOES count toward SS provisional income.
+    #   - early_withdrawal_subject_to_penalty: taxable portion of distributions
+    #     taken before age 59½ (1099-R code 1). Subject to 10% additional tax
+    #     (Schedule 2 line 8 → Form 5329).
+    pension_distributions_taxable: Decimal = Decimal(0)
+    ira_distributions_taxable: Decimal = Decimal(0)
+    social_security_benefits: Decimal = Decimal(0)
+    tax_exempt_interest: Decimal = Decimal(0)
+    early_withdrawal_subject_to_penalty: Decimal = Decimal(0)
+
     # ISO exercise (bargain element) — feeds AMT preferences & the advisor
     iso_bargain_element: Decimal = Decimal(0)
 
@@ -221,6 +241,11 @@ class TaxResult(BaseModel):
     ptc_excess_aptc_repayment: Decimal = Decimal(0)        # additional tax owed (Form 8962)
     personal_exemption_used: Decimal = Decimal(0)          # pre-TCJA only
     pease_reduction: Decimal = Decimal(0)                  # pre-TCJA only
+    # Retirement income (Phase 2 federal coverage).
+    social_security_taxable: Decimal = Decimal(0)          # taxable portion of SSA-1099 box 5
+    pension_taxable: Decimal = Decimal(0)                  # 1040 line 5b (pensions/annuities)
+    ira_taxable: Decimal = Decimal(0)                      # 1040 line 4b (IRA dist)
+    early_withdrawal_penalty: Decimal = Decimal(0)         # Schedule 2 line 8 / Form 5329
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -287,6 +312,14 @@ class Rules(BaseModel):
     pease: dict[str, Any] | None = None
     # NOL pre-TCJA could offset 100% of taxable income; post-2017 capped at 80%.
     nol_full_offset: bool = False
+    # Social Security benefits taxability (§86). Defaults to current-law
+    # thresholds if absent. Engine applies tiered formula on provisional income.
+    #   {base_threshold: {single, mfj, mfs, hoh, qss},
+    #    second_threshold: {...},
+    #    first_tier_rate: 0.50, second_tier_rate: 0.85}
+    social_security: dict[str, Any] | None = None
+    # 10% early-withdrawal penalty (§72(t)). Defaults to 0.10 if absent.
+    early_withdrawal_penalty_rate: Decimal = Decimal("0.10")
 
 
 class StateResult(BaseModel):

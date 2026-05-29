@@ -35,7 +35,9 @@ def main() -> int:
         "--noconfirm", "--clean", "--onefile",
         "--name", "taxlens-backend",
         "--paths", str(REPO / "src"),
-        "--add-data", f"{REPO / 'tax_rules'}{SEP}tax_rules",
+        # tax_rules now lives inside the package — bundle it there so the
+        # runtime path Path(__file__).parent/"tax_rules" resolves correctly.
+        "--add-data", f"{REPO / 'src' / 'taxlens' / 'tax_rules'}{SEP}taxlens/tax_rules",
         "--add-data", f"{REPO / 'src' / 'taxlens' / 'web'}{SEP}taxlens/web",
         "--add-data", f"{REPO / 'src' / 'taxlens' / 'demo'}{SEP}taxlens/demo",
         "--collect-submodules", "taxlens",

@@ -10,9 +10,9 @@ A local-first tool that ingests US tax return PDFs (Form 1040 + common schedules
 
 ```
 taxlens/
-├── src/taxlens/         # Python tax engine (pure functions, decimal arithmetic)
-├── tax_rules/federal/   # Year-versioned bracket/credit YAML — change rules without touching code
-├── tests/               # Engine tests + golden return fixtures
+├── src/taxlens/             # Python tax engine (pure functions, decimal arithmetic)
+│   └── tax_rules/federal/   # Year-versioned bracket/credit YAML — change rules without touching code
+├── tests/                   # Engine tests + golden return fixtures
 └── pyproject.toml
 ```
 
@@ -27,7 +27,7 @@ taxlens/
 - [x] v0.4 — **Cross-OS installers via GitHub Actions** (Win `.exe` + macOS `.dmg` + Linux `.AppImage`), Roth conversion + Tax-loss harvest simulators, WA 7% capital-gains tax (RCW 82.87), 2023 state-YAML backfills, §1211(b) capital-loss limit in engine
 - [x] v0.5 — Multi-year capital-loss carryforward, NYC + Yonkers locality tax, MA/OR/NJ/VA/GA state YAMLs, Trends tab (SVG line/stacked charts), SHA-256 checksums + signed build provenance on every release
 
-See `tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
+See `src/taxlens/tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
 
 ## Download (no Python required)
 
@@ -138,7 +138,7 @@ The web UI has six screens: Import (drag-drop), Dashboard (multi-year), Year det
 
 ## Adding a new tax year
 
-1. Drop a new file `tax_rules/federal/{YEAR}.yaml` with brackets, std deduction, FICA caps, NIIT/Add'l Medicare thresholds, CTC params. Use 2024 as a template.
+1. Drop a new file `src/taxlens/tax_rules/federal/{YEAR}.yaml` with brackets, std deduction, FICA caps, NIIT/Add'l Medicare thresholds, CTC params. Use 2024 as a template.
 2. Add a golden return YAML in `tests/fixtures/returns/`.
 3. Run `pytest` — engine snapshot tests must match within $0.01.
 

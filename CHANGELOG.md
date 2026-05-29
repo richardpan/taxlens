@@ -2,6 +2,32 @@
 
 All notable changes to TaxLens.
 
+## [0.16.1] — 2026
+
+### Fixed — "No federal rules for tax year" in packaged builds
+
+**Critical hotfix.** Every PDF import in the Electron/installer builds was
+failing with `No federal rules for tax year ...` because the `tax_rules/`
+directory lived at the **repo root** rather than inside the Python package.
+`rules.py` resolved the path via `Path(__file__).resolve().parents[2] /
+"tax_rules"` — which worked in development (where it points back to the
+repo root) but broke in every packaged distribution (wheel, PyInstaller,
+Electron) where there is no `tax_rules` directory two levels above the
+module.
+
+Fix:
+- Moved `tax_rules/` to `src/taxlens/tax_rules/` so it's inside the
+  package and gets bundled into the wheel automatically.
+- Updated `rules.py` to look at `Path(__file__).parent / "tax_rules"`.
+- Updated `desktop/scripts/build_backend.py` and `build-backend.ps1`
+  PyInstaller `--add-data` arguments to point at the new location and
+  bundle under `taxlens/tax_rules/` so the runtime path resolves
+  correctly inside the frozen executable too.
+- Updated `README.md` references.
+
+Verified: the v0.16.1 wheel now contains all 10 federal year YAMLs plus
+state and locality YAMLs under `taxlens/tax_rules/`. **217 tests passing.**
+
 ## [0.16.0] — 2026
 
 ### Added — UX quick wins: better errors, delete returns

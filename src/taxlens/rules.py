@@ -10,10 +10,13 @@ import yaml
 
 from taxlens.models import Rules
 
-# Locate the tax_rules directory relative to the repo root.
-# src/taxlens/rules.py  → repo root is parents[2]
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-RULES_DIR = _REPO_ROOT / "tax_rules" / "federal"
+# Locate the tax_rules directory INSIDE the package so it ships with the wheel
+# (and works when installed via pip, in an Electron app, or any other packaged
+# distribution). Previously this was at `parents[2] / "tax_rules"`, which only
+# worked when running from the dev repo and silently broke every PDF import in
+# packaged builds with "No federal rules for tax year ..." errors.
+_PKG_DIR = Path(__file__).resolve().parent
+RULES_DIR = _PKG_DIR / "tax_rules" / "federal"
 
 
 def _to_decimal(obj: Any) -> Any:
@@ -51,7 +54,7 @@ def load_rules(year: int, rules_dir: Path | None = None) -> Rules:
     return Rules(**raw)
 
 
-STATE_RULES_DIR = _REPO_ROOT / "tax_rules" / "state"
+STATE_RULES_DIR = _PKG_DIR / "tax_rules" / "state"
 
 
 @lru_cache(maxsize=None)
@@ -77,7 +80,7 @@ def load_state_rules(state: str, year: int, rules_dir: Path | None = None) -> "S
     return StateRules(**raw)
 
 
-LOCALITY_RULES_DIR = _REPO_ROOT / "tax_rules" / "locality"
+LOCALITY_RULES_DIR = _PKG_DIR / "tax_rules" / "locality"
 
 
 @lru_cache(maxsize=None)
