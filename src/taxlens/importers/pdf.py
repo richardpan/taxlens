@@ -30,13 +30,28 @@ def _money(s: str) -> Decimal:
 
 
 def _first_money_after(label_re: str, text: str) -> Decimal | None:
-    m = re.search(label_re + r"[^\n\r$0-9-]*(" + _MONEY + r")", text, re.IGNORECASE)
-    if not m:
-        return None
-    try:
-        return _money(m.group(1))
-    except InvalidOperation:
-        return None
+    """Find the first money string that appears on the SAME LINE as a label match.
+
+    Earlier versions used a permissive cross-line bridge, which let stray
+    digits like '-2' from 'Form W-2 box 1' or '22' from '(add lines 22 and 23)'
+    bleed into the value. We now constrain matching to one physical line."""
+    label_pat = re.compile(label_re, re.IGNORECASE)
+    money_pat = re.compile(_MONEY)
+    for line in text.splitlines():
+        m = label_pat.search(line)
+        if not m:
+            continue
+        # Look at the tail after the label match end.
+        tail = line[m.end():]
+        # Take the LAST money on the line (handles "(add lines 22 and 23) ...... $1,234").
+        money_matches = list(money_pat.finditer(tail))
+        if not money_matches:
+            continue
+        try:
+            return _money(money_matches[-1].group(0))
+        except InvalidOperation:
+            continue
+    return None
 
 
 LINE_PATTERNS: dict[str, list[str]] = {
@@ -49,7 +64,11 @@ LINE_PATTERNS: dict[str, list[str]] = {
     "ordinary_dividends":      [r"Line\s*3b\b[^\n]{0,40}?Ordinary dividends",
                                 r"\b3\s*b\b[^\n]{0,40}?Ordinary dividends"],
     "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain"],
-    "se_income":               [r"Schedule\s*C[^\n]{0,40}?Net profit"],
+    "se_income":               [r"Line\s*3\b[^\n]{0,40}?Business income",
+                                r"Schedule\s*C[^\n]{0,40}?Net profit"],
+    "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income"],
+    "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income"],
+    "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit"],
     "agi_reported":            [r"Line\s*11\b[^\n]{0,40}?Adjusted gross income"],
     "taxable_income_reported": [r"Line\s*15\b[^\n]{0,40}?Taxable income"],
     "total_tax_reported":      [r"Line\s*24\b[^\n]{0,40}?Total tax"],

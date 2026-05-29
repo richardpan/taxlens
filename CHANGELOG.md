@@ -2,6 +2,32 @@
 
 All notable changes to TaxLens.
 
+## [0.8.0] — 2026
+
+### Added — realistic multi-page PDF golden fixtures
+- New `tests/realistic_1040.py` generator emits a full Form 1040 page 1+2
+  plus Schedule 1, 2, 3, and B in the same layout style as real IRS forms,
+  with proper section headers and `Line N <label> ...... $value` rows.
+- 5 new round-trip tests in `tests/test_pdf_golden.py` covering MFJ with
+  dividends + Sch B, Schedule C self-employment, high-income with AMT + FTC,
+  retiree, and a parametrized sweep over all 5 filing statuses.
+
+### Fixed — PDF importer line-bridging bug
+- The previous regex bridge `[^\n\r$0-9-]*` would happily skip across
+  intervening text and pick up stray digits like `-2` from "Form W-2 box 1"
+  or `22` from "(add lines 22 and 23)" instead of the actual money value.
+- `_first_money_after` now matches the label and value on the **same
+  physical line** and takes the **last** money string on that line — robust
+  against IRS-style labels that mention other line numbers in parentheses.
+
+### Added — broader PDF line coverage
+- New importer patterns for **Form 1040 Line 8** (additional income from
+  Schedule 1), **Line 26** (other adjustments), **Schedule 3 Line 1**
+  (foreign tax credit), and a broader **Schedule SE** income capture.
+
+### Tests
+- 122 passing (was 113).
+
 ## [0.7.0] — 2026
 
 ### Added — multi-year carryforward suite
