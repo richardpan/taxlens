@@ -1,0 +1,20 @@
+# Arizona individual income tax — TY 2024.
+# Flat 2.5% as of 2023 (SB 1828 fully phased in).
+# Source: AZ Form 140 instructions, A.R.S. §43-1011.
+
+state: AZ
+year: 2024
+
+standard_deduction:
+  single: 14600
+  mfj:    29200
+  mfs:    14600
+  hoh:    21900
+  qss:    29200
+
+ordinary_brackets:
+  single: [[0, 0.025]]
+  mfj:    [[0, 0.025]]
+  mfs:    [[0, 0.025]]
+  hoh:    [[0, 0.025]]
+  qss:    [[0, 0.025]]

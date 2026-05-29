@@ -27,6 +27,9 @@ class Return(BaseModel):
     tax_year: int
     filing_status: FilingStatus
     qualifying_children: int = 0
+    # Other dependents (qualifying relatives or kids who age out of CTC).
+    # Each eligible for the $500 nonrefundable Credit for Other Dependents (ODC).
+    other_dependents: int = 0
 
     # Income
     wages: Decimal = Decimal(0)                  # 1040 line 1

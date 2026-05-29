@@ -1,0 +1,20 @@
+# North Carolina individual income tax — TY 2024.
+# Flat 4.5% (down from 4.75% in 2023; HB 259 sched).
+# Source: NC D-400 instructions, N.C.G.S. §105-153.7.
+
+state: NC
+year: 2024
+
+standard_deduction:
+  single: 12750
+  mfj:    25500
+  mfs:    12750
+  hoh:    19125
+  qss:    25500
+
+ordinary_brackets:
+  single: [[0, 0.045]]
+  mfj:    [[0, 0.045]]
+  mfs:    [[0, 0.045]]
+  hoh:    [[0, 0.045]]
+  qss:    [[0, 0.045]]

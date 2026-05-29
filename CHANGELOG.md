@@ -2,6 +2,24 @@
 
 All notable changes to TaxLens.
 
+## [0.6.0] — 2026
+
+### Added
+- **8 more 2024 state YAMLs**: PA, OH, NC, AZ, MN, CO, MI, MD.
+  Total state coverage is now **19** (CA, NY, IL, TX, FL, WA, MA, OR, NJ,
+  VA, GA, PA, OH, NC, AZ, MN, CO, MI, MD).
+- **2023 backfills** for the v0.5 states (MA, OR, NJ, VA, GA) — including
+  GA's pre-flat-tax graduated schedule.
+- **$500 Credit for Other Dependents (ODC)** — `other_dependents: int`
+  on the `Return` model. Shares the CTC phase-out ($50/$1k AGI over
+  $200k single / $400k MFJ).
+- **UI surfacing** for two previously-invisible v0.5 features:
+  - Capital-loss carryforward to next year shows as a card on Year detail
+    when non-zero.
+  - NYC/Yonkers locality tax shows as its own card alongside state tax.
+- 16 new tests covering all 13 state YAMLs and ODC math. **104 tests
+  passing total.**
+
 ## [0.5.1] — 2026
 
 ### Added

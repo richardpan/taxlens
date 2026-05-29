@@ -1,0 +1,62 @@
+# New Jersey gross income tax — TY 2024.
+# Source: NJ-1040 instructions, N.J.S.A. 54A:2-1.
+# LTCG taxed as ordinary income. NJ has no standard deduction; the personal
+# exemption ($1,000) is modeled in the deduction slot for engine compatibility.
+
+state: NJ
+year: 2023
+notes: |
+  NJ has no true standard deduction. The personal exemption ($1,000) is
+  modeled here. MFJ also includes a spousal exemption ($1,000).
+
+standard_deduction:
+  single: 1000
+  mfj:    2000
+  mfs:    1000
+  hoh:    1000
+  qss:    2000
+
+ordinary_brackets:
+  single:
+    - [0,       0.014]
+    - [20000,   0.0175]
+    - [35000,   0.035]
+    - [40000,   0.05525]
+    - [75000,   0.0637]
+    - [500000,  0.0897]
+    - [1000000, 0.1075]
+  mfj:
+    - [0,       0.014]
+    - [20000,   0.0175]
+    - [50000,   0.0245]
+    - [70000,   0.035]
+    - [80000,   0.05525]
+    - [150000,  0.0637]
+    - [500000,  0.0897]
+    - [1000000, 0.1075]
+  mfs:
+    - [0,       0.014]
+    - [20000,   0.0175]
+    - [35000,   0.035]
+    - [40000,   0.05525]
+    - [75000,   0.0637]
+    - [500000,  0.0897]
+    - [1000000, 0.1075]
+  hoh:
+    - [0,       0.014]
+    - [20000,   0.0175]
+    - [50000,   0.0245]
+    - [70000,   0.035]
+    - [80000,   0.05525]
+    - [150000,  0.0637]
+    - [500000,  0.0897]
+    - [1000000, 0.1075]
+  qss:
+    - [0,       0.014]
+    - [20000,   0.0175]
+    - [50000,   0.0245]
+    - [70000,   0.035]
+    - [80000,   0.05525]
+    - [150000,  0.0637]
+    - [500000,  0.0897]
+    - [1000000, 0.1075]

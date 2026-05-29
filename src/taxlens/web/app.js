@@ -302,7 +302,11 @@ async function renderYearDetail() {
     ['NIIT', r.niit],
     ['Credits', '-' + r.credits],
     ['Total federal tax', r.total_tax],
+    ...(Number(r.capital_loss_carryforward_out || 0) > 0
+        ? [['Cap-loss carried to next year', r.capital_loss_carryforward_out]] : []),
     ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
+    ...(r.state_result && r.state_result.locality
+        ? [[`${r.state_result.locality} locality tax`, r.state_result.locality_tax]] : []),
     ['Withholding + estimated', String(Number(ret.federal_withholding) + Number(ret.estimated_payments))],
     ['Refund/owed', r.refund_or_owed],
   ].map(([k,v]) => `<div class="border border-slate-200 rounded-lg p-3">

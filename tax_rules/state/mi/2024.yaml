@@ -1,0 +1,23 @@
+# Michigan individual income tax — TY 2024.
+# Flat 4.25% (the 2023 rate cut to 4.05% reverted to 4.25% for TY 2024).
+# Source: MI-1040 instructions, MCL 206.51.
+# Personal exemption modeled in std deduction slot ($5,600 / exemption).
+
+state: MI
+year: 2024
+notes: |
+  Personal exemption ($5,600 in 2024) is modeled as the standard deduction.
+
+standard_deduction:
+  single: 5600
+  mfj:    11200
+  mfs:    5600
+  hoh:    5600
+  qss:    11200
+
+ordinary_brackets:
+  single: [[0, 0.0425]]
+  mfj:    [[0, 0.0425]]
+  mfs:    [[0, 0.0425]]
+  hoh:    [[0, 0.0425]]
+  qss:    [[0, 0.0425]]

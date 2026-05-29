@@ -654,10 +654,13 @@ def _compute_niit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -
 
 def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
     cfg = rules.ctc
-    if ret.qualifying_children <= 0:
+    if ret.qualifying_children <= 0 and ret.other_dependents <= 0:
         return ZERO
     per_child = Decimal(cfg["per_qualifying_child"])
-    raw = per_child * ret.qualifying_children
+    per_odc   = Decimal(cfg.get("per_other_dependent", 500))
+    raw_ctc = per_child * ret.qualifying_children
+    raw_odc = per_odc * ret.other_dependents
+    raw = raw_ctc + raw_odc
     threshold = Decimal(cfg["phaseout_start"][_status(ret)])
     if agi > threshold:
         # IRS rounds AGI excess UP to the next $1,000.
@@ -668,11 +671,15 @@ def _compute_ctc(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) ->
         reduction = ZERO
         credit = raw
     rec.add(
-        "Child Tax Credit",
-        "per_child × children − phaseout",
+        "Child Tax Credit + ODC",
+        "(CTC × children + ODC × other_deps) − phaseout",
         {
             "per_child": per_child,
             "children": ret.qualifying_children,
+            "per_other_dependent": per_odc,
+            "other_dependents": ret.other_dependents,
+            "raw_ctc": raw_ctc,
+            "raw_odc": raw_odc,
             "raw": raw,
             "agi": agi,
             "threshold": threshold,

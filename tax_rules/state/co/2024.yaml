@@ -1,0 +1,21 @@
+# Colorado individual income tax — TY 2024.
+# Flat 4.40% (HB 23-1006). LTCG taxed as ordinary income.
+# Source: CO 104 instructions, C.R.S. §39-22-104.
+# CO standard deduction = federal standard deduction (modeled directly).
+
+state: CO
+year: 2024
+
+standard_deduction:
+  single: 14600
+  mfj:    29200
+  mfs:    14600
+  hoh:    21900
+  qss:    29200
+
+ordinary_brackets:
+  single: [[0, 0.044]]
+  mfj:    [[0, 0.044]]
+  mfs:    [[0, 0.044]]
+  hoh:    [[0, 0.044]]
+  qss:    [[0, 0.044]]

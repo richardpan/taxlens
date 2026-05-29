@@ -1,0 +1,37 @@
+# Ohio individual income tax — TY 2024.
+# Source: Ohio IT 1040 instructions, ORC §5747.02.
+# 2024 schedule (HB 33): no tax under $26,050; 2.75% bracket; 3.50% over $100k.
+# Personal exemption ($2,400 if AGI <= $40k, scaled) approximated as fixed $2,400
+# standard deduction for simplicity.
+
+state: OH
+year: 2024
+
+standard_deduction:
+  single: 2400
+  mfj:    4800
+  mfs:    2400
+  hoh:    2400
+  qss:    4800
+
+ordinary_brackets:
+  single:
+    - [0,       0]
+    - [26050,   0.0275]
+    - [100000,  0.035]
+  mfj:
+    - [0,       0]
+    - [26050,   0.0275]
+    - [100000,  0.035]
+  mfs:
+    - [0,       0]
+    - [26050,   0.0275]
+    - [100000,  0.035]
+  hoh:
+    - [0,       0]
+    - [26050,   0.0275]
+    - [100000,  0.035]
+  qss:
+    - [0,       0]
+    - [26050,   0.0275]
+    - [100000,  0.035]

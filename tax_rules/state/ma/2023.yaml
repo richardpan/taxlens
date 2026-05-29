@@ -1,0 +1,26 @@
+# Massachusetts personal income tax — TY 2024.
+# Flat 5% on Part B (earned) income; 9% on Part A short-term cap gains;
+# 4% surtax ("Fair Share") on income over $1,053,750.
+# Source: 2024 Form 1 instructions, M.G.L. ch. 62.
+# Simplification: model the 5% base + 4% millionaire surtax as a 2-bracket
+# walk. STCG higher rate and LTCG carve-outs are not modeled here.
+
+state: MA
+year: 2023
+notes: |
+  Flat 5%, plus 4% surtax over $1,053,750 (single, MFJ, all statuses).
+  No state-level qualified-dividend distinction in this simplified model.
+
+standard_deduction:
+  single: 0
+  mfj:    0
+  mfs:    0
+  hoh:    0
+  qss:    0
+
+ordinary_brackets:
+  single: [[0, 0.05], [1000000, 0.09]]
+  mfj:    [[0, 0.05], [1000000, 0.09]]
+  mfs:    [[0, 0.05], [1000000, 0.09]]
+  hoh:    [[0, 0.05], [1000000, 0.09]]
+  qss:    [[0, 0.05], [1000000, 0.09]]

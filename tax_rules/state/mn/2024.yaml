@@ -1,0 +1,41 @@
+# Minnesota individual income tax — TY 2024.
+# Source: M1 instructions, Minn. Stat. §290.06.
+# Graduated brackets to 9.85%. LTCG taxed as ordinary income.
+# Note: MN also has a 1% net-investment-income surtax over $1M; not modeled here.
+
+state: MN
+year: 2024
+
+standard_deduction:
+  single: 14575
+  mfj:    29150
+  mfs:    14575
+  hoh:    21900
+  qss:    29150
+
+ordinary_brackets:
+  single:
+    - [0,      0.0535]
+    - [31690,  0.068]
+    - [104090, 0.0785]
+    - [193240, 0.0985]
+  mfj:
+    - [0,      0.0535]
+    - [46330,  0.068]
+    - [184040, 0.0785]
+    - [321450, 0.0985]
+  mfs:
+    - [0,      0.0535]
+    - [23165,  0.068]
+    - [92020,  0.0785]
+    - [160725, 0.0985]
+  hoh:
+    - [0,      0.0535]
+    - [39010,  0.068]
+    - [156760, 0.0785]
+    - [256880, 0.0985]
+  qss:
+    - [0,      0.0535]
+    - [46330,  0.068]
+    - [184040, 0.0785]
+    - [321450, 0.0985]

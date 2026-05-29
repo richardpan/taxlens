@@ -1,0 +1,20 @@
+# Pennsylvania personal income tax — TY 2024.
+# Flat 3.07% on 8 classes of income; no standard deduction, no personal exemption.
+# Source: PA-40 instructions, 72 P.S. §7302.
+# Note: PA does NOT tax retirement income (401k/IRA distributions, pensions, SS) —
+# the engine's AGI-based starting point will overstate PA tax for retirees.
+# A future refinement could subtract retirement_income before applying the rate.
+
+state: PA
+year: 2024
+notes: |
+  Flat 3.07%. No std deduction. LTCG taxed at flat rate.
+
+standard_deduction: {single: 0, mfj: 0, mfs: 0, hoh: 0, qss: 0}
+
+ordinary_brackets:
+  single: [[0, 0.0307]]
+  mfj:    [[0, 0.0307]]
+  mfs:    [[0, 0.0307]]
+  hoh:    [[0, 0.0307]]
+  qss:    [[0, 0.0307]]
