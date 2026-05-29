@@ -212,6 +212,9 @@ class StateRules(BaseModel):
     qualified_brackets: dict[str, list[tuple[Decimal, Decimal]]] | None = None
     # Optional state surcharges (e.g. CA Mental Health Services Tax).
     mental_health_services_tax: dict[str, Any] | None = None
+    # Optional state-level long-term capital-gains excise tax (e.g. WA 7% over $262k).
+    # Shape: {rate, threshold_by_status: {single, mfj, ...}, standard_deduction_by_status?}
+    capital_gains_excise_tax: dict[str, Any] | None = None
     notes: str | None = None
 
 

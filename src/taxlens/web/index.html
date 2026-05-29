@@ -30,6 +30,7 @@
       <button data-tab="whatif"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">What-if</button>
       <button data-tab="compare"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Compare</button>
       <button data-tab="advisor"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Advisor ✨</button>
+      <button data-tab="plan"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Planner</button>
     </nav>
     <div class="text-xs text-slate-500">PDFs never leave this machine</div>
   </div>
@@ -199,10 +200,37 @@
   </div>
 </section>
 
+<section id="tab-plan" class="tab-panel hidden">
+  <div class="flex items-baseline justify-between mb-4">
+    <h2 class="text-xl font-semibold">Planner · Roth conversion & Tax-loss harvest</h2>
+    <select id="planYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="font-semibold mb-3">Roth conversion</div>
+      <p class="text-sm text-slate-600 mb-3">How much extra tax would I owe this year if I converted some traditional IRA / 401(k) money to Roth?</p>
+      <label class="block text-sm mb-1">Amount to convert</label>
+      <input id="rothAmount" type="number" min="0" value="20000" class="w-full text-sm border border-slate-300 rounded px-3 py-2 mb-3" />
+      <button id="rothRun" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">Simulate</button>
+      <div id="rothResult" class="mt-4 text-sm"></div>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="font-semibold mb-3">Tax-loss harvest</div>
+      <p class="text-sm text-slate-600 mb-3">How much tax would I save if I realized this much long-term loss?</p>
+      <label class="block text-sm mb-1">LT loss to harvest</label>
+      <input id="tlhAmount" type="number" min="0" value="10000" class="w-full text-sm border border-slate-300 rounded px-3 py-2 mb-3" />
+      <button id="tlhRun" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">Simulate</button>
+      <div id="tlhResult" class="mt-4 text-sm"></div>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.3.0
+  TaxLens · local-first · v0.4.0
 </footer>
 
 <script src="/static/app.js"></script>

@@ -128,6 +128,22 @@ def load_demo() -> dict[str, Any]:
     return {"loaded": loaded, "count": len(loaded)}
 
 
+@app.post("/api/returns/{return_id}/simulate/roth")
+def simulate_roth(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    out = service.simulate_roth(return_id, body.get("amount", 0))
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
+@app.post("/api/returns/{return_id}/simulate/tlh")
+def simulate_tlh(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    out = service.simulate_tlh(return_id, body.get("loss_amount", 0))
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
 # Static UI ───────────────────────────────────────────────────────────────────
 
 if WEB_DIR.exists():

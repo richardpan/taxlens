@@ -17,6 +17,7 @@ function showTab(name) {
   else if (name === 'whatif')   renderWhatif();
   else if (name === 'compare')  renderCompare();
   else if (name === 'advisor')  renderAdvisor();
+  else if (name === 'plan')     renderPlan();
 }
 window.showTab = showTab;
 
@@ -537,3 +538,68 @@ if (demoBtn) {
     }
   });
 }
+
+// --- planner tab ---------------------------------------------------------
+function populatePlanYearPicker() {
+  const sel = document.getElementById('planYearPicker');
+  if (!sel) return;
+  sel.innerHTML = RETURNS.map(r =>
+    '<option value="' + r.id + '">' + r.tax_year + '</option>'
+  ).join('');
+}
+
+function _fmtMoney(n) {
+  const v = Number(n);
+  const sign = v < 0 ? '-' : '+';
+  return sign + '$' + Math.abs(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+}
+
+function _fmtPct(n) {
+  return (Number(n) * 100).toFixed(2) + '%';
+}
+
+function _renderSim(targetId, out) {
+  const cls = Number(out.tax_delta) < 0 ? 'text-emerald-700' : 'text-rose-700';
+  const lines = [
+    '<div class="font-semibold ' + cls + ' text-lg">' + _fmtMoney(out.tax_delta) + ' federal tax</div>',
+    '<div class="text-slate-500 text-xs mt-1">' + out.scenario + '</div>',
+    '<div class="mt-3 text-slate-700">Effective marginal rate: <span class="font-mono">' + _fmtPct(out.federal_marginal_rate) + '</span></div>',
+    '<div class="mt-2 text-slate-500 text-xs">Original total tax: $' + Number(out.original.total_tax).toLocaleString() + ' → after: $' + Number(out.after.total_tax).toLocaleString() + '</div>',
+  ];
+  document.getElementById(targetId).innerHTML = lines.join('');
+}
+
+async function runRoth() {
+  const id = Number(document.getElementById('planYearPicker').value);
+  const amount = document.getElementById('rothAmount').value;
+  document.getElementById('rothResult').textContent = 'Simulating…';
+  try {
+    const out = await api('/api/returns/' + id + '/simulate/roth',
+      { method: 'POST', body: JSON.stringify({ amount }) });
+    _renderSim('rothResult', out);
+  } catch (e) {
+    document.getElementById('rothResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function runTLH() {
+  const id = Number(document.getElementById('planYearPicker').value);
+  const loss_amount = document.getElementById('tlhAmount').value;
+  document.getElementById('tlhResult').textContent = 'Simulating…';
+  try {
+    const out = await api('/api/returns/' + id + '/simulate/tlh',
+      { method: 'POST', body: JSON.stringify({ loss_amount }) });
+    _renderSim('tlhResult', out);
+  } catch (e) {
+    document.getElementById('tlhResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderPlan() {
+  populatePlanYearPicker();
+}
+
+const _rothBtn = document.getElementById('rothRun');
+if (_rothBtn) _rothBtn.addEventListener('click', runRoth);
+const _tlhBtn = document.getElementById('tlhRun');
+if (_tlhBtn) _tlhBtn.addEventListener('click', runTLH);

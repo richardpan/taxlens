@@ -2,6 +2,51 @@
 
 All notable changes to TaxLens.
 
+## [0.4.0] — 2026
+
+### Added
+- **Cross-OS installers via GitHub Actions** (`.github/workflows/release.yml`) —
+  on every `v*.*.*` tag, builds Windows NSIS `.exe`, macOS `.dmg`, and Linux
+  `.AppImage` installers on native runners and uploads them as release assets.
+  End users can now click-to-install with no Python required.
+- **Tests CI workflow** (`.github/workflows/tests.yml`) — matrix runs of
+  pytest on Win/Mac/Linux × Python 3.11/3.12 on every push and PR.
+- **Roth conversion simulator** — `POST /api/returns/{id}/simulate/roth`
+  returns marginal tax cost of converting traditional → Roth this year.
+- **Tax-loss harvest simulator** — `POST /api/returns/{id}/simulate/tlh`
+  returns same-year tax savings of realizing a given LT loss.
+- **Planner tab** in the web UI with side-by-side Roth + TLH cards.
+- **WA capital-gains excise tax (RCW 82.87)** — 7% over $262k (2024) /
+  $250k (2023). State YAMLs gained a `capital_gains_excise_tax:` block.
+- **2023 state YAML backfills** for NY, IL, TX, FL, WA.
+- **Python OCR extra** — `pip install taxlens[ocr]` now installs
+  `pytesseract` + `pdf2image` (Tesseract & Poppler binaries still external).
+- **§1211(b) capital-loss limitation in engine** — net cap losses now
+  correctly cap at -$3,000 against ordinary income, with a recorded step.
+  Excess carryforward is surfaced in the trace (not yet auto-applied to
+  future years; that's the multi-year carryforward feature for v0.5).
+- **Cross-OS PyInstaller build script** (`desktop/scripts/build_backend.py`)
+  — replaces the Windows-only PowerShell script with a portable Python one.
+
+### Fixed
+- Engine no longer crashes when a Return has a net capital loss (pre-fix it
+  raised `ValueError: amount must be non-negative` from the qualified-rate
+  bracket walk).
+- AMT and qualified-rate computations now floor net LT+qual at $0 to avoid
+  taxing negative income at preferential rates.
+
+### Tests
+78 passing (up from 72 in v0.3.0). New tests cover both simulators and the
+WA capital-gains tax.
+
+### Notes
+- Installers from the v0.4.0 release are **unsigned** (no SmartScreen /
+  Gatekeeper bypass yet). Users see a one-time warning on first launch.
+  See `docs/signing.md` for the production signing flow.
+- macOS installers built in CI are universal-ish but currently x86_64-only
+  (the GitHub-hosted macOS runner image determines the slice). For Apple
+  Silicon builds, run `npm run dist` locally on an M-series Mac.
+
 ## [0.3.0] — 2025
 
 ### Added

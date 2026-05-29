@@ -176,6 +176,29 @@ class TaxLensService:
                 "edits": {k: str(v) for k, v in edits.items()},
             }
 
+    # ── planning simulators ──────────────────────────────────────────────────
+
+    def _load_return(self, return_id: int) -> Return | None:
+        with self.sessionmaker_() as s:
+            row = s.get(StoredReturn, return_id)
+            if row is None:
+                return None
+            return Return(**self._decimalize(json.loads(row.return_json)))
+
+    def simulate_roth(self, return_id: int, amount: Decimal) -> dict[str, Any] | None:
+        from taxlens.simulators import simulate_roth_conversion
+        base = self._load_return(return_id)
+        if base is None:
+            return None
+        return simulate_roth_conversion(base, Decimal(amount)).to_json()
+
+    def simulate_tlh(self, return_id: int, loss_amount: Decimal) -> dict[str, Any] | None:
+        from taxlens.simulators import simulate_tax_loss_harvest
+        base = self._load_return(return_id)
+        if base is None:
+            return None
+        return simulate_tax_loss_harvest(base, Decimal(loss_amount)).to_json()
+
     def commit_override(self, return_id: int, field: str, new_value: str, reason: str | None) -> bool:
         with self.sessionmaker_() as s:
             row = s.get(StoredReturn, return_id)

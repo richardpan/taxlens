@@ -205,25 +205,41 @@ def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Deci
 
 
 def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rec: _StepRecorder) -> Decimal:
+    # Net capital gain/loss with the §1211(b) $3,000 ordinary-income cap on
+    # net losses. Excess carries forward indefinitely (not yet modeled).
+    raw_cap = (
+        ret.long_term_capital_gains + ret.k1_long_term_gains
+        + ret.short_term_capital_gains + ret.k1_short_term_gains
+    )
+    if raw_cap < Decimal("-3000"):
+        net_cap = Decimal("-3000")
+        carryforward = raw_cap - net_cap
+        rec.add(
+            "Capital loss limitation (§1211(b))",
+            "net loss capped at -$3,000 against ordinary income; excess carries forward",
+            {"raw_cap": raw_cap, "carryforward": carryforward},
+            net_cap,
+        )
+    else:
+        net_cap = raw_cap
+
     gross = (
         ret.wages
         + ret.interest_income + ret.k1_interest
         + ret.ordinary_dividends + ret.k1_ordinary_dividends
-        + ret.long_term_capital_gains + ret.k1_long_term_gains
-        + ret.short_term_capital_gains + ret.k1_short_term_gains
+        + net_cap
         + ret.se_income
         + ret.other_ordinary_income
         + sch_e_net
     )
     rec.add(
         "Gross income",
-        "wages + interest(+k1) + ord_div(+k1) + ltcg(+k1) + stcg(+k1) + se + sch_e + other",
+        "wages + interest(+k1) + ord_div(+k1) + net_cap + se + sch_e + other",
         {
             "wages": ret.wages,
             "interest": ret.interest_income, "k1_interest": ret.k1_interest,
             "ord_div": ret.ordinary_dividends, "k1_ord_div": ret.k1_ordinary_dividends,
-            "ltcg": ret.long_term_capital_gains, "k1_ltcg": ret.k1_long_term_gains,
-            "stcg": ret.short_term_capital_gains, "k1_stcg": ret.k1_short_term_gains,
+            "net_cap": net_cap,
             "se": ret.se_income,
             "sch_e": sch_e_net,
             "other": ret.other_ordinary_income,
@@ -300,6 +316,7 @@ def _compute_income_tax(
 
     qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
         + ret.k1_qualified_dividends + ret.k1_long_term_gains
+    qd_ltcg = max(qd_ltcg, ZERO)  # net LT loss flows through AGI (capped at -3k); never taxed at preferential rate
     unrec_1250 = ret.unrecaptured_1250_gains
     collectibles = ret.collectibles_gains
 
@@ -403,6 +420,7 @@ def _compute_amt(
 
     qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
         + ret.k1_qualified_dividends + ret.k1_long_term_gains
+    qd_ltcg = max(qd_ltcg, ZERO)
     # ISO bargain element is one of the most common AMT preference items.
     amti = (
         taxable_income
@@ -522,6 +540,24 @@ def _compute_state_with(ret: Return, agi: Decimal, srules: StateRules) -> StateR
                 f"({taxable} − {thr}) × {rate}",
                 {"taxable": taxable, "threshold": thr, "rate": rate},
                 surcharge,
+            )
+
+    # Optional state-level long-term capital-gains excise tax
+    # (e.g. WA 7% on LT gains over the per-status threshold, RCW 82.87).
+    if srules.capital_gains_excise_tax:
+        c = srules.capital_gains_excise_tax
+        thresholds = c.get("threshold_by_status", {})
+        thr = Decimal(thresholds.get(status, thresholds.get("single", 0)))
+        rate = Decimal(c["rate"])
+        lt_gains = ret.long_term_capital_gains or ZERO
+        if lt_gains > thr:
+            cg_tax = (lt_gains - thr) * rate
+            tax = tax + cg_tax
+            rec.add(
+                f"{srules.state} capital-gains excise tax",
+                f"({lt_gains} − {thr}) × {rate}",
+                {"lt_gains": lt_gains, "threshold": thr, "rate": rate},
+                cg_tax,
             )
 
     return StateResult(

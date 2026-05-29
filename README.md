@@ -24,18 +24,33 @@ taxlens/
 - [x] Phase 4 — Multi-year dashboard, year detail, math view, what-if editor, compare view
 - [x] Phase 5 (v0.2) — AMT (Form 6251), Schedule D 28%/25% worksheet, CA state module, at-rest DB encryption (Fernet), Electron desktop shell
 - [x] v0.3 — Schedule E + K-1 + §199A QBI + ISO/AMT, CA Mental Health Services Tax, **Tax Savings Advisor** (single-year + cross-year rules), NY/IL/TX/FL/WA state stubs, broker 1099-B CSV importer, OCR fallback (Tesseract), demo mode, PyInstaller-bundled desktop backend, signing/notarization docs
-- [ ] v0.4 — Signed Win/Mac installers, more state-year backfills, Roth/TLH multi-year simulators, WA 7% capital-gains tax
+- [x] v0.4 — **Cross-OS installers via GitHub Actions** (Win `.exe` + macOS `.dmg` + Linux `.AppImage`), Roth conversion + Tax-loss harvest simulators, WA 7% capital-gains tax (RCW 82.87), 2023 state-YAML backfills, §1211(b) capital-loss limit in engine
+- [ ] v0.5 — Code-signed installers, multi-year capital-loss carryforward, more state YAMLs, NYC / Yonkers locality tax
 
 See `tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
 
-## Quick start
+## Download (no Python required)
+
+Pre-built installers are attached to each [release](https://github.com/richardpan/taxlens/releases):
+
+| OS      | File                              |
+|---------|-----------------------------------|
+| Windows | `TaxLens-Setup-x.y.z.exe` (NSIS)  |
+| macOS   | `TaxLens-x.y.z.dmg`               |
+| Linux   | `TaxLens-x.y.z.AppImage`          |
+
+> These are **unsigned** today, so Windows SmartScreen and macOS Gatekeeper
+> may warn on first launch. Right-click → Open (mac) or "More info → Run
+> anyway" (Windows) to proceed. Signed installers are tracked for v0.5.
+
+## Quick start (developer)
 
 ```powershell
 cd taxlens
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest                              # 72 tests, ~10s
+pytest                              # 78 tests, ~10s
 taxlens import path\to\1040.pdf     # also accepts .txf / .json / .yaml / .csv (1099-B)
 taxlens list
 taxlens serve                       # opens http://127.0.0.1:8765 in your browser
