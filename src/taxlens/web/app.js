@@ -94,25 +94,28 @@ window.toggleReturnsMenu = () => {
   m.classList.toggle('hidden');
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+// Wire returns-menu listeners immediately. app.js is loaded at end-of-body,
+// so the DOM is already parsed — using DOMContentLoaded here would no-op.
+(function wireReturnsMenu() {
   const btn = document.getElementById('returnsMenuBtn');
   const menu = document.getElementById('returnsMenu');
   const closeBtn = document.getElementById('returnsMenuClose');
   const importBtn = document.getElementById('returnsMenuImport');
-  if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); window.toggleReturnsMenu(); });
+  if (!btn || !menu) return;
+  btn.addEventListener('click', (e) => { e.stopPropagation(); window.toggleReturnsMenu(); });
   if (closeBtn) closeBtn.addEventListener('click', window.closeReturnsMenu);
   if (importBtn) importBtn.addEventListener('click', () => { window.closeReturnsMenu(); showTab('import'); });
   // Click anywhere outside the menu closes it.
   document.addEventListener('click', (e) => {
-    if (!menu || menu.classList.contains('hidden')) return;
-    if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+    if (menu.classList.contains('hidden')) return;
+    if (menu.contains(e.target) || btn.contains(e.target)) return;
     window.closeReturnsMenu();
   });
   // Esc also closes.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') window.closeReturnsMenu();
   });
-});
+})();
 
 function populateYearPickers() {
   const opts = RETURNS.map(r => `<option value="${r.id}">${r.tax_year}</option>`).join('');

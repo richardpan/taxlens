@@ -2,6 +2,17 @@
 
 All notable changes to TaxLens.
 
+## [0.26.1] — 2026
+
+### Fixed — Returns badge in the header was not clickable
+
+The badge listener was registered inside a `DOMContentLoaded` handler,
+but `app.js` is loaded at the end of `<body>` without `defer` — so the
+event had already fired by the time the listener was registered, and
+it never ran. Replaced with an immediately-invoked function that wires
+the click + outside-click + Esc handlers directly. The popover now
+opens on first click, every time.
+
 ## [0.26.0] — 2026
 
 ### Added — Form 8606 nondeductible IRA basis tracking
