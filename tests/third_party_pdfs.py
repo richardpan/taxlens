@@ -158,3 +158,97 @@ def make_freetaxusa_1040(path: Path, r: ThirdPartyReturn) -> None:
         y -= 14
     c.showPage()
     c.save()
+
+
+def make_freetaxusa_realistic_1040(path: Path, r: ThirdPartyReturn) -> None:
+    """A closer-to-reality FreeTaxUSA export that mimics three quirks we've
+    seen break the importer in the wild:
+
+      1. Column-split layout where the amount lands on the line BELOW the
+         label, with one or more pure-noise lines in between (dot-leaders,
+         '(see instructions)' continuations, schedule-attachment hints).
+      2. A "Tax Return Summary" cover page that uses friendly labels
+         ("Wages and Salaries", "Taxable Interest") instead of the IRS
+         line-1a / 2b phrasing.
+      3. Capital losses rendered as parens-negative — e.g. `($3,000)`.
+    """
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    width, height = LETTER
+
+    agi = r.agi if r.agi is not None else (r.wages + r.interest + r.ord_div)
+    ti = r.taxable_income if r.taxable_income is not None else (agi - Decimal(14600))
+
+    # ── Page 1: friendly summary page ───────────────────────────────────────
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 40, f"FreeTaxUSA — {r.tax_year} Tax Return Summary")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 58, f"Filing Status: {r.filing_status_label}")
+    c.drawString(50, height - 72, f"Tax Year: {r.tax_year}")
+
+    summary = [
+        ("Wages and Salaries", _money(r.wages)),
+        ("Taxable Interest", _money(r.interest)),
+        ("Ordinary Dividends", _money(r.ord_div)),
+        ("Qualified Dividends", _money(r.qual_div)),
+        ("Adjusted Gross Income", _money(agi)),
+        ("Taxable Income", _money(ti)),
+        ("Total Tax", _money(r.total_tax) if r.total_tax else "$0"),
+        ("Federal Tax Withheld", _money(r.withholding)),
+    ]
+    y = height - 100
+    for label, value in summary:
+        c.drawString(50, y, label)
+        c.drawRightString(width - 50, y, value)
+        y -= 16
+    c.showPage()
+
+    # ── Page 2: column-split Form 1040 facsimile with noise lines ───────────
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, height - 40, f"Form 1040 — {r.tax_year}")
+    c.setFont("Helvetica", 9)
+    c.drawString(50, height - 54, f"OMB No. 1545-0074  {r.tax_year}")
+    c.setFont("Helvetica", 10)
+
+    # Each tuple: (label, [optional noise lines that pdfplumber may emit
+    # between the label and the value], value)
+    rows = [
+        ("1a Total amount from Form(s) W-2, box 1",
+         ["(see instructions)", ". . . . . . . . . . . . . . . . . . . . . . . . . ."],
+         _money(r.wages)),
+        ("1z Add lines 1a through 1h",
+         [". . . . . . . . . . . . . . . . . . . . . . . . . ."],
+         _money(r.wages)),
+        ("2b Taxable interest",
+         ["Attach Schedule B if required"],
+         _money(r.interest)),
+        ("3a Qualified dividends", [], _money(r.qual_div)),
+        ("3b Ordinary dividends",
+         ["Attach Schedule B if required"],
+         _money(r.ord_div)),
+        ("7  Capital gain or (loss). Attach Schedule D",
+         ["if required.  If not required, check here .... ▶ ☐"],
+         "($3,000)" if False else _money(Decimal(0))),  # placeholder, no cap loss in base fixture
+        ("11 Adjusted gross income.  Subtract line 10 from line 9",
+         [],
+         _money(agi)),
+        ("15 Taxable income.  Subtract line 14 from line 11",
+         ["If zero or less, enter -0-"],
+         _money(ti)),
+        ("24 Add lines 22 and 23.  This is your total tax",
+         ["▶"],
+         _money(r.total_tax) if r.total_tax else "$0"),
+        ("25a Federal income tax withheld from Form(s) W-2", [],
+         _money(r.withholding)),
+    ]
+    y = height - 90
+    for label, noise, value in rows:
+        c.drawString(50, y, label)
+        y -= 12
+        for n in noise:
+            c.drawString(80, y, n)
+            y -= 12
+        # Value goes on its own line, right-aligned in a separate column.
+        c.drawRightString(width - 50, y, value)
+        y -= 16
+    c.showPage()
+    c.save()

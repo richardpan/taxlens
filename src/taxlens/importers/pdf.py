@@ -23,49 +23,100 @@ from taxlens.importers import Imported, sha256_file
 from taxlens.models import FilingStatus, Return
 
 _MONEY = r"\$?\s*-?[0-9][0-9,]*(?:\.[0-9]{1,2})?"
+# Parens-negative: `(1,500)` and `(1,500.00)` → -1500
+_PAREN_NEG = re.compile(r"\(\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*\)")
+# Pure-noise lines we skip when scanning forward for a value:
+#   - dot-leader-only: ". . . . . . . ." or "........"
+#   - bare line-letter: "1a" / "25 a" / "1z"
+#   - parenthetical hint: "(see instructions)" / "(Form 8949)"
+#   - "Attach Schedule ..." or "Attach Form ..." continuations
+_NOISE_LINE = re.compile(
+    r"^\s*(?:[\.\s]+|\d+\s*[a-z]?|\([^)]*\)|Attach\s+(?:Schedule|Form|Form\(s\))\s+\S.*)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _money(s: str) -> Decimal:
-    return Decimal(s.replace("$", "").replace(",", "").replace(" ", ""))
+    s = s.replace("$", "").replace(",", "").replace(" ", "")
+    return Decimal(s)
+
+
+def _is_form_id_digit(tail: str, start: int) -> bool:
+    """True if the money match at `start` is actually part of a form identifier
+    like 'W-2', '1099-R', '8949', 'Form 1116', 'Sch B'. Without this guard,
+    'Federal income tax withheld from Form(s) W-2' would match '-2' as the
+    withholding amount."""
+    # Preceded by `[Letter]-` → part of a form code like W-2 / 1099-R.
+    if start >= 2 and tail[start - 1] == "-" and tail[start - 2].isalpha():
+        return True
+    # Preceded by word char (digit or letter) with no separator → glued
+    # identifier, not a money column.
+    if start >= 1 and (tail[start - 1].isalnum() or tail[start - 1] == "-"):
+        return True
+    return False
+
+
+def _money_matches_in(tail: str) -> list:
+    """All money matches in `tail` that are not inside form identifiers."""
+    money_pat = re.compile(_MONEY)
+    return [m for m in money_pat.finditer(tail) if not _is_form_id_digit(tail, m.start())]
 
 
 def _first_money_after(label_re: str, text: str) -> Decimal | None:
     """Find the first money string that appears on the SAME LINE as a label match,
-    falling back to the NEXT non-empty line if the label line has no number
-    (TurboTax / H&R Block often render label and amount in separate text columns,
-    which pdfplumber emits on adjacent lines).
+    falling back to the next several non-empty lines if the label line has no
+    number (TurboTax / H&R Block / FreeTaxUSA often render label and amount in
+    separate text columns, which pdfplumber emits on adjacent lines, frequently
+    with noise lines like dot-leaders or '(see instructions)' in between).
 
-    Earlier versions used a permissive cross-line bridge, which let stray
-    digits like '-2' from 'Form W-2 box 1' or '22' from '(add lines 22 and 23)'
-    bleed into the value. We now constrain to the label's line + at most one
-    follow-up line, and we ignore numbers that look like line references
-    (e.g. 'see line 22') by requiring at least 3 digits or a decimal point on
-    the follow-up line."""
+    Money matches that are actually part of a form identifier (`W-2`, `1099-R`,
+    `8949`) are filtered out — otherwise the withholding line would extract
+    '-2' from 'Form(s) W-2'.
+    """
     label_pat = re.compile(label_re, re.IGNORECASE)
-    money_pat = re.compile(_MONEY)
     # Stricter pattern for next-line fallback: real money has ≥3 digits or a cent decimal.
-    strict_money_pat = re.compile(r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?|\$?\s*-?[0-9]+\.[0-9]{1,2}")
+    strict_money_pat = re.compile(
+        r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?|\$?\s*-?[0-9]+\.[0-9]{1,2}"
+    )
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = label_pat.search(line)
         if not m:
             continue
         tail = line[m.end():]
-        money_matches = list(money_pat.finditer(tail))
+        pn = _PAREN_NEG.search(tail)
+        money_matches = _money_matches_in(tail)
+        if pn:
+            try:
+                return -_money(pn.group(1))
+            except InvalidOperation:
+                pass
         if money_matches:
             try:
                 return _money(money_matches[-1].group(0))
             except InvalidOperation:
-                continue
-        # Same-line fallback failed — look at next non-empty line (column-split layouts).
-        for j in range(i + 1, min(i + 3, len(lines))):
-            nxt = lines[j].strip()
+                pass
+        # Same-line fallback failed — scan up to 5 next non-empty lines,
+        # skipping pure noise.
+        for j in range(i + 1, min(i + 6, len(lines))):
+            nxt_raw = lines[j]
+            nxt = nxt_raw.strip()
             if not nxt:
                 continue
-            # Bail if the next line looks like another label (starts with a line number + word).
-            if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]", lines[j]):
+            if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]{3,}", nxt_raw):
                 break
-            strict = list(strict_money_pat.finditer(nxt))
+            if _NOISE_LINE.match(nxt):
+                continue
+            pn = _PAREN_NEG.search(nxt)
+            if pn:
+                try:
+                    return -_money(pn.group(1))
+                except InvalidOperation:
+                    pass
+            strict = [
+                m for m in strict_money_pat.finditer(nxt)
+                if not _is_form_id_digit(nxt, m.start())
+            ]
             if strict:
                 try:
                     return _money(strict[-1].group(0))
@@ -80,36 +131,64 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\b1\s*[az]?\b[^\n]{0,40}?Wages",
                                 # Actual IRS 1040 line 1a phrasing — no "Wages" word
                                 r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2[^\n]{0,30}?box\s*1",
+                                # Looser: "Form(s) W-2" anywhere on the line.
+                                r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2",
                                 # Line 1z is the W-2 totals line on post-2021 1040
-                                r"\b1\s*z\b[^\n]{0,80}?Add\s+lines?\s*1a\s+through\s+1h"],
+                                r"\b1\s*z\b[^\n]{0,80}?Add\s+lines?\s*1a\s+through\s+1h",
+                                # FreeTaxUSA summary-page phrasings
+                                r"Wages,\s*salaries,?\s*tips",
+                                r"Wages\s+and\s+salaries"],
     "interest_income":         [r"Line\s*2b\b[^\n]{0,40}?Taxable interest",
-                                r"\b2\s*b\b[^\n]{0,40}?Taxable interest"],
+                                r"\b2\s*b\b[^\n]{0,40}?Taxable interest",
+                                r"\bTaxable\s+interest\b"],
     "qualified_dividends":     [r"Line\s*3a\b[^\n]{0,40}?Qualified dividends",
-                                r"\b3\s*a\b[^\n]{0,40}?Qualified dividends"],
+                                r"\b3\s*a\b[^\n]{0,40}?Qualified dividends",
+                                r"\bQualified\s+dividends\b"],
     "ordinary_dividends":      [r"Line\s*3b\b[^\n]{0,40}?Ordinary dividends",
-                                r"\b3\s*b\b[^\n]{0,40}?Ordinary dividends"],
+                                r"\b3\s*b\b[^\n]{0,40}?Ordinary dividends",
+                                r"\bOrdinary\s+dividends\b"],
     "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain",
-                                r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)"],
+                                r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)",
+                                # FreeTaxUSA summary — distinguishes LT vs ST
+                                r"\bLong[-\s]term\s+capital\s+gain",
+                                r"\bNet\s+long[-\s]term\s+capital\s+gain"],
+    "short_term_capital_gains":[r"\bShort[-\s]term\s+capital\s+gain",
+                                r"\bNet\s+short[-\s]term\s+capital\s+gain"],
     "se_income":               [r"Line\s*3\b[^\n]{0,40}?Business income",
                                 r"Schedule\s*C[^\n]{0,40}?Net profit",
-                                r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)"],
+                                r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)",
+                                r"\bSelf[-\s]employment\s+income"],
     "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income",
                                 r"\b8\b[^\n]{0,40}?(?:Additional|Other) income"],
+    "pension_distributions_taxable": [
+                                r"\b5\s*b\b[^\n]{0,40}?(?:Pensions|Taxable amount)",
+                                r"\bPensions\s+and\s+annuities"],
+    "ira_distributions_taxable": [
+                                r"\b4\s*b\b[^\n]{0,40}?(?:IRA|Taxable amount)",
+                                r"\bIRA\s+distributions\b[^\n]{0,40}?taxable"],
+    "social_security_benefits":[r"\b6\s*a\b[^\n]{0,40}?Social security benefits",
+                                r"\bSocial\s+security\s+benefits"],
+    "unemployment_compensation":[r"\bUnemployment\s+compensation"],
     "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income",
                                 # Schedule 1 line 26 in FreeTaxUSA
                                 r"\b10\b[^\n]{0,80}?Adjustments to income\s+from\s+Schedule\s*1"],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
     "agi_reported":            [r"Line\s*11\b[^\n]{0,40}?Adjusted gross income",
-                                r"\b11\b[^\n]{0,80}?Adjusted gross income"],
+                                r"\b11\b[^\n]{0,80}?Adjusted gross income",
+                                r"\bAdjusted\s+gross\s+income\b"],
     "taxable_income_reported": [r"Line\s*15\b[^\n]{0,40}?Taxable income",
-                                r"\b15\b[^\n]{0,80}?Taxable income"],
+                                r"\b15\b[^\n]{0,80}?Taxable income",
+                                r"\bTaxable\s+income\b"],
     "total_tax_reported":      [r"Line\s*24\b[^\n]{0,40}?Total tax",
-                                r"\b24\b[^\n]{0,80}?(?:total tax|Add lines\s*22\s+and\s+23)"],
+                                r"\b24\b[^\n]{0,80}?(?:total tax|Add lines\s*22\s+and\s+23)",
+                                r"\bTotal\s+tax\b"],
     "federal_withholding":     [r"Line\s*25a?\b[^\n]{0,80}?Federal income tax withheld",
-                                r"\b25\s*a?\b[^\n]{0,80}?Federal income tax withheld"],
+                                r"\b25\s*a?\b[^\n]{0,80}?Federal income tax withheld",
+                                r"\bFederal\s+(?:income\s+)?tax\s+withheld"],
     "estimated_payments":      [r"Line\s*26\b[^\n]{0,80}?estimated tax payments",
-                                r"\b26\b[^\n]{0,80}?estimated tax payments"],
+                                r"\b26\b[^\n]{0,80}?estimated tax payments",
+                                r"\bEstimated\s+tax\s+payments\b"],
     "qualifying_children":     [r"Number of qualifying children",
                                 r"Qualifying children[^\n]{0,40}?for\s+child\s+tax\s+credit"],
 }

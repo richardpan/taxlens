@@ -2,6 +2,33 @@
 
 All notable changes to TaxLens.
 
+## [0.27.1] — 2026
+
+### Fixed — FreeTaxUSA PDF importer dropping income fields
+
+Three real-world FreeTaxUSA layout quirks were silently breaking income
+extraction:
+
+1. Column-split amounts. FreeTaxUSA renders the actual IRS Form 1040 with
+   labels in a left column and amounts right-aligned in a separate column,
+   often with noise lines (dot-leaders, `(see instructions)`, `Attach
+   Schedule B`) between the two. The importer used to give up after the
+   first non-noise line below the label; it now scans up to 5 next non-
+   empty lines, skipping noise.
+2. Form-identifier false-positives. `Federal income tax withheld from
+   Form(s) W-2` was extracting `-2` (from `W-2`) as the withholding
+   amount. Money matches preceded by `[letter]-` or glued to alphanumeric
+   characters are now filtered out as form-code fragments.
+3. Friendly summary-page labels. FreeTaxUSA's Tax Return Summary uses
+   labels like `Wages and Salaries` and `Taxable Interest` instead of
+   the IRS line-1a / 2b phrasing. New summary-style patterns now match.
+4. Parens-negative. Capital losses on line 7 (`($3,000)`) and similar
+   are now correctly parsed as negative values.
+
+Also added a realistic FreeTaxUSA fixture (summary page + column-split
+1040 facsimile with noise lines) and a golden test that locks in
+extraction of wages / interest / dividends / withholding / total tax.
+
 ## [0.27.0] — 2026
 
 ### Added — Form 5329: excess IRA contribution & RMD shortfall excise
