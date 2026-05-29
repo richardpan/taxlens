@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>TaxLens</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.05) 1px, transparent 0); background-size: 18px 18px; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .tab.active { background: #0f172a; color: white; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+  <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white font-bold">T</div>
+      <span class="font-semibold">TaxLens</span>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 ml-2">local · <span id="returnCount">0</span> returns</span>
+    </div>
+    <nav class="flex gap-1 text-sm">
+      <button data-tab="import"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">Import</button>
+      <button data-tab="dashboard" class="tab px-3 py-1.5 rounded hover:bg-slate-100 active">Dashboard</button>
+      <button data-tab="year"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Year detail</button>
+      <button data-tab="math"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Show the math</button>
+      <button data-tab="whatif"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">What-if</button>
+      <button data-tab="compare"   class="tab px-3 py-1.5 rounded hover:bg-slate-100">Compare</button>
+    </nav>
+    <div class="text-xs text-slate-500">PDFs never leave this machine</div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8">
+
+<!-- ─── Import ─── -->
+<section id="tab-import" class="tab-panel hidden">
+  <h2 class="text-2xl font-bold mb-1">Import returns</h2>
+  <p class="text-slate-500 mb-6">Drop PDFs, TXF, JSON, or YAML files. Year and filing status are auto-detected.</p>
+  <div id="dropzone" class="grid-bg border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center bg-white cursor-pointer hover:border-emerald-400">
+    <div class="text-5xl mb-3">📄</div>
+    <div class="text-lg font-medium">Drop tax return files here</div>
+    <div class="text-slate-500 text-sm mt-1">or <span class="text-emerald-600 underline">browse</span></div>
+    <input id="fileInput" type="file" class="hidden" multiple accept=".pdf,.txf,.json,.yaml,.yml" />
+  </div>
+  <div id="importList" class="mt-6 bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 hidden"></div>
+</section>
+
+<!-- ─── Dashboard ─── -->
+<section id="tab-dashboard" class="tab-panel">
+  <h2 class="text-2xl font-bold mb-1">Multi-year dashboard</h2>
+  <p class="text-slate-500 mb-6">All imported returns at a glance.</p>
+  <div id="dashEmpty" class="hidden text-center py-20 text-slate-400">
+    No returns imported yet. <button class="text-emerald-600 underline" onclick="showTab('import')">Import one</button>.
+  </div>
+  <div id="dashContent">
+    <div class="grid grid-cols-4 gap-4 mb-6" id="kpis"></div>
+    <div class="grid grid-cols-3 gap-6">
+      <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="font-semibold mb-3">Income composition by year</div>
+        <canvas id="incomeStack" height="120"></canvas>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="font-semibold mb-3">Effective vs. marginal rate</div>
+        <canvas id="rateLine" height="180"></canvas>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="font-semibold mb-3">Tax composition (latest year)</div>
+        <canvas id="taxDonut" height="180"></canvas>
+      </div>
+      <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="font-semibold mb-3">All returns</div>
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase text-slate-500">
+            <tr><th class="text-left py-2">Year</th><th class="text-left">Status</th><th class="text-left">Source</th><th class="text-right">AGI</th><th class="text-right">Total tax</th><th class="text-right">Refund/owed</th><th>Reconciled</th></tr>
+          </thead>
+          <tbody id="returnsTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Year detail ─── -->
+<section id="tab-year" class="tab-panel hidden">
+  <div class="flex items-end justify-between mb-1">
+    <h2 class="text-2xl font-bold">Year detail</h2>
+    <select id="yearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+  </div>
+  <p class="text-slate-500 mb-6">Income flow + how the federal brackets were filled.</p>
+  <div class="grid grid-cols-2 gap-6">
+    <div class="bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="font-semibold mb-3">Income → take-home waterfall</div>
+      <canvas id="waterfall" height="180"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="font-semibold mb-3">Federal bracket fill</div>
+      <canvas id="brackets" height="180"></canvas>
+    </div>
+    <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="font-semibold mb-3">Tax breakdown</div>
+      <div id="taxBreakdown" class="grid grid-cols-3 gap-4 text-sm"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Math ─── -->
+<section id="tab-math" class="tab-panel hidden">
+  <div class="flex items-end justify-between mb-1">
+    <h2 class="text-2xl font-bold">Show the math</h2>
+    <select id="mathYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+  </div>
+  <p class="text-slate-500 mb-6">Every step of the computation, in order.</p>
+  <div id="mathSteps" class="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100"></div>
+  <div id="mathBrackets" class="mt-6 bg-white rounded-2xl border border-slate-200 p-5">
+    <div class="font-semibold mb-3">Bracket walk</div>
+    <div id="ordinaryBrackets"></div>
+    <div id="qualifiedBracketsSection" class="mt-6 hidden">
+      <div class="font-medium mb-2">Qualified dividends + LTCG (stacked above ordinary)</div>
+      <div id="qualifiedBrackets"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── What-if ─── -->
+<section id="tab-whatif" class="tab-panel hidden">
+  <div class="flex items-end justify-between mb-1">
+    <h2 class="text-2xl font-bold">What-if editor</h2>
+    <select id="whatifYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+  </div>
+  <p class="text-slate-500 mb-6">Edit any input — the engine re-runs locally and shows the delta.</p>
+  <div class="grid grid-cols-2 gap-6">
+    <div class="bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="font-semibold mb-4">Inputs</div>
+      <div id="whatifForm" class="space-y-3 text-sm"></div>
+      <div class="mt-5 flex gap-2">
+        <button id="whatifRun" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">Recompute</button>
+        <button id="whatifReset" class="px-4 py-2 rounded border border-slate-300 hover:bg-slate-50">Reset</button>
+      </div>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-5">
+      <div class="font-semibold mb-4">As filed vs. what-if</div>
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase text-slate-500">
+          <tr><th class="text-left py-2">Field</th><th class="text-right">As filed</th><th class="text-right">What-if</th><th class="text-right">Δ</th></tr>
+        </thead>
+        <tbody id="whatifTable"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Compare ─── -->
+<section id="tab-compare" class="tab-panel hidden">
+  <h2 class="text-2xl font-bold mb-1">Compare years</h2>
+  <p class="text-slate-500 mb-6">Pick any two imported years.</p>
+  <div class="flex gap-3 mb-4 items-center">
+    <select id="cmpLeft"  class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+    <span class="text-slate-400">vs.</span>
+    <select id="cmpRight" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+  </div>
+  <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+        <tr><th class="text-left px-5 py-3">Category</th><th class="text-right px-5">Left</th><th class="text-right px-5">Right</th><th class="text-right px-5">Δ</th><th class="text-right px-5 pr-6">Δ %</th></tr>
+      </thead>
+      <tbody id="compareTable" class="divide-y divide-slate-100 font-mono"></tbody>
+    </table>
+  </div>
+</section>
+
+</main>
+
+<footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
+  TaxLens · local-first · v0.0.1
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

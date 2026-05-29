@@ -18,12 +18,13 @@ taxlens/
 
 ## Status
 
-- [x] Phase 0 — Engine scaffold + 2024 federal rules + reconciliation tests
-- [ ] Phase 1 — PDF/TXF import pipeline
-- [ ] Phase 2 — Full schedule coverage (B, D, 1, 2, 3, SE)
-- [ ] Phase 3 — Tauri + React UI with what-if editor
+- [x] Phase 1 — Engine + 2023/2024 federal rules + reconciliation tests
+- [x] Phase 2 — Import pipeline (PDF via pdfplumber, TXF, JSON/YAML manual)
+- [x] Phase 3 — SQLite persistence, FastAPI sidecar, single-page web UI
+- [x] Phase 4 — Multi-year dashboard, year detail, math view, what-if editor, compare view
+- [ ] Phase 5 (post-MVP) — More schedules (D, SE, 8959/8960 deep), OCR fallback for scanned PDFs, encrypted DB (SQLCipher), signed installers, CA state module
 
-See the full plan and UI mockups in the design folder.
+See `tax_rules/federal/` for the rule tables and `tests/fixtures/returns/` for golden returns.
 
 ## Quick start
 
@@ -32,7 +33,33 @@ cd taxlens
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest
+pytest                              # 27 tests, ~4s
+taxlens import path\to\1040.pdf     # also accepts .txf / .json / .yaml
+taxlens list
+taxlens serve                       # opens http://127.0.0.1:8765 in your browser
+```
+
+The web UI has six screens: Import (drag-drop), Dashboard (multi-year), Year detail (waterfall + bracket fill), Show the math (audit trail), What-if editor (live recompute), Compare.
+
+## Architecture
+
+```
+┌────────────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
+│  Browser (vanilla JS + │ ◀──▶│  FastAPI sidecar     │ ◀──▶│  SQLite (encrypted   │
+│  Tailwind + Chart.js)  │     │  taxlens.api         │     │  in Phase 5)         │
+└────────────────────────┘     │                      │     │  - returns           │
+                               │  ┌─────────────────┐ │     │  - computation_cache │
+                               │  │ service layer   │ │     │  - overrides         │
+                               │  └─────────────────┘ │     └──────────────────────┘
+                               │  ┌─────────────────┐ │
+                               │  │ importers       │◀──── PDF / TXF / JSON / YAML
+                               │  │  pdf, txf, …    │ │
+                               │  └─────────────────┘ │
+                               │  ┌─────────────────┐ │
+                               │  │ engine (pure)   │◀──── tax_rules/federal/*.yaml
+                               │  │  Decimal math   │ │
+                               │  └─────────────────┘ │
+                               └──────────────────────┘
 ```
 
 ## Design principles
@@ -41,6 +68,13 @@ pytest
 2. **Rules live in YAML**, never in code. A new tax year is a one-file PR.
 3. **Every computation step is recorded** as `(label, formula, inputs, output)` so the UI can render an audit trail and cite back to the source PDF.
 4. **Never silently "fix" a return.** Surface deltas; let the user decide.
+5. **Idempotent imports.** Re-importing the same file (matched by sha256) replaces, never duplicates.
+
+## Adding a new tax year
+
+1. Drop a new file `tax_rules/federal/{YEAR}.yaml` with brackets, std deduction, FICA caps, NIIT/Add'l Medicare thresholds, CTC params. Use 2024 as a template.
+2. Add a golden return YAML in `tests/fixtures/returns/`.
+3. Run `pytest` — engine snapshot tests must match within $0.01.
 
 ## License
 
