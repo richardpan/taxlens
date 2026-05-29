@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "taxlens"
+version = "0.0.1"
+description = "Local-first multi-year US tax return analyzer with transparent math."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Richard Pan" }]
+dependencies = [
+  "pydantic>=2.6",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=4.1",
+  "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/richardpan/taxlens"
+Source   = "https://github.com/richardpan/taxlens"
+Issues   = "https://github.com/richardpan/taxlens/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/taxlens"]
+
+[tool.hatch.build]
+include = ["src/taxlens/**", "tax_rules/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

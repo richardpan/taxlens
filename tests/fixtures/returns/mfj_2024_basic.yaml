@@ -1,0 +1,32 @@
+# A straightforward MFJ 2024 return, no SE / no qualified income.
+# Hand-computed expected values:
+#   AGI            = 240000 + 6000 = 246000
+#   Std deduction  = 29200
+#   Taxable        = 216800
+#   Ordinary tax (MFJ 2024):
+#     10% on 23200       = 2320.00
+#     12% on (94300-23200)=71100        = 8532.00
+#     22% on (201050-94300)=106750      = 23485.00
+#     24% on (216800-201050)=15750      = 3780.00
+#   Total ordinary tax = 38117.00
+#   No qualified income, no SE, no NIIT (under threshold), no add'l Medicare.
+#   CTC: 2 children × 2000 = 4000 (no phaseout, AGI 246k < 400k)
+#   Total tax = 38117 − 4000 = 34117.00
+tax_year: 2024
+filing_status: mfj
+qualifying_children: 2
+wages: 240000
+interest_income: 6000
+federal_withholding: 40000
+
+expected:
+  agi: 246000.00
+  taxable_income: 216800.00
+  ordinary_tax: 38117.00
+  qualified_tax: 0.00
+  se_tax: 0.00
+  niit: 0.00
+  additional_medicare_tax: 0.00
+  credits: 4000.00
+  total_tax: 34117.00
+  refund_or_owed: 5883.00

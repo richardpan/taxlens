@@ -1,0 +1,42 @@
+# MFJ 2024 with qualified dividends + LTCG to exercise the stacked bracket walk.
+# AGI            = 240000 + 6000 + 18000 + 14000 = 278000
+# Std deduction  = 29200
+# Taxable income = 248800
+# Qualified income = qual_div + ltcg = 32000
+# Ordinary stack = 248800 - 32000 = 216800
+# Ordinary tax (same as basic fixture) = 38117.00
+#
+# Qualified bracket walk (MFJ 2024 thresholds: 0%≤94050, 15%≤583750, 20%>)
+#   stack starts at 216800, ends at 248800
+#   entire 32000 falls inside the 15% bracket → 32000 × 0.15 = 4800.00
+#
+# NIIT: investment_income = 6000 + 18000 + 14000 = 38000
+#       magi_excess = 278000 - 250000 = 28000
+#       NIIT base = min(38000, 28000) = 28000
+#       NIIT = 28000 × 0.038 = 1064.00
+# Additional Medicare: medicare_wages = 240000 (no SE), threshold 250000 → 0
+# CTC: 0 children → 0
+# Total tax = 38117 + 4800 + 0 + 0 + 1064 − 0 = 43981.00
+tax_year: 2024
+filing_status: mfj
+qualifying_children: 0
+wages: 240000
+interest_income: 6000
+ordinary_dividends: 18000
+qualified_dividends: 18000
+long_term_capital_gains: 14000
+federal_withholding: 45000
+reported_total_tax: 43981
+
+expected:
+  agi: 278000.00
+  taxable_income: 248800.00
+  ordinary_tax: 38117.00
+  qualified_tax: 4800.00
+  se_tax: 0.00
+  additional_medicare_tax: 0.00
+  niit: 1064.00
+  credits: 0.00
+  total_tax: 43981.00
+  refund_or_owed: 1019.00
+  reconciliation_delta: 0.00

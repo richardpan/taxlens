@@ -1,0 +1,86 @@
+# Federal tax rules for TY 2023.
+# Sources: IRS Rev. Proc. 2022-38.
+
+year: 2023
+
+standard_deduction:
+  single: 13850
+  mfj: 27700
+  mfs: 13850
+  hoh: 20800
+  qss: 27700
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [11000,    0.12]
+    - [44725,    0.22]
+    - [95375,    0.24]
+    - [182100,   0.32]
+    - [231250,   0.35]
+    - [578125,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [22000,    0.12]
+    - [89450,    0.22]
+    - [190750,   0.24]
+    - [364200,   0.32]
+    - [462500,   0.35]
+    - [693750,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [11000,    0.12]
+    - [44725,    0.22]
+    - [95375,    0.24]
+    - [182100,   0.32]
+    - [231250,   0.35]
+    - [346875,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [15700,    0.12]
+    - [59850,    0.22]
+    - [95350,    0.24]
+    - [182100,   0.32]
+    - [231250,   0.35]
+    - [578100,   0.37]
+
+qualified_brackets:
+  single: [[0, 0.00], [44625, 0.15], [492300, 0.20]]
+  mfj:    [[0, 0.00], [89250, 0.15], [553850, 0.20]]
+  mfs:    [[0, 0.00], [44625, 0.15], [276900, 0.20]]
+  hoh:    [[0, 0.00], [59750, 0.15], [523050, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 160200
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+ctc:
+  per_qualifying_child: 2000
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50

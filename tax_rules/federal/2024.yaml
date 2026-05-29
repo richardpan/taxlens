@@ -1,0 +1,95 @@
+# Federal tax rules for TY 2024.
+# Sources: IRS Rev. Proc. 2023-34, Forms 1040 / Sch SE / Form 8959 / Form 8960.
+# All money values are USD. Rates are decimals (0.10 = 10%).
+
+year: 2024
+
+standard_deduction:
+  single: 14600
+  mfj: 29200
+  mfs: 14600
+  hoh: 21900
+  qss: 29200
+
+# Ordinary income brackets. Each bracket: [lower_inclusive, rate].
+# Implicit upper bound = next bracket's lower bound; last bracket has no upper bound.
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [11600,    0.12]
+    - [47150,    0.22]
+    - [100525,   0.24]
+    - [191950,   0.32]
+    - [243725,   0.35]
+    - [609350,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [23200,    0.12]
+    - [94300,    0.22]
+    - [201050,   0.24]
+    - [383900,   0.32]
+    - [487450,   0.35]
+    - [731200,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [11600,    0.12]
+    - [47150,    0.22]
+    - [100525,   0.24]
+    - [191950,   0.32]
+    - [243725,   0.35]
+    - [365600,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [16550,    0.12]
+    - [63100,    0.22]
+    - [100500,   0.24]
+    - [191950,   0.32]
+    - [243700,   0.35]
+    - [609350,   0.37]
+
+# Qualified dividends + LTCG. Same bracket model.
+qualified_brackets:
+  single: [[0, 0.00], [47025, 0.15], [518900, 0.20]]
+  mfj:    [[0, 0.00], [94050, 0.15], [583750, 0.20]]
+  mfs:    [[0, 0.00], [47025, 0.15], [291875, 0.20]]
+  hoh:    [[0, 0.00], [63000, 0.15], [551350, 0.20]]
+
+# Self-employment tax (Schedule SE).
+se_tax:
+  net_earnings_multiplier: 0.9235     # SE income × 0.9235 = SE base
+  social_security_rate: 0.124         # 12.4%
+  social_security_wage_base: 168600
+  medicare_rate: 0.029                # 2.9%
+  # Deductible portion = 50% of SE tax (above-the-line adjustment).
+  deductible_fraction: 0.5
+
+# Additional Medicare Tax (Form 8959). Applies to wages + SE earnings above threshold.
+additional_medicare:
+  rate: 0.009                         # 0.9%
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Net Investment Income Tax (Form 8960).
+niit:
+  rate: 0.038                         # 3.8%
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Child Tax Credit (simplified — phaseout omitted; v1 engine adds full phaseout).
+ctc:
+  per_qualifying_child: 2000
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50           # $50 reduction per $1k AGI over threshold
