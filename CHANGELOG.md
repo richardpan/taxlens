@@ -2,6 +2,54 @@
 
 All notable changes to TaxLens.
 
+## [0.21.0] — 2026
+
+### Added — Tax year 2025 support
+
+New `src/taxlens/tax_rules/federal/2025.yaml` ships every block needed by
+the engine, populated with the IRS inflation-adjusted figures from
+**Rev. Proc. 2024-40**:
+
+- Standard deductions: $15,000 single / $30,000 MFJ / $22,500 HoH
+- Ordinary brackets (37% kicks in at $626,350 single / $751,600 MFJ)
+- Qualified/LTCG brackets (15% breakpoint at $48,350 / $96,700)
+- SE tax with SSA 2025 wage base $176,100
+- AMT exemption $88,100 single / $137,000 MFJ; phaseout at $626,350 / $1,252,700
+- QBI threshold $247,000 / $494,000
+- EITC parameters (max credit $649 / $4,328 / $7,152 / $8,046 by kid count)
+- Saver's Credit, Roth IRA, HSA, 401(k) limits
+- Trad IRA active-participant phaseout: single $79k–$89k, MFJ $126k–$146k,
+  spouse-covered-only $236k–$246k
+- Student loan interest phaseout: single $85k–$100k, MFJ $170k–$200k
+- All Phase-2 items (DCC, Form 5695, Form 8936) carried forward
+
+Plus 3 new tests verifying the YAML loads and the bracket walk produces
+the expected federal tax for a $100k single filer in 2025 ($13,614 on
+$85k taxable income).
+
+### Added — Remove imported return from the import screen
+
+Successful import rows now show a trash icon alongside the status badge.
+Click it and confirm to immediately delete the just-imported return
+without navigating to the dashboard. Useful when you accidentally upload
+the wrong file or duplicate.
+
+### Added — UX polish (income / tax breakdown surfaces new fields)
+
+- The Dashboard "Income composition by year" stacked bar now breaks out
+  Pensions, IRA distributions, taxable Social Security, and Unemployment
+  as their own series (auto-hidden when zero).
+- The Year-detail "Tax breakdown" cards now surface the early-withdrawal
+  penalty, Child & Dependent Care Credit, Residential Clean Energy
+  Credit, Clean Vehicle Credit, Student Loan Interest deduction,
+  Educator expense deduction, and Traditional IRA deduction.
+- Tax composition donut now includes the early-withdrawal penalty slice.
+- Header is now mobile-responsive: nav buttons wrap and scroll
+  horizontally on small screens; "PDFs never leave this machine"
+  blurb hides on mobile to save space.
+
+**Total tests: 270.**
+
 ## [0.20.0] — 2026
 
 ### Added — Phase-2 federal credits (Forms 2441, 5695, 8936)

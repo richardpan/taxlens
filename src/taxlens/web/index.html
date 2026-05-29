@@ -16,13 +16,13 @@
 <body class="bg-slate-50 text-slate-800">
 
 <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
-  <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white font-bold">T</div>
       <span class="font-semibold">TaxLens</span>
       <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 ml-2">local · <span id="returnCount">0</span> returns</span>
     </div>
-    <nav class="flex gap-1 text-sm">
+    <nav class="flex flex-wrap gap-1 text-sm order-3 sm:order-2 w-full sm:w-auto overflow-x-auto">
       <button data-tab="import"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">Import</button>
       <button data-tab="dashboard" class="tab px-3 py-1.5 rounded hover:bg-slate-100 active">Dashboard</button>
       <button data-tab="year"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Year detail</button>
@@ -33,11 +33,11 @@
       <button data-tab="plan"      class="tab px-3 py-1.5 rounded hover:bg-slate-100">Planner</button>
       <button data-tab="trends"    class="tab px-3 py-1.5 rounded hover:bg-slate-100">Trends 📈</button>
     </nav>
-    <div class="text-xs text-slate-500">PDFs never leave this machine</div>
+    <div class="text-xs text-slate-500 hidden md:block order-2 sm:order-3">PDFs never leave this machine</div>
   </div>
 </header>
 
-<main class="max-w-7xl mx-auto px-6 py-8">
+<main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
 
 <!-- ─── Import ─── -->
 <section id="tab-import" class="tab-panel hidden">
@@ -269,7 +269,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.20.0
+  TaxLens · local-first · v0.21.0
 </footer>
 
 <script src="/static/app.js"></script>

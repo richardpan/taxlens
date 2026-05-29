@@ -1,0 +1,346 @@
+# Federal tax rules for TY 2025.
+# Sources: IRS Rev. Proc. 2024-40 (inflation adjustments) + Form/SSA bulletins.
+# All money values are USD. Rates are decimals (0.10 = 10%).
+
+year: 2025
+
+standard_deduction:
+  single: 15000
+  mfj: 30000
+  mfs: 15000
+  hoh: 22500
+  qss: 30000
+
+# Ordinary income brackets. Each bracket: [lower_inclusive, rate].
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [11925,    0.12]
+    - [48475,    0.22]
+    - [103350,   0.24]
+    - [197300,   0.32]
+    - [250525,   0.35]
+    - [626350,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [23850,    0.12]
+    - [96950,    0.22]
+    - [206700,   0.24]
+    - [394600,   0.32]
+    - [501050,   0.35]
+    - [751600,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [11925,    0.12]
+    - [48475,    0.22]
+    - [103350,   0.24]
+    - [197300,   0.32]
+    - [250525,   0.35]
+    - [375800,   0.37]
+  hoh:
+    - [0,        0.10]
+    - [17000,    0.12]
+    - [64850,    0.22]
+    - [103350,   0.24]
+    - [197300,   0.32]
+    - [250500,   0.35]
+    - [626350,   0.37]
+
+# Qualified dividends + LTCG.
+qualified_brackets:
+  single: [[0, 0.00], [48350, 0.15], [533400, 0.20]]
+  mfj:    [[0, 0.00], [96700, 0.15], [600050, 0.20]]
+  mfs:    [[0, 0.00], [48350, 0.15], [300000, 0.20]]
+  hoh:    [[0, 0.00], [64750, 0.15], [566700, 0.20]]
+
+# Self-employment tax (Schedule SE).
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 176100      # SSA 2025 wage base
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+# Additional Medicare Tax (Form 8959). Thresholds statutory, not inflation-adjusted.
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Net Investment Income Tax (Form 8960). Thresholds statutory, not inflation-adjusted.
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Child Tax Credit.
+ctc:
+  per_qualifying_child: 2000
+  refundable_per_child: 1700
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50
+
+# AMT (Form 6251).
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 239100
+    mfj:    239100
+    mfs:    119550
+    hoh:    239100
+    qss:    239100
+  exemption:
+    single: 88100
+    mfj:    137000
+    mfs:    68650
+    hoh:    88100
+    qss:    137000
+  exemption_phaseout_start:
+    single: 626350
+    mfj:    1252700
+    mfs:    626350
+    hoh:    626350
+    qss:    1252700
+  phaseout_rate: 0.25
+
+# Schedule D worksheet cap rates.
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+# QBI deduction (§199A).
+qbi:
+  rate: 0.20
+  threshold:
+    single: 247000
+    mfj:    494000
+    mfs:    247000
+    hoh:    247000
+    qss:    494000
+  phaseout:     50000
+  phaseout_mfj: 100000
+
+# Annual contribution / deferral limits used by the Tax Savings Advisor.
+contribution_limits:
+  k401_elective_deferral:      23500
+  k401_catchup_50plus:          7500
+  ira_contribution:             7000
+  ira_catchup_50plus:           1000
+  hsa_self:                     4300
+  hsa_family:                   8550
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 150000
+    mfj:    236000
+    mfs:    0
+    hoh:    150000
+    qss:    236000
+  roth_ira_phaseout_end:
+    single: 165000
+    mfj:    246000
+    mfs:    10000
+    hoh:    165000
+    qss:    246000
+
+# Earned Income Tax Credit (Schedule EIC). Refundable. Source: Rev. Proc. 2024-40 §3.06.
+eitc:
+  investment_income_limit: 11950
+  parameters:
+    "0":
+      earned_income_amount: 8490
+      max_credit: 649
+      phaseout_rate: 0.0765
+      phaseout_start: 10620
+      phaseout_start_joint: 17730
+      completed_phaseout: 19104
+      completed_phaseout_joint: 26214
+    "1":
+      earned_income_amount: 12730
+      max_credit: 4328
+      phaseout_rate: 0.1598
+      phaseout_start: 23350
+      phaseout_start_joint: 30470
+      completed_phaseout: 50434
+      completed_phaseout_joint: 57554
+    "2":
+      earned_income_amount: 17880
+      max_credit: 7152
+      phaseout_rate: 0.2106
+      phaseout_start: 23350
+      phaseout_start_joint: 30470
+      completed_phaseout: 57310
+      completed_phaseout_joint: 64430
+    "3":
+      earned_income_amount: 17880
+      max_credit: 8046
+      phaseout_rate: 0.2106
+      phaseout_start: 23350
+      phaseout_start_joint: 30470
+      completed_phaseout: 61555
+      completed_phaseout_joint: 68675
+
+# Education credits (Form 8863). Phaseout windows are statutory (not inflation-adjusted).
+education_credits:
+  aotc:
+    max_expenses_per_student: 4000
+    first_tier_rate: 1.00
+    first_tier_cap: 2000
+    second_tier_rate: 0.25
+    refundable_fraction: 0.40
+  llc:
+    rate: 0.20
+    expense_cap: 10000
+  phaseout:
+    single: [80000, 90000]
+    mfj:    [160000, 180000]
+    mfs:    [0, 0]
+    hoh:    [80000, 90000]
+    qss:    [160000, 180000]
+
+# Saver's Credit (Form 8880).
+savers_credit:
+  max_contribution_per_person: 2000
+  rates:
+    single:
+      - [23750, 0.50]
+      - [26250, 0.20]
+      - [39500, 0.10]
+    mfj:
+      - [47500, 0.50]
+      - [51000, 0.20]
+      - [79000, 0.10]
+    mfs:
+      - [23750, 0.50]
+      - [26250, 0.20]
+      - [39500, 0.10]
+    hoh:
+      - [35625, 0.50]
+      - [39375, 0.20]
+      - [59250, 0.10]
+    qss:
+      - [47500, 0.50]
+      - [51000, 0.20]
+      - [79000, 0.10]
+
+# Premium Tax Credit (Form 8962). FPL values are 2024 (used by TY 2025 returns).
+# Applicable Figure curve reflects the IRA extension through TY 2025
+# (no 400% cliff, 8.5% cap above 400% FPL).
+ptc:
+  fpl_base: 15060
+  fpl_increment_per_person: 5380
+  applicable_figure:
+    - [0,   150,  0.000, 0.000]
+    - [150, 200,  0.000, 0.020]
+    - [200, 250,  0.020, 0.040]
+    - [250, 300,  0.040, 0.060]
+    - [300, 400,  0.060, 0.085]
+    - [400, 99999, 0.085, 0.085]
+  repayment_limits:
+    - {below_pct_fpl: 200, single: 400,  family: 800}
+    - {below_pct_fpl: 300, single: 1025, family: 2050}
+    - {below_pct_fpl: 400, single: 1700, family: 3400}
+
+
+# Social Security taxability (§86) — thresholds unchanged since 1993.
+social_security:
+  base_threshold:
+    single: 25000
+    mfj:    32000
+    mfs:    0
+    hoh:    25000
+    qss:    25000
+  second_threshold:
+    single: 34000
+    mfj:    44000
+    mfs:    0
+    hoh:    34000
+    qss:    34000
+  first_tier_rate:  0.50
+  second_tier_rate: 0.85
+
+
+# Traditional IRA deduction (§219) — active-participant phaseout.
+ira_deduction:
+  contribution_limit:
+    under_50:   7000
+    fifty_plus: 8000
+  phaseout_covered:
+    single: { start: 79000, end: 89000 }
+    hoh:    { start: 79000, end: 89000 }
+    mfj:    { start: 126000, end: 146000 }
+    qss:    { start: 126000, end: 146000 }
+    mfs:    { start: 0,     end: 10000 }
+  phaseout_spouse_covered_only:
+    mfj:    { start: 236000, end: 246000 }
+    mfs:    { start: 0,     end: 10000 }
+
+# Student loan interest deduction (§221).
+student_loan_interest:
+  max_deduction: 2500
+  phaseout:
+    single: { start: 85000, end: 100000 }
+    hoh:    { start: 85000, end: 100000 }
+    qss:    { start: 170000, end: 200000 }
+    mfj:    { start: 170000, end: 200000 }
+    mfs:    { disabled: true }
+
+# Educator expense deduction (§62(a)(2)(D)).
+educator_expense:
+  per_educator_cap: 300
+
+# Child & Dependent Care Credit (Form 2441).
+dependent_care_credit:
+  expense_cap_one:      3000
+  expense_cap_two_plus: 6000
+  refundable: false
+  rate_tiers:
+    - [15000, 0.35]
+    - [17000, 0.34]
+    - [19000, 0.33]
+    - [21000, 0.32]
+    - [23000, 0.31]
+    - [25000, 0.30]
+    - [27000, 0.29]
+    - [29000, 0.28]
+    - [31000, 0.27]
+    - [33000, 0.26]
+    - [35000, 0.25]
+    - [37000, 0.24]
+    - [39000, 0.23]
+    - [41000, 0.22]
+    - [43000, 0.21]
+    - [45000, 0.20]
+    - [99999999, 0.20]
+
+# Residential Clean Energy Credit (Form 5695 Part I).
+residential_clean_energy:
+  rate: 0.30
+
+# Clean Vehicle Credit (Form 8936) — MAGI cap.
+clean_vehicle:
+  enforce: true
+  new_magi_cap:
+    single: 150000
+    hoh:    225000
+    mfj:    300000
+    qss:    300000
+    mfs:    150000
+  used_magi_cap:
+    single: 75000
+    hoh:    112500
+    mfj:    150000
+    qss:    150000
+    mfs:    75000

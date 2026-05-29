@@ -116,7 +116,11 @@ async function uploadFiles(files) {
           <span class="text-emerald-600">✓</span>
           <div><div class="font-medium">${f.name}</div>
             <div class="text-xs text-slate-500">TY ${out.tax_year} · ${out.filing_status.toUpperCase()} · ${out.source}${warn}</div>
-          </div></div>${badge}`;
+          </div></div>
+        <div class="flex items-center gap-2">${badge}
+          <button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Remove this return"
+            onclick="removeImportedReturn(${out.id}, ${out.tax_year}, this)">🗑</button>
+        </div>`;
     } catch (err) {
       // err.detail (set by api()) contains the diagnostic from the 422 body.
       // Split on " Tail: " so the noisy traceback can be hidden by default.
@@ -208,6 +212,27 @@ window.deleteReturn = async (id, year) => {
   }
 };
 
+// Remove an entry directly from the post-upload import list (no nav required).
+window.removeImportedReturn = async (id, year, btn) => {
+  if (!confirm(`Remove tax year ${year} from TaxLens? This cannot be undone.`)) return;
+  const row = btn.closest('div.px-5');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await api('/api/returns/' + id, { method: 'DELETE' });
+    FULL.delete(id);
+    if (row) {
+      row.style.opacity = '0.5';
+      row.innerHTML = `<div class="text-xs text-slate-500 italic">Removed tax year ${year}.</div>`;
+    }
+    await refreshAll();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = '🗑';
+    alert('Could not remove return: ' + (err.detail || err.message));
+  }
+};
+
 function recreate(id, cfg) {
   if (charts[id]) charts[id].destroy();
   charts[id] = new Chart(document.getElementById(id), cfg);
@@ -216,21 +241,30 @@ function recreate(id, cfg) {
 function drawIncomeStack(fulls) {
   const years = fulls.map(f => f.tax_year);
   const series = {
-    Wages:    fulls.map(f => Number(f.return.wages)),
-    'Qual div': fulls.map(f => Number(f.return.qualified_dividends)),
-    'Ord div': fulls.map(f => Number(f.return.ordinary_dividends) - Number(f.return.qualified_dividends)),
-    LTCG:     fulls.map(f => Number(f.return.long_term_capital_gains)),
-    STCG:     fulls.map(f => Number(f.return.short_term_capital_gains)),
-    Interest: fulls.map(f => Number(f.return.interest_income)),
-    SE:       fulls.map(f => Number(f.return.se_income)),
-    Other:    fulls.map(f => Number(f.return.other_ordinary_income)),
+    Wages:        fulls.map(f => Number(f.return.wages)),
+    'Qual div':   fulls.map(f => Number(f.return.qualified_dividends)),
+    'Ord div':    fulls.map(f => Number(f.return.ordinary_dividends) - Number(f.return.qualified_dividends)),
+    LTCG:         fulls.map(f => Number(f.return.long_term_capital_gains)),
+    STCG:         fulls.map(f => Number(f.return.short_term_capital_gains)),
+    Interest:     fulls.map(f => Number(f.return.interest_income)),
+    SE:           fulls.map(f => Number(f.return.se_income)),
+    Pensions:     fulls.map(f => Number(f.return.pension_distributions_taxable || 0)),
+    'IRA dist.':  fulls.map(f => Number(f.return.ira_distributions_taxable || 0)),
+    'SS taxable': fulls.map(f => Number(f.result.social_security_taxable || 0)),
+    Unemployment: fulls.map(f => Number(f.return.unemployment_compensation || 0)),
+    Other:        fulls.map(f => Number(f.return.other_ordinary_income)),
   };
-  const colors = ['#34d399','#60a5fa','#3b82f6','#a78bfa','#c084fc','#fbbf24','#f472b6','#94a3b8'];
-  const datasets = Object.entries(series).map(([label, data], i) => ({ label, data, backgroundColor: colors[i] }));
+  // Drop all-zero series to keep the legend tidy across older returns.
+  for (const k of Object.keys(series)) {
+    if (series[k].every(v => v === 0)) delete series[k];
+  }
+  const colors = ['#34d399','#60a5fa','#3b82f6','#a78bfa','#c084fc','#fbbf24','#f472b6','#22d3ee','#06b6d4','#facc15','#fb923c','#94a3b8'];
+  const datasets = Object.entries(series).map(([label, data], i) => ({ label, data, backgroundColor: colors[i % colors.length] }));
   recreate('incomeStack', {
     type: 'bar',
     data: { labels: years, datasets },
     options: {
+      maintainAspectRatio: false,
       scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } } },
       plugins: { legend: { position: 'bottom' } }
     }
@@ -270,6 +304,7 @@ function drawTaxDonut(full) {
     ['SE tax',          Number(r.se_tax)],
     ['Add\'l Medicare', Number(r.additional_medicare_tax)],
     ['NIIT',            Number(r.niit)],
+    ['Early-wd penalty', Number(r.early_withdrawal_penalty || 0)],
     ['State',           Number(r.state_result ? r.state_result.state_tax : 0)],
   ].filter(([_, v]) => v > 0);
   recreate('taxDonut', {
@@ -341,6 +376,8 @@ async function renderYearDetail() {
     ['SE tax', r.se_tax],
     ['Additional Medicare', r.additional_medicare_tax],
     ['NIIT', r.niit],
+    ...(Number(r.early_withdrawal_penalty || 0) > 0
+        ? [['Early-withdrawal penalty (§72(t))', '+' + r.early_withdrawal_penalty]] : []),
     ['Credits', '-' + r.credits],
     ...(Number(r.eitc || 0) > 0
         ? [['Earned Income Tax Credit (refundable)', '-' + r.eitc]] : []),
@@ -354,10 +391,24 @@ async function renderYearDetail() {
         ? [['Additional CTC refundable (Form 8812)', '-' + r.actc]] : []),
     ...(Number(r.savers_credit || 0) > 0
         ? [["Saver's Credit (Form 8880)", '-' + r.savers_credit]] : []),
+    ...(Number(r.dependent_care_credit || 0) > 0
+        ? [['Child & Dependent Care Credit (Form 2441)', '-' + r.dependent_care_credit]] : []),
+    ...(Number(r.dependent_care_credit_refundable || 0) > 0
+        ? [['Dependent Care Credit (refundable, TY2021)', '-' + r.dependent_care_credit_refundable]] : []),
+    ...(Number(r.residential_clean_energy_credit || 0) > 0
+        ? [['Residential Clean Energy Credit (Form 5695)', '-' + r.residential_clean_energy_credit]] : []),
+    ...(Number(r.clean_vehicle_credit || 0) > 0
+        ? [['Clean Vehicle Credit (Form 8936)', '-' + r.clean_vehicle_credit]] : []),
     ...(Number(r.ptc_net || 0) > 0
         ? [['Premium Tax Credit refund (Form 8962)', '-' + r.ptc_net]] : []),
     ...(Number(r.ptc_excess_aptc_repayment || 0) > 0
         ? [['Excess APTC repayment (Form 8962)', '+' + r.ptc_excess_aptc_repayment]] : []),
+    ...(Number(r.student_loan_interest_deduction || 0) > 0
+        ? [['Student loan interest deduction (Sch 1)', '-' + r.student_loan_interest_deduction]] : []),
+    ...(Number(r.educator_expense_deduction || 0) > 0
+        ? [['Educator expenses deduction (Sch 1)', '-' + r.educator_expense_deduction]] : []),
+    ...(Number(r.ira_deduction_allowed || 0) > 0
+        ? [['Traditional IRA deduction (§219)', '-' + r.ira_deduction_allowed]] : []),
     ['Total federal tax', r.total_tax],
     ...(Number(r.capital_loss_carryforward_out || 0) > 0
         ? [['Cap-loss carried to next year', r.capital_loss_carryforward_out]] : []),
