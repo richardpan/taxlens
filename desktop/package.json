@@ -1,6 +1,6 @@
 {
   "name": "taxlens-desktop",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "private": true,
   "description": "Electron shell that hosts the TaxLens local sidecar + web UI.",
   "main": "main.js",

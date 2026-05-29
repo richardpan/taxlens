@@ -2,6 +2,33 @@
 
 All notable changes to TaxLens.
 
+## [0.15.2] — 2026
+
+### Added — TurboTax, H&R Block, FreeTaxUSA PDF compatibility
+
+Third-party tax software exports follow the IRS 1040 layout but each has
+its own quirks: explicit `Filing Status: X` markers instead of checkbox
+indicators, column-split layouts where pdfplumber emits label and amount
+on adjacent lines, and cover/summary pages preceding the actual form.
+This release hardens the importer for all three major vendors:
+
+- **Filing-status detection rewritten** with three tiers: (1) explicit
+  "Filing Status: X" / "Your filing status is X" markers (TurboTax,
+  H&R Block, FreeTaxUSA cover pages); (2) checkbox indicators on the
+  actual form; (3) count-based fallback (the selected status appears more
+  times in the document than the option labels do). Eliminates a class of
+  false positives where the first-listed option (MFJ) was always picked
+  because all 5 labels appear once on the IRS form.
+- **Next-line money fallback** in `_first_money_after`: if the label line
+  has no amount, look at the next non-empty line (column-split layouts
+  in TurboTax/H&R Block PDFs). Uses a stricter ≥3-digit or decimal
+  money pattern there to avoid grabbing stray line references.
+- **New test fixtures** in `tests/third_party_pdfs.py` generate mock
+  TurboTax, H&R Block, and FreeTaxUSA-style PDFs.
+- **9 new golden tests** in `tests/test_third_party_pdfs.py` cover all 5
+  filing statuses × all 3 vendors plus year detection across vendor
+  header styles. **214 tests passing.**
+
 ## [0.15.1] — 2026
 
 ### Fixed — PDF upload no longer returns opaque 500 errors

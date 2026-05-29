@@ -30,27 +30,48 @@ def _money(s: str) -> Decimal:
 
 
 def _first_money_after(label_re: str, text: str) -> Decimal | None:
-    """Find the first money string that appears on the SAME LINE as a label match.
+    """Find the first money string that appears on the SAME LINE as a label match,
+    falling back to the NEXT non-empty line if the label line has no number
+    (TurboTax / H&R Block often render label and amount in separate text columns,
+    which pdfplumber emits on adjacent lines).
 
     Earlier versions used a permissive cross-line bridge, which let stray
     digits like '-2' from 'Form W-2 box 1' or '22' from '(add lines 22 and 23)'
-    bleed into the value. We now constrain matching to one physical line."""
+    bleed into the value. We now constrain to the label's line + at most one
+    follow-up line, and we ignore numbers that look like line references
+    (e.g. 'see line 22') by requiring at least 3 digits or a decimal point on
+    the follow-up line."""
     label_pat = re.compile(label_re, re.IGNORECASE)
     money_pat = re.compile(_MONEY)
-    for line in text.splitlines():
+    # Stricter pattern for next-line fallback: real money has ≥3 digits or a cent decimal.
+    strict_money_pat = re.compile(r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?|\$?\s*-?[0-9]+\.[0-9]{1,2}")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
         m = label_pat.search(line)
         if not m:
             continue
-        # Look at the tail after the label match end.
         tail = line[m.end():]
-        # Take the LAST money on the line (handles "(add lines 22 and 23) ...... $1,234").
         money_matches = list(money_pat.finditer(tail))
-        if not money_matches:
-            continue
-        try:
-            return _money(money_matches[-1].group(0))
-        except InvalidOperation:
-            continue
+        if money_matches:
+            try:
+                return _money(money_matches[-1].group(0))
+            except InvalidOperation:
+                continue
+        # Same-line fallback failed — look at next non-empty line (column-split layouts).
+        for j in range(i + 1, min(i + 3, len(lines))):
+            nxt = lines[j].strip()
+            if not nxt:
+                continue
+            # Bail if the next line looks like another label (starts with a line number + word).
+            if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]", lines[j]):
+                break
+            strict = list(strict_money_pat.finditer(nxt))
+            if strict:
+                try:
+                    return _money(strict[-1].group(0))
+                except InvalidOperation:
+                    pass
+            break
     return None
 
 
@@ -119,6 +140,16 @@ STATUS_PATTERNS = [
     (FilingStatus.SINGLE, re.compile(r"\bSingle\b")),
 ]
 
+# Explicit selection markers used by TurboTax / H&R Block / FreeTaxUSA on cover
+# pages and worksheets. These take priority over the form's option-list scan
+# because the option list contains ALL 5 status labels (one of which would
+# otherwise be picked spuriously by the joined-text fallback).
+STATUS_EXPLICIT = [
+    re.compile(r"Filing\s*Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
+    re.compile(r"Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
+    re.compile(r"Your\s+filing\s+status\s+is\s+([A-Za-z][^\n.]{0,40})", re.IGNORECASE),
+]
+
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
 
 
@@ -181,11 +212,39 @@ def _detect_year(pages: list[str]) -> int | None:
 
 def _detect_status(pages: list[str]) -> FilingStatus | None:
     joined = "\n".join(pages)
+    # Explicit phrase → status map (case-insensitive substring of captured group).
+    explicit_map: list[tuple[FilingStatus, str]] = [
+        (FilingStatus.MFJ,    "married filing jointly"),
+        (FilingStatus.MFS,    "married filing separately"),
+        (FilingStatus.HOH,    "head of household"),
+        (FilingStatus.QSS,    "qualifying surviving spouse"),
+        (FilingStatus.QSS,    "qualifying widow"),  # pre-2022 label
+        (FilingStatus.SINGLE, "single"),
+    ]
+
+    # 1. Highest priority: explicit "Filing Status: X" markers (TurboTax, H&R Block).
+    for pat in STATUS_EXPLICIT:
+        for m in pat.finditer(joined):
+            phrase = m.group(1).strip().lower()
+            for status, needle in explicit_map:
+                if needle in phrase:
+                    return status
+
+    # 2. Check-mark indicators on the actual form.
     for line in joined.splitlines():
         if CHECKED_HINT.search(line):
             for status, pat in STATUS_PATTERNS:
                 if pat.search(line):
                     return status
+
+    # 3. Last-resort fallback — pick whichever status appears the MOST times
+    #    (the actual selection is usually echoed on multiple pages/worksheets,
+    #    whereas option labels appear once on the form).
+    counts = [(status, len(pat.findall(joined))) for status, pat in STATUS_PATTERNS]
+    if any(c > 0 for _, c in counts):
+        counts.sort(key=lambda x: -x[1])
+        if counts[0][1] > counts[1][1]:
+            return counts[0][0]
     for status, pat in STATUS_PATTERNS:
         if pat.search(joined):
             return status
