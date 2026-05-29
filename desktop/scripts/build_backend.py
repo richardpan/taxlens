@@ -53,7 +53,7 @@ def main() -> int:
     shutil.copy2(src, dst)
     if os.name != "nt":
         dst.chmod(0o755)
-    print(f"→ {dst}")
+    print(f"-> {dst}")
     return 0
 
 
