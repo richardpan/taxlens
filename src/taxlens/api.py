@@ -74,6 +74,55 @@ async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
         }
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        # Anything else (encrypted PDF, parser crash, pydantic validation, etc.)
+        # — return diagnostic info instead of a bare 500 so the user sees what went wrong.
+        import traceback
+        tb = traceback.format_exc().splitlines()[-6:]
+        raise HTTPException(
+            422,
+            f"Could not parse {file.filename or 'upload'}: {type(e).__name__}: {e}. "
+            f"Try /api/debug/extract to inspect the PDF text. Tail: {' | '.join(tb)}",
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+@app.post("/api/debug/extract")
+async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Diagnostic: extract raw text from a PDF (or first 4KB of any file) without
+    trying to parse it as a return. Helps debug import failures by showing
+    exactly what the importer sees."""
+    suffix = Path(file.filename or "").suffix.lower() or ".bin"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
+    try:
+        if suffix == ".pdf":
+            import pdfplumber
+            try:
+                with pdfplumber.open(str(tmp_path)) as pdf:
+                    pages = [(p.extract_text() or "") for p in pdf.pages]
+                return {
+                    "filename": file.filename,
+                    "kind": "pdf",
+                    "page_count": len(pages),
+                    "nonempty_pages": sum(1 for p in pages if p.strip()),
+                    "pages": [{"index": i, "text": p[:8000]} for i, p in enumerate(pages)],
+                }
+            except Exception as e:
+                return {
+                    "filename": file.filename,
+                    "kind": "pdf",
+                    "error": f"{type(e).__name__}: {e}",
+                    "hint": "PDF may be encrypted, corrupted, or scanned without text layer.",
+                }
+        else:
+            raw = tmp_path.read_bytes()[:4096]
+            try:
+                return {"filename": file.filename, "kind": "text", "preview": raw.decode("utf-8", errors="replace")}
+            except Exception:
+                return {"filename": file.filename, "kind": "binary", "size": tmp_path.stat().st_size}
     finally:
         tmp_path.unlink(missing_ok=True)
 

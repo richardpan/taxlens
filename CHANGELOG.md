@@ -2,6 +2,39 @@
 
 All notable changes to TaxLens.
 
+## [0.15.1] — 2026
+
+### Fixed — PDF upload no longer returns opaque 500 errors
+
+Real-world third-party tax-software PDFs (FreeTaxUSA, TurboTax, H&R Block)
+follow the IRS Form 1040 layout but use the exact statutory line phrasing
+(e.g. line 1a reads *"Total amount from Form(s) W-2, box 1"* — there is no
+word "Wages"). Earlier `LINE_PATTERNS` required keywords the IRS form
+doesn't actually print, and any other unexpected exception (encrypted PDF,
+pdfplumber crash, pydantic validation error) bubbled up as an unhelpful
+**500 Internal Server Error**.
+
+This release:
+
+- **Broadens `LINE_PATTERNS`** to match the canonical IRS phrasing used by
+  third-party software — line 1a (W-2 box 1), line 1z (sum of 1a–1h), line
+  24 (Add lines 22 and 23), line 10 (Adjustments from Schedule 1), and
+  more permissive variants for AGI / taxable income / withholding.
+- **Broadens `YEAR_PATTERNS`** to handle "2023 Form 1040", "OMB No.
+  1545-0074 2023", "For the year Jan 1 – Dec 31, 2023", and "Tax Year 2023".
+- **Wraps `pdfplumber.open`** to detect encrypted/password-protected PDFs
+  and emit a clear 400 instead of a 500.
+- **Wraps `Return()` construction** so a bad field value yields a
+  diagnostic 400 listing the detected year/status/fields, not a 500.
+- **Broadens the import endpoint** (`POST /api/returns/import`) to catch
+  every exception and return HTTP 422 with the exception type, message,
+  and traceback tail — so users immediately see what failed.
+- **New diagnostic endpoint** `POST /api/debug/extract` returns the raw
+  per-page text pdfplumber sees, so failing imports can be debugged
+  without server access (and without sharing the PDF with anyone).
+
+No behavior changes for already-working PDFs. **205 tests passing.**
+
 ## [0.15.0] — 2026
 
 ### Added — "What changed?" diff with driver attribution

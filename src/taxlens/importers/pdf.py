@@ -56,31 +56,59 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
 
 LINE_PATTERNS: dict[str, list[str]] = {
     "wages":                   [r"Line\s*1[az]?\s+Wages",
-                                r"\b1\s*[az]?\b[^\n]{0,40}?Wages"],
+                                r"\b1\s*[az]?\b[^\n]{0,40}?Wages",
+                                # Actual IRS 1040 line 1a phrasing — no "Wages" word
+                                r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2[^\n]{0,30}?box\s*1",
+                                # Line 1z is the W-2 totals line on post-2021 1040
+                                r"\b1\s*z\b[^\n]{0,80}?Add\s+lines?\s*1a\s+through\s+1h"],
     "interest_income":         [r"Line\s*2b\b[^\n]{0,40}?Taxable interest",
                                 r"\b2\s*b\b[^\n]{0,40}?Taxable interest"],
     "qualified_dividends":     [r"Line\s*3a\b[^\n]{0,40}?Qualified dividends",
                                 r"\b3\s*a\b[^\n]{0,40}?Qualified dividends"],
     "ordinary_dividends":      [r"Line\s*3b\b[^\n]{0,40}?Ordinary dividends",
                                 r"\b3\s*b\b[^\n]{0,40}?Ordinary dividends"],
-    "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain"],
+    "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain",
+                                r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)"],
     "se_income":               [r"Line\s*3\b[^\n]{0,40}?Business income",
-                                r"Schedule\s*C[^\n]{0,40}?Net profit"],
-    "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income"],
-    "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income"],
-    "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit"],
-    "agi_reported":            [r"Line\s*11\b[^\n]{0,40}?Adjusted gross income"],
-    "taxable_income_reported": [r"Line\s*15\b[^\n]{0,40}?Taxable income"],
-    "total_tax_reported":      [r"Line\s*24\b[^\n]{0,40}?Total tax"],
-    "federal_withholding":     [r"Line\s*25a?\b[^\n]{0,80}?Federal income tax withheld"],
-    "estimated_payments":      [r"Line\s*26\b[^\n]{0,80}?estimated tax payments"],
-    "qualifying_children":     [r"Number of qualifying children"],
+                                r"Schedule\s*C[^\n]{0,40}?Net profit",
+                                r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)"],
+    "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income",
+                                r"\b8\b[^\n]{0,40}?(?:Additional|Other) income"],
+    "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income",
+                                # Schedule 1 line 26 in FreeTaxUSA
+                                r"\b10\b[^\n]{0,80}?Adjustments to income\s+from\s+Schedule\s*1"],
+    "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
+                                r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
+    "agi_reported":            [r"Line\s*11\b[^\n]{0,40}?Adjusted gross income",
+                                r"\b11\b[^\n]{0,80}?Adjusted gross income"],
+    "taxable_income_reported": [r"Line\s*15\b[^\n]{0,40}?Taxable income",
+                                r"\b15\b[^\n]{0,80}?Taxable income"],
+    "total_tax_reported":      [r"Line\s*24\b[^\n]{0,40}?Total tax",
+                                r"\b24\b[^\n]{0,80}?(?:total tax|Add lines\s*22\s+and\s+23)"],
+    "federal_withholding":     [r"Line\s*25a?\b[^\n]{0,80}?Federal income tax withheld",
+                                r"\b25\s*a?\b[^\n]{0,80}?Federal income tax withheld"],
+    "estimated_payments":      [r"Line\s*26\b[^\n]{0,80}?estimated tax payments",
+                                r"\b26\b[^\n]{0,80}?estimated tax payments"],
+    "qualifying_children":     [r"Number of qualifying children",
+                                r"Qualifying children[^\n]{0,40}?for\s+child\s+tax\s+credit"],
 }
 
 YEAR_PATTERNS = [
+    # "Form 1040 (2023)" — older IRS style
     re.compile(r"Form\s*1040[^\n]{0,30}?(20\d{2})", re.IGNORECASE),
+    # "2023 Form 1040" — TurboTax, FreeTaxUSA, H&R Block headers
+    re.compile(r"\b(20\d{2})\s+Form\s*1040", re.IGNORECASE),
+    # IRS official line: "U.S. Individual Income Tax Return 2023"
     re.compile(r"\b(20\d{2})\b\s+U\.?S\.?\s*Individual", re.IGNORECASE),
+    re.compile(r"U\.?S\.?\s*Individual[^\n]{0,80}?(20\d{2})", re.IGNORECASE),
+    # "Tax Year: 2023" — many third-party formats
     re.compile(r"Tax\s*Year\s*[:\-]?\s*(20\d{2})", re.IGNORECASE),
+    # "For the year Jan. 1 - Dec. 31, 2023" — IRS line above the title
+    re.compile(r"For\s+the\s+year[^\n]{0,80}?(20\d{2})", re.IGNORECASE),
+    # FreeTaxUSA cover-page footer "Tax Year 2023"
+    re.compile(r"Tax\s*Year\s+(20\d{2})", re.IGNORECASE),
+    # Last-resort: OMB number line "OMB No. 1545-0074  2023"
+    re.compile(r"OMB\s*No\.\s*1545-0074[^\n]{0,30}?(20\d{2})", re.IGNORECASE),
 ]
 
 STATUS_PATTERNS = [
@@ -98,9 +126,22 @@ def _extract_text_per_page(path: Path) -> tuple[list[str], bool]:
     """Returns (pages, ocr_used). When pdfplumber finds no text on most pages,
     we fall back to Tesseract OCR via `pytesseract` + `pdf2image` (if installed)."""
     pages: list[str] = []
-    with pdfplumber.open(str(path)) as pdf:
-        for p in pdf.pages:
-            pages.append(p.extract_text() or "")
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            for p in pdf.pages:
+                pages.append(p.extract_text() or "")
+    except Exception as e:
+        # Common cases: encrypted PDF, malformed xref, pdfplumber/pdfminer crash.
+        msg = str(e).lower()
+        if "encrypt" in msg or "password" in msg:
+            raise ValueError(
+                f"PDF is password-protected. Remove the password and re-upload. "
+                f"(Underlying error: {e})"
+            ) from e
+        raise ValueError(
+            f"Could not read PDF text layer ({type(e).__name__}: {e}). "
+            f"Try POST /api/debug/extract to diagnose."
+        ) from e
 
     nonempty = sum(1 for p in pages if p.strip())
     if nonempty >= max(1, len(pages) // 2):
@@ -191,13 +232,20 @@ def import_pdf(path: Path) -> Imported:
     fields.pop("agi_reported", None)
     fields.pop("taxable_income_reported", None)
 
-    ret = Return(
-        tax_year=tax_year,
-        filing_status=filing_status,
-        qualifying_children=children,
-        reported_total_tax=reported_total_tax,
-        **fields,
-    )
+    try:
+        ret = Return(
+            tax_year=tax_year,
+            filing_status=filing_status,
+            qualifying_children=children,
+            reported_total_tax=reported_total_tax,
+            **fields,
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Extracted fields from {path.name} failed validation: {type(e).__name__}: {e}. "
+            f"Detected year={tax_year}, status={filing_status}, fields={sorted(fields.keys())}. "
+            f"Try POST /api/debug/extract to inspect raw PDF text."
+        ) from e
     if ocr_used:
         warnings.insert(0, "PDF appeared to be scanned; used OCR fallback. Results may be approximate — please double-check.")
     return Imported(
