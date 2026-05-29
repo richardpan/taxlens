@@ -71,6 +71,7 @@ class Return(BaseModel):
     unrecaptured_1250_gains: Decimal = Decimal(0)     # 25%-rate gain (Sch D wksht)
     se_income: Decimal = Decimal(0)              # Schedule C net profit
     other_ordinary_income: Decimal = Decimal(0)
+    unemployment_compensation: Decimal = Decimal(0)  # 1099-G box 1 → Sch 1 line 7
 
     # Schedule E (rentals + royalties + passthrough)
     rental_net_income: Decimal = Decimal(0)        # net of expenses & depreciation; can be < 0
@@ -169,6 +170,9 @@ class Return(BaseModel):
     # Above-the-line adjustments (Schedule 1 Part II), excluding ½ SE tax (engine adds it)
     hsa_deduction: Decimal = Decimal(0)
     other_adjustments: Decimal = Decimal(0)
+    # Common above-the-line adjustments (Schedule 1 Part II).
+    student_loan_interest_paid: Decimal = Decimal(0)  # Sch 1 line 21; engine caps at $2500 and phases out by MAGI
+    educator_expenses: Decimal = Decimal(0)           # Sch 1 line 11; capped per year ($250→$300 in 2022+)
 
     # Deduction choice
     itemized_deductions: Decimal | None = None   # None → use standard deduction
@@ -259,6 +263,8 @@ class TaxResult(BaseModel):
     # IRA deductibility (§219) — claimed amount after limit + active-participant phaseout.
     ira_deduction_allowed: Decimal = Decimal(0)            # Schedule 1 line 20
     ira_deduction_disallowed: Decimal = Decimal(0)         # phased-out portion (becomes basis)
+    student_loan_interest_deduction: Decimal = Decimal(0)  # Sch 1 line 21 (after $2500 cap + phaseout)
+    educator_expense_deduction: Decimal = Decimal(0)       # Sch 1 line 11 (after annual cap)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
@@ -340,6 +346,13 @@ class Rules(BaseModel):
     #    phaseout_covered: {single: {start, end}, mfj: {...}, mfs: {...}, ...},
     #    phaseout_spouse_covered_only: {mfj: {...}, mfs: {...}}}
     ira_deduction: dict[str, Any] | None = None
+    # Student loan interest deduction (§221). When None, deduction allowed in full.
+    #   {max_deduction: 2500,
+    #    phaseout: {single: {start, end}, mfj: {...}, mfs: {disabled: true}, ...}}
+    student_loan_interest: dict[str, Any] | None = None
+    # Educator expense deduction (§62(a)(2)(D)). When None, no cap enforced.
+    #   {per_educator_cap: 300}  # doubled on MFJ when both spouses are educators
+    educator_expense: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

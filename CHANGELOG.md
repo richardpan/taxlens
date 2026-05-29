@@ -2,6 +2,34 @@
 
 All notable changes to TaxLens.
 
+## [0.19.0] — 2026
+
+### Added — Common income & above-the-line adjustments
+
+Three commonly-encountered items closed in this drop:
+
+- **Unemployment compensation** (1099-G box 1, Schedule 1 line 7) — new
+  `Return.unemployment_compensation` field, included in gross income.
+- **Student loan interest deduction (§221)** — new
+  `Return.student_loan_interest_paid`, capped at $2,500/year, MAGI
+  phaseout via linear ramp, fully disabled for MFS per §221(e)(2).
+  YAML brackets supplied for every year 2015–2024 (2024: single
+  $80k–$95k, MFJ $165k–$195k).
+- **Educator expense deduction (§62(a)(2)(D))** — new
+  `Return.educator_expenses`, per-educator cap ($250 → $300 in 2022),
+  auto-doubled on MFJ when both spouses are educators (caller passes
+  the combined paid amount).
+
+New `TaxResult` fields: `student_loan_interest_deduction`,
+`educator_expense_deduction`.
+
+When YAML lacks `student_loan_interest:` or `educator_expense:` the
+engine falls back to full-deduction behavior (back-compat).
+
+**Tests:** +13 (251 total). Covers unemployment, SLI tiers + MFS
+prohibition + MFJ thresholds, educator caps + historical $250 cap +
+MFJ doubling.
+
 ## [0.18.0] — 2026
 
 ### Added — Traditional IRA deduction phaseout (§219(g))

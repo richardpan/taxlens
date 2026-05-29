@@ -297,6 +297,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         + net_cap
         + ret.se_income
         + ret.other_ordinary_income
+        + ret.unemployment_compensation
         + sch_e_net
         + ret.pension_distributions_taxable
         + ret.ira_distributions_taxable
@@ -316,6 +317,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
             "se": ret.se_income,
             "sch_e": sch_e_net,
             "other": ret.other_ordinary_income,
+            "unemployment": ret.unemployment_compensation,
             "pension_taxable": ret.pension_distributions_taxable,
             "ira_taxable": ret.ira_distributions_taxable,
             "taxable_ss": taxable_ss,
@@ -331,8 +333,19 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     # (computed without the IRA deduction) plus a few add-backs we don't
     # model (student-loan interest, foreign earned income exclusion, etc.).
     # We approximate MAGI ≈ gross − (all other adjustments).
+    educator_ded = _compute_educator_deduction(ret, rules, rec)
+    # Compute SLI deduction using MAGI ≈ gross − (other adjustments excl SLI itself).
+    pre_sli_adjustments = (
+        ret.hsa_deduction + ret.other_adjustments + half_se_tax + educator_ded
+    )
+    magi_for_sli = gross - pre_sli_adjustments
+    sli_ded = _compute_sli_deduction(ret, magi_for_sli, rules, rec)
+    rec._sli_deduction = sli_ded  # type: ignore[attr-defined]
+    rec._educator_deduction = educator_ded  # type: ignore[attr-defined]
+
     other_adjustments_total = (
         ret.hsa_deduction + ret.other_adjustments + half_se_tax
+        + educator_ded + sli_ded
     )
     magi_for_ira = gross - other_adjustments_total
     ira_deduction_allowed, ira_deduction_disallowed = _compute_ira_deduction(
@@ -346,21 +359,103 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         + ira_deduction_allowed
         + ret.other_adjustments
         + half_se_tax
+        + educator_ded
+        + sli_ded
     )
     rec.add(
         "Above-the-line adjustments",
-        "hsa + trad_ira_deductible + other + ½ se_tax",
+        "hsa + trad_ira_deductible + other + ½ se_tax + educator + student_loan_int",
         {
             "hsa": ret.hsa_deduction,
             "trad_ira_deductible": ira_deduction_allowed,
             "other": ret.other_adjustments,
             "half_se_tax": half_se_tax,
+            "educator": educator_ded,
+            "student_loan_interest": sli_ded,
         },
         adjustments,
     )
     agi = gross - adjustments
     rec.add("AGI", "gross − adjustments", {"gross": gross, "adjustments": adjustments}, agi)
     return agi, carryforward_out
+
+
+def _compute_educator_deduction(
+    ret: Return, rules: Rules, rec: _StepRecorder
+) -> Decimal:
+    """§62(a)(2)(D) educator expense deduction (Schedule 1 line 11).
+
+    $250 per eligible educator (2015-2021), raised to $300 from 2022 onward.
+    Doubled on MFJ when both spouses are educators — we approximate via
+    a per-return cap (caller can pass 2× via educator_expenses on a
+    joint return when both qualify).
+    """
+    paid = ret.educator_expenses
+    if paid <= 0:
+        return ZERO
+    cfg = rules.educator_expense
+    if cfg is None:
+        return _money(paid)
+    cap = Decimal(str(cfg.get("per_educator_cap", 300)))
+    # On MFJ, allow up to 2× the cap so both spouses can claim independently.
+    if ret.filing_status == FilingStatus.MFJ:
+        cap = cap * 2
+    allowed = min(paid, cap)
+    rec.add(
+        "Educator expenses (§62(a)(2)(D))",
+        "min(paid, per_educator_cap × eligible_educators)",
+        {"paid": paid, "cap_applied": cap},
+        allowed,
+    )
+    return _money(allowed)
+
+
+def _compute_sli_deduction(
+    ret: Return, magi: Decimal, rules: Rules, rec: _StepRecorder
+) -> Decimal:
+    """§221 Student Loan Interest Deduction (Schedule 1 line 21).
+
+    Capped at $2,500/year; phases out over a MAGI range. Disallowed entirely
+    for MFS (per IRC §221(e)(2)).
+    """
+    paid = ret.student_loan_interest_paid
+    if paid <= 0:
+        return ZERO
+    cfg = rules.student_loan_interest
+    if cfg is None:
+        return _money(paid)
+
+    status = _status(ret)
+    max_ded = Decimal(str(cfg.get("max_deduction", 2500)))
+    capped = min(paid, max_ded)
+
+    ph = (cfg.get("phaseout") or {}).get(status)
+    if ph is None:
+        allowed = capped
+    elif ph.get("disabled"):
+        allowed = ZERO
+    else:
+        start = Decimal(str(ph.get("start", 0)))
+        end = Decimal(str(ph.get("end", 0)))
+        if magi <= start:
+            allowed = capped
+        elif magi >= end:
+            allowed = ZERO
+        else:
+            ratio = (end - magi) / (end - start)
+            allowed = capped * ratio
+
+    allowed = _money(allowed)
+    rec.add(
+        "Student loan interest deduction (§221)",
+        "min(paid, $2500) reduced by MAGI phaseout (disabled for MFS)",
+        {
+            "paid": paid, "capped": capped, "magi": magi,
+            "filing_status": status,
+        },
+        allowed,
+    )
+    return allowed
 
 
 def _compute_ira_deduction(
@@ -1469,6 +1564,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         early_withdrawal_penalty=early_withdrawal_penalty,
         ira_deduction_allowed=_money(getattr(rec, "_ira_deduction_allowed", ZERO)),
         ira_deduction_disallowed=_money(getattr(rec, "_ira_deduction_disallowed", ZERO)),
+        student_loan_interest_deduction=_money(getattr(rec, "_sli_deduction", ZERO)),
+        educator_expense_deduction=_money(getattr(rec, "_educator_deduction", ZERO)),
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),

@@ -188,3 +188,16 @@ ira_deduction:
   phaseout_spouse_covered_only:
     mfj:    { start: 198000, end: 208000 }
     mfs:    { start: 0,     end: 10000 }
+
+# Student loan interest deduction (§221).
+student_loan_interest:
+  max_deduction: 2500
+  phaseout:
+    single: { start: 70000, end: 85000 }
+    hoh:    { start: 70000, end: 85000 }
+    qss:    { start: 140000,  end: 170000 }
+    mfj:    { start: 140000,  end: 170000 }
+    mfs:    { disabled: true }
+# Educator expense deduction (§62(a)(2)(D)).
+educator_expense:
+  per_educator_cap: 250
