@@ -28,7 +28,21 @@ const FULL = new Map();     // id → full return record (lazy)
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  if (!r.ok) {
+    // Try to extract a JSON `detail` field (FastAPI HTTPException body) so the
+    // UI surfaces a useful message instead of the raw JSON envelope.
+    let detail = '';
+    try {
+      const body = await r.json();
+      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body);
+    } catch (_) {
+      try { detail = await r.text(); } catch (_) { detail = ''; }
+    }
+    const err = new Error(`${r.status}: ${detail || r.statusText}`);
+    err.status = r.status;
+    err.detail = detail;
+    throw err;
+  }
   return r.json();
 }
 
@@ -104,11 +118,26 @@ async function uploadFiles(files) {
             <div class="text-xs text-slate-500">TY ${out.tax_year} · ${out.filing_status.toUpperCase()} · ${out.source}${warn}</div>
           </div></div>${badge}`;
     } catch (err) {
-      row.innerHTML = `<div class="flex items-center gap-3">
-          <span class="text-rose-500">✗</span>
-          <div><div class="font-medium">${f.name}</div>
-            <div class="text-xs text-rose-500">${err.message}</div>
-          </div></div><span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">failed</span>`;
+      // err.detail (set by api()) contains the diagnostic from the 422 body.
+      // Split on " Tail: " so the noisy traceback can be hidden by default.
+      const detail = err.detail || err.message || 'Unknown error';
+      const tailIdx = detail.indexOf(' Tail:');
+      const headline = tailIdx >= 0 ? detail.slice(0, tailIdx) : detail;
+      const tail = tailIdx >= 0 ? detail.slice(tailIdx + 7) : '';
+      const escTail = tail.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      const details = tail
+        ? `<details class="mt-1"><summary class="text-xs text-rose-400 cursor-pointer hover:underline">Show technical details</summary>
+             <pre class="mt-1 text-[10px] text-rose-500 bg-rose-50 border border-rose-100 rounded p-2 whitespace-pre-wrap break-all">${escTail}</pre>
+             <button class="mt-1 text-xs text-sky-600 hover:underline" onclick="navigator.clipboard.writeText(${JSON.stringify(detail)}); this.textContent='Copied ✓'">Copy diagnostic</button>
+           </details>`
+        : '';
+      row.innerHTML = `<div class="flex items-start gap-3 flex-1 min-w-0">
+          <span class="text-rose-500 mt-0.5">✗</span>
+          <div class="min-w-0 flex-1"><div class="font-medium">${f.name}</div>
+            <div class="text-xs text-rose-500 break-words">${headline}</div>
+            ${details}
+          </div></div><span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 ml-2 flex-shrink-0">failed</span>`;
+      row.className = 'px-5 py-3 flex items-start justify-between';
     }
   }
   await refreshAll();
@@ -137,14 +166,15 @@ function renderDashboard() {
     const recon = r.reconciled === null || r.reconciled === undefined ? '—'
                 : r.reconciled ? '<span class="text-emerald-600">✓</span>'
                 : `<span class="text-amber-600">Δ $${r.reconciliation_delta}</span>`;
-    return `<tr class="hover:bg-slate-50 cursor-pointer" onclick="pickYear(${r.id})">
-      <td class="py-2">${r.tax_year}</td>
-      <td>${r.filing_status.toUpperCase()}</td>
-      <td><span class="text-xs px-2 py-0.5 rounded-full bg-slate-100">${r.source}</span></td>
-      <td class="text-right">${fmt(r.agi)}</td>
-      <td class="text-right">${fmt(r.total_tax)}</td>
-      <td class="text-right">${fmt(r.refund_or_owed)}</td>
-      <td class="text-center">${recon}</td></tr>`;
+    return `<tr class="hover:bg-slate-50">
+      <td class="py-2 cursor-pointer" onclick="pickYear(${r.id})">${r.tax_year}</td>
+      <td class="cursor-pointer" onclick="pickYear(${r.id})">${r.filing_status.toUpperCase()}</td>
+      <td class="cursor-pointer" onclick="pickYear(${r.id})"><span class="text-xs px-2 py-0.5 rounded-full bg-slate-100">${r.source}</span></td>
+      <td class="text-right cursor-pointer" onclick="pickYear(${r.id})">${fmt(r.agi)}</td>
+      <td class="text-right cursor-pointer" onclick="pickYear(${r.id})">${fmt(r.total_tax)}</td>
+      <td class="text-right cursor-pointer" onclick="pickYear(${r.id})">${fmt(r.refund_or_owed)}</td>
+      <td class="text-center cursor-pointer" onclick="pickYear(${r.id})">${recon}</td>
+      <td class="text-center"><button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Delete this return" onclick="deleteReturn(${r.id}, ${r.tax_year})">🗑</button></td></tr>`;
   }).join('');
 
   // charts (need full records for income decomposition + taxes by type)
@@ -165,6 +195,17 @@ function kpi(label, big, small) {
 window.pickYear = (id) => {
   $('#yearPicker').value = String(id);
   showTab('year');
+};
+
+window.deleteReturn = async (id, year) => {
+  if (!confirm(`Delete tax year ${year}? This cannot be undone.`)) return;
+  try {
+    await api('/api/returns/' + id, { method: 'DELETE' });
+    FULL.delete(id);
+    await refreshAll();
+  } catch (err) {
+    alert('Could not delete return: ' + (err.detail || err.message));
+  }
 };
 
 function recreate(id, cfg) {

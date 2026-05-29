@@ -84,3 +84,53 @@ def test_pdf_round_trip_via_api(client, tmp_path):
     assert Decimal(body["result"]["total_tax"]) == Decimal("34117.00")
     assert body["result"]["reconciliation_delta"] is not None
     assert abs(Decimal(body["result"]["reconciliation_delta"])) <= Decimal("1.00")
+
+def test_import_returns_422_with_diagnostic_on_bad_pdf(client) -> None:
+    """A garbage file should yield a useful 422 (not a bare 500), with
+    enough info in `detail` for the user to know what went wrong."""
+    r = client.post(
+        "/api/returns/import",
+        files={"file": ("not-a-pdf.pdf", b"%PDF-1.4 garbage not really a pdf", "application/pdf")},
+    )
+    assert r.status_code in (400, 422), r.text
+    detail = r.json().get("detail", "")
+    assert detail, "expected non-empty detail field"
+    # Should mention the filename so the user can correlate with their input.
+    assert "not-a-pdf.pdf" in detail or "Could not" in detail or "tax year" in detail.lower()
+
+
+def test_debug_extract_handles_garbage_pdf_gracefully(client) -> None:
+    """The debug endpoint should never raise — it returns an `error` field
+    inside a 200 response so the user can always inspect what's happening."""
+    r = client.post(
+        "/api/debug/extract",
+        files={"file": ("garbage.pdf", b"%PDF-1.4 nonsense", "application/pdf")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "pdf"
+    # Either it parsed (unlikely) or returned an error string.
+    assert "error" in body or "pages" in body
+
+
+def test_delete_return_via_api(client) -> None:
+    """End-to-end: import a return, list it, delete it, confirm gone."""
+    yaml_path = _fixture_yaml()
+    with yaml_path.open("rb") as f:
+        r = client.post(
+            "/api/returns/import",
+            files={"file": ("mfj_2024_basic.yaml", f, "application/yaml")},
+        )
+    assert r.status_code == 200
+    rid = r.json()["id"]
+
+    assert any(x["id"] == rid for x in client.get("/api/returns").json())
+
+    r = client.delete(f"/api/returns/{rid}")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": True}
+
+    assert not any(x["id"] == rid for x in client.get("/api/returns").json())
+
+    # Re-delete should 404.
+    assert client.delete(f"/api/returns/{rid}").status_code == 404

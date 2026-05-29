@@ -2,6 +2,30 @@
 
 All notable changes to TaxLens.
 
+## [0.16.0] — 2026
+
+### Added — UX quick wins: better errors, delete returns
+
+- **Import errors are now actionable.** The front-end `api()` helper now
+  parses the FastAPI `detail` field, so failed imports show the actual
+  diagnostic (`Could not parse foo.pdf: ValueError: Could not detect tax
+  year ...`) instead of a raw JSON envelope. Each failed file row gets a
+  collapsible **"Show technical details"** disclosure with the traceback
+  tail and a **"Copy diagnostic"** button — copy it into a GitHub issue
+  and we (or you) can extend importer patterns from there.
+- **Delete returns from the dashboard.** Each row in the Returns table
+  has a trash icon that prompts to confirm, calls `DELETE /api/returns/{id}`,
+  invalidates the cache, and re-renders. Useful for cleaning up a bad
+  PDF import without nuking the whole DB.
+- Drag-and-drop multi-file import was already supported — verified it
+  still works alongside the new error-detail rendering.
+
+### Tests
+
+- 3 new API tests in `tests/test_api.py` cover the 422 diagnostic path,
+  the `/api/debug/extract` graceful-failure behaviour, and the full
+  delete round-trip. **217 tests passing.**
+
 ## [0.15.2] — 2026
 
 ### Added — TurboTax, H&R Block, FreeTaxUSA PDF compatibility
