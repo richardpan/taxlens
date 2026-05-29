@@ -2,6 +2,23 @@
 
 All notable changes to TaxLens.
 
+## [0.5.1] — 2026
+
+### Added
+- **Free trust artifacts on every installer** — no paid certs required:
+  - **SHA-256 checksum** (`*.sha256`) published next to each installer.
+  - **GitHub build-provenance attestation** (Sigstore-signed) — verify
+    with `gh attestation verify <file> --repo richardpan/taxlens`.
+  - **Ad-hoc `codesign` on macOS** — silences the "TaxLens is damaged"
+    error on Apple Silicon. (Right-click → Open still needed once.)
+- Expanded README "Download" section with verification commands and
+  first-launch warning walkthrough for each OS.
+
+### Decided
+- TaxLens will remain **unsigned** for the foreseeable future. EV/Apple
+  Developer certs cost $100–300/yr and we don't want users or maintainers
+  to fund that. Provenance + checksums are our verification story.
+
 ## [0.5.0] — 2026
 
 ### Added
