@@ -2,6 +2,25 @@
 
 All notable changes to TaxLens.
 
+## [0.12.0] — 2026
+
+### Added — 8 more state YAMLs (21 states total)
+
+**No-tax states** (stubs): NV, SD, WY, AK, TN, NH. (Engine returns $0
+state tax cleanly when these are selected. NH note: wage tax never
+existed; the I&D tax was phased to 3% in 2024 and repealed in 2025.)
+
+**New income-tax states:**
+- **Wisconsin** — 4-bracket graduated (3.5% / 4.4% / 5.3% / 7.65%),
+  with the maximum standard deduction approximated (WI's actual SD
+  phases out with AGI).
+- **Indiana** — flat 3.05% (down from 3.15% in 2023). Standard-deduction
+  slot used to approximate the personal-exemption baseline.
+
+### Tests
+- 180 passing (was 172). 8 new state tests including bracket-walk
+  verification for WI and the flat-rate check for IN.
+
 ## [0.11.0] — 2026
 
 ### Added — Saver's Credit, ACTC, Premium Tax Credit

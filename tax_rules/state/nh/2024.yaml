@@ -1,0 +1,13 @@
+# New Hampshire — no tax on wages. The 5% Interest & Dividends Tax was
+# phased out by 2025 (3% in 2024); we model as 0% for simplicity since
+# wage income (the dominant case) is and was untaxed.
+state: NH
+year: 2024
+notes: "NH has no wage tax; the Interest & Dividends Tax was phased to 3% in 2024 and fully repealed in 2025."
+standard_deduction: { single: 0, mfj: 0, mfs: 0, hoh: 0, qss: 0 }
+ordinary_brackets:
+  single: [[0, 0]]
+  mfj:    [[0, 0]]
+  mfs:    [[0, 0]]
+  hoh:    [[0, 0]]
+  qss:    [[0, 0]]

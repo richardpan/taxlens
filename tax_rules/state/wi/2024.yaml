@@ -1,0 +1,40 @@
+# Wisconsin individual income tax — TY 2024.
+# 4-bracket graduated structure. Source: WI DOR Schedule 1 (2024).
+state: WI
+year: 2024
+
+# WI standard deduction phases out with AGI; we use the maximum amounts here.
+# Engine treats this as a constant — a minor over-deduction at higher AGI.
+standard_deduction:
+  single: 12760
+  mfj:    23620
+  mfs:    11225
+  hoh:    16470
+  qss:    23620
+
+ordinary_brackets:
+  single:
+    - [0,        0.035]
+    - [14320,    0.044]
+    - [28640,    0.053]
+    - [315310,   0.0765]
+  mfj:
+    - [0,        0.035]
+    - [19090,    0.044]
+    - [38190,    0.053]
+    - [420420,   0.0765]
+  mfs:
+    - [0,        0.035]
+    - [9550,     0.044]
+    - [19090,    0.053]
+    - [210210,   0.0765]
+  hoh:
+    - [0,        0.035]
+    - [14320,    0.044]
+    - [28640,    0.053]
+    - [315310,   0.0765]
+  qss:
+    - [0,        0.035]
+    - [19090,    0.044]
+    - [38190,    0.053]
+    - [420420,   0.0765]
