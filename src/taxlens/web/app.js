@@ -50,11 +50,69 @@ async function refreshAll() {
   RETURNS = await api('/api/returns');
   RETURNS.sort((a, b) => a.tax_year - b.tax_year);
   $('#returnCount').textContent = RETURNS.length;
+  renderReturnsMenu();
   populateYearPickers();
   // re-render whichever tab is active
   const active = $$('.tab').find(b => b.classList.contains('active'));
   if (active) showTab(active.dataset.tab);
 }
+
+// ─── Returns menu (top-right popover) ─────────────────────────────────────
+function renderReturnsMenu() {
+  const list = document.getElementById('returnsMenuList');
+  if (!list) return;
+  if (RETURNS.length === 0) {
+    list.innerHTML = `<div class="px-4 py-6 text-center text-slate-400 text-xs italic">
+      No returns imported yet.</div>`;
+    return;
+  }
+  list.innerHTML = RETURNS.map(r => {
+    const status = r.reconciled === null || r.reconciled === undefined
+      ? '<span class="text-slate-400 text-[10px]">unverified</span>'
+      : r.reconciled
+        ? '<span class="text-emerald-600 text-[10px]">✓ reconciled</span>'
+        : `<span class="text-amber-600 text-[10px]">Δ $${r.reconciliation_delta}</span>`;
+    return `<div class="px-4 py-2 flex items-center justify-between hover:bg-slate-50">
+      <button type="button" class="text-left flex-1 cursor-pointer"
+              onclick="closeReturnsMenu(); pickYear(${r.id})">
+        <div class="font-medium">${r.tax_year}
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 ml-1">${r.source}</span>
+        </div>
+        <div class="text-xs text-slate-500">${r.filing_status.toUpperCase()} · AGI ${fmt(r.agi)} · tax ${fmt(r.total_tax)}</div>
+        <div class="mt-0.5">${status}</div>
+      </button>
+      <button type="button" class="ml-3 text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50"
+              title="Remove this return"
+              onclick="event.stopPropagation(); deleteReturn(${r.id}, ${r.tax_year})">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+window.closeReturnsMenu = () => document.getElementById('returnsMenu').classList.add('hidden');
+window.toggleReturnsMenu = () => {
+  const m = document.getElementById('returnsMenu');
+  m.classList.toggle('hidden');
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('returnsMenuBtn');
+  const menu = document.getElementById('returnsMenu');
+  const closeBtn = document.getElementById('returnsMenuClose');
+  const importBtn = document.getElementById('returnsMenuImport');
+  if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); window.toggleReturnsMenu(); });
+  if (closeBtn) closeBtn.addEventListener('click', window.closeReturnsMenu);
+  if (importBtn) importBtn.addEventListener('click', () => { window.closeReturnsMenu(); showTab('import'); });
+  // Click anywhere outside the menu closes it.
+  document.addEventListener('click', (e) => {
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+    window.closeReturnsMenu();
+  });
+  // Esc also closes.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') window.closeReturnsMenu();
+  });
+});
 
 function populateYearPickers() {
   const opts = RETURNS.map(r => `<option value="${r.id}">${r.tax_year}</option>`).join('');

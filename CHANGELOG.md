@@ -2,6 +2,23 @@
 
 All notable changes to TaxLens.
 
+## [0.25.0] — 2026
+
+### Added — Returns popover in the header
+
+The "local · N returns" badge in the top-right corner is now a button.
+Clicking it opens a dropdown that lists every imported return with:
+
+- Tax year, source (PDF / TXF / JSON / YAML), filing status, AGI, and
+  total tax — each row links straight to the Year-detail tab.
+- A reconciliation status pill (✓ reconciled / Δ delta / unverified).
+- A trash icon per row to remove that return without leaving the
+  current view.
+- A footer shortcut to jump to the Import tab to add more returns.
+
+Outside-click and `Esc` both close the menu. The list re-renders any
+time the set of returns changes (after upload, delete, or rebuild).
+
 ## [0.24.1] — 2026
 
 ### Fixed — Charts growing vertically forever on load
