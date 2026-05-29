@@ -465,6 +465,7 @@ function drawCarryforwards(fulls) {
     'AMT credit':         fulls.map(f => Number(f.result.amt_credit_carryforward_out || 0)),
     'Foreign tax credit': fulls.map(f => Number(f.result.ftc_carryforward_out || 0)),
     'Charitable':         fulls.map(f => Number(f.result.charitable_carryover_out || 0)),
+    'IRA basis (8606)':   fulls.map(f => Number(f.result.ira_basis_out || 0)),
   };
   for (const k of Object.keys(series)) {
     if (series[k].every(v => v === 0)) delete series[k];
@@ -478,6 +479,7 @@ function drawCarryforwards(fulls) {
     'AMT credit':         '#a78bfa',
     'Foreign tax credit': '#0ea5e9',
     'Charitable':         '#10b981',
+    'IRA basis (8606)':   '#6366f1',
   };
   const datasets = Object.entries(series).map(([label, data]) => ({
     label, data,
@@ -687,6 +689,10 @@ async function renderYearDetail() {
         ? [['Foreign tax credit carried', r.ftc_carryforward_out]] : []),
     ...(Number(r.charitable_carryover_out || 0) > 0
         ? [['Charitable carryover to next year', r.charitable_carryover_out]] : []),
+    ...(Number(r.ira_distribution_nontaxable || 0) > 0
+        ? [['IRA basis recovered (Form 8606)', '-' + r.ira_distribution_nontaxable]] : []),
+    ...(Number(r.ira_basis_out || 0) > 0
+        ? [['IRA basis carried to next year', r.ira_basis_out]] : []),
     ...(Number(r.depreciation_current_year || 0) > 0
         ? [['MACRS depreciation (Form 4562)', '-' + r.depreciation_current_year]] : []),
     ...(Number(r.passive_loss_disallowed || 0) > 0

@@ -114,6 +114,7 @@ class TaxLensService:
             ("amt_credit_carryforward_in",   "amt_credit_carryforward_out"),
             ("ftc_carryforward_in",          "ftc_carryforward_out"),
             ("charitable_carryover_in",      "charitable_carryover_out"),
+            ("ira_basis_in",                 "ira_basis_out"),
         ]
         with self.sessionmaker_() as s:
             rows = s.execute(

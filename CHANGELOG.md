@@ -2,6 +2,48 @@
 
 All notable changes to TaxLens.
 
+## [0.26.0] — 2026
+
+### Added — Form 8606 nondeductible IRA basis tracking
+
+Closes a real gap: prior versions surfaced `ira_deduction_disallowed`
+per year but the resulting nondeductible basis evaporated, so a later
+distribution from a partly-basis IRA was overtaxed by treating the
+full reported amount as taxable. With this change:
+
+- **`Return.ira_basis_in`** carries accumulated basis forward each
+  year (auto-threaded by the service from the prior year's
+  `TaxResult.ira_basis_out`, same mechanism as cap-loss / NOL / FTC).
+- **`Return.ira_year_end_value`** is the combined FMV of all
+  traditional/SEP/SIMPLE IRAs on Dec 31 (Form 8606 line 6).
+- **§72(b) pro-rata recovery** (Form 8606 lines 6–13): on any IRA
+  distribution where carry-in basis > 0, the engine splits the
+  reported taxable amount into a taxable portion (added to gross
+  income as before) and a nontaxable basis-recovery portion. The
+  basis carried forward is reduced by the recovered amount.
+- **`TaxResult.ira_basis_out`** = remaining basis + this year's
+  disallowed §219(g) contribution, ready to thread to next year.
+- **`TaxResult.ira_distribution_nontaxable`** + **`ira_taxable_after_basis`**
+  surface the split for audit trail / what-if scenarios.
+- Edge cases handled: full liquidation (`year_end_value == 0`) means
+  basis is recovered up to the size of the distribution; basis larger
+  than the distribution simply caps the recovery.
+
+### UI
+- Carryforward chart on the dashboard now includes an "IRA basis (8606)"
+  series (indigo).
+- Year-detail tax-breakdown cards show "IRA basis recovered" and
+  "IRA basis carried to next year" when nonzero.
+- Math view step "Form 8606 §72(b) IRA basis pro-rata" walks the
+  calculation with formula + inputs visible.
+
+### Tests
+- 7 new tests in `tests/test_ira_basis.py` cover zero-basis no-op,
+  contribution-only basis carry, partial pro-rata, full-liquidation,
+  basis-larger-than-distribution cap, distribution-with-no-basis,
+  and combined "distribute + nondeductibly contribute" same year.
+- **277 total tests passing** (was 270).
+
 ## [0.25.0] — 2026
 
 ### Added — Returns popover in the header

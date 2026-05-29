@@ -205,6 +205,64 @@ def _compute_se_tax(ret: Return, rules: Rules, rec: _StepRecorder) -> tuple[Deci
     return se_tax_rounded, _money(deductible)
 
 
+def _compute_ira_basis_pro_rata(
+    basis_for_year: Decimal,
+    reported_taxable_distribution: Decimal,
+    year_end_value: Decimal,
+    rec: "_StepRecorder",
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Form 8606 §72(b) pro-rata basis-recovery on Traditional IRA distributions.
+
+    Returns (taxable_after_basis, nontaxable_recovered, basis_remaining).
+
+    - `basis_for_year`: accumulated nondeductible basis available before this
+      year's distribution (Form 8606 line 3, approximated as `ira_basis_in`).
+    - `reported_taxable_distribution`: what the user reported as taxable on
+      Form 1099-R box 2a (Form 8606 line 7).
+    - `year_end_value`: combined FMV of every traditional/SEP/SIMPLE IRA on
+      Dec 31 (Form 8606 line 6).
+
+    Formula (Form 8606 lines 8-13):
+      line 8  = year_end_value + distribution
+      frac    = min(1, basis / line 8)
+      line 13 = distribution × frac  (nontaxable, recovered basis)
+      taxable = distribution − line 13
+      basis_remaining = basis − line 13
+    """
+    if basis_for_year <= 0 or reported_taxable_distribution <= 0:
+        return (
+            reported_taxable_distribution,
+            ZERO,
+            basis_for_year if basis_for_year > 0 else ZERO,
+        )
+    if year_end_value <= 0:
+        # Full liquidation: there is no remaining IRA balance, so the whole
+        # carry-in basis is recovered up to the size of the distribution.
+        recovered = min(basis_for_year, reported_taxable_distribution)
+    else:
+        denom = year_end_value + reported_taxable_distribution
+        fraction = basis_for_year / denom
+        if fraction > Decimal("1"):
+            fraction = Decimal("1")
+        recovered = (reported_taxable_distribution * fraction).quantize(Decimal("0.01"))
+        if recovered > basis_for_year:
+            recovered = basis_for_year
+    taxable = reported_taxable_distribution - recovered
+    basis_remaining = basis_for_year - recovered
+    rec.add(
+        "Form 8606 §72(b) IRA basis pro-rata",
+        "nontaxable = distribution × basis / (year_end_value + distribution)",
+        {
+            "basis_in": basis_for_year,
+            "year_end_value": year_end_value,
+            "reported_taxable": reported_taxable_distribution,
+            "nontaxable_recovered": recovered,
+        },
+        taxable,
+    )
+    return taxable, recovered, basis_remaining
+
+
 def _compute_taxable_ss(
     ret: Return, gross_excl_ss: Decimal, rules: Rules, rec: _StepRecorder
 ) -> Decimal:
@@ -290,6 +348,27 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     else:
         net_cap = raw_cap
 
+    # ── Form 8606 §72(b) pro-rata basis recovery (Traditional IRA) ─────────
+    # Performed BEFORE gross income is summed so the taxable portion of
+    # IRA distributions correctly excludes any nondeductible-basis recovery.
+    # Uses `ira_basis_in` only (carry-in from prior years) — this is a small
+    # simplification vs. the strict Form 8606 sequence, which also includes
+    # the current year's NEW nondeductible contribution in Line 3. Cases
+    # where someone simultaneously contributes nondeductibly AND distributes
+    # in the same year are rare; the basis_out we hand to next year still
+    # includes this year's new nondeductible amount.
+    (ira_taxable_after_basis,
+     ira_nontaxable_recovered,
+     ira_basis_after_distrib) = _compute_ira_basis_pro_rata(
+        basis_for_year=ret.ira_basis_in or ZERO,
+        reported_taxable_distribution=ret.ira_distributions_taxable or ZERO,
+        year_end_value=ret.ira_year_end_value or ZERO,
+        rec=rec,
+    )
+    rec._ira_taxable_after_basis = ira_taxable_after_basis  # type: ignore[attr-defined]
+    rec._ira_nontaxable_recovered = ira_nontaxable_recovered  # type: ignore[attr-defined]
+    rec._ira_basis_after_distrib = ira_basis_after_distrib  # type: ignore[attr-defined]
+
     gross_excl_ss = (
         ret.wages
         + ret.interest_income + ret.k1_interest
@@ -300,7 +379,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         + ret.unemployment_compensation
         + sch_e_net
         + ret.pension_distributions_taxable
-        + ret.ira_distributions_taxable
+        + ira_taxable_after_basis
     )
     # §86 — Social Security taxability depends on the rest of gross income.
     taxable_ss = _compute_taxable_ss(ret, gross_excl_ss, rules, rec)
@@ -319,7 +398,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
             "other": ret.other_ordinary_income,
             "unemployment": ret.unemployment_compensation,
             "pension_taxable": ret.pension_distributions_taxable,
-            "ira_taxable": ret.ira_distributions_taxable,
+            "ira_taxable": ira_taxable_after_basis,
             "taxable_ss": taxable_ss,
         },
         gross,
@@ -1699,6 +1778,14 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         amt_credit_carryforward_out=_money(amt_credit_carry_out),
         ftc_carryforward_out=_money(ftc_carry_out),
         charitable_carryover_out=_money(charitable_carry_out),
+        # Form 8606 basis: basis_out = basis_after_distribution + this year's
+        # newly-nondeductible contribution (§219(g) disallowed portion).
+        ira_basis_out=_money(
+            getattr(rec, "_ira_basis_after_distrib", ZERO)
+            + getattr(rec, "_ira_deduction_disallowed", ZERO)
+        ),
+        ira_distribution_nontaxable=_money(getattr(rec, "_ira_nontaxable_recovered", ZERO)),
+        ira_taxable_after_basis=_money(getattr(rec, "_ira_taxable_after_basis", ZERO)),
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )
