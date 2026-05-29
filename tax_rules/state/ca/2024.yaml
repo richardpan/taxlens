@@ -1,0 +1,72 @@
+# California Personal Income Tax — TY 2024.
+# Source: FTB 540 instructions; brackets per Rev. & Tax. Code §17041.
+# CA does NOT have a preferential rate for long-term capital gains or qualified
+# dividends — they are taxed as ordinary income. The 1% mental health surcharge
+# (over $1M, Prop. 63) is omitted in v1 (we'll add when a fixture needs it).
+
+state: CA
+year: 2024
+notes: |
+  - Capital gains and qualified dividends are taxed as ordinary income.
+  - Standard deduction values are CA-specific.
+  - The 1% Mental Health Services Tax above $1M of taxable income is NOT
+    modeled in v1. Add when a fixture requires it.
+
+standard_deduction:
+  single: 5540
+  mfj:    11080
+  mfs:    5540
+  hoh:    11080
+  qss:    11080
+
+ordinary_brackets:
+  single:
+    - [0,        0.01]
+    - [10756,    0.02]
+    - [25499,    0.04]
+    - [40245,    0.06]
+    - [55866,    0.08]
+    - [70606,    0.093]
+    - [360659,   0.103]
+    - [432787,   0.113]
+    - [721314,   0.123]
+  mfj:
+    - [0,        0.01]
+    - [21512,    0.02]
+    - [50998,    0.04]
+    - [80490,    0.06]
+    - [111732,   0.08]
+    - [141212,   0.093]
+    - [721318,   0.103]
+    - [865574,   0.113]
+    - [1442628,  0.123]
+  mfs:
+    - [0,        0.01]
+    - [10756,    0.02]
+    - [25499,    0.04]
+    - [40245,    0.06]
+    - [55866,    0.08]
+    - [70606,    0.093]
+    - [360659,   0.103]
+    - [432787,   0.113]
+    - [721314,   0.123]
+  hoh:
+    - [0,        0.01]
+    - [21527,    0.02]
+    - [51000,    0.04]
+    - [65744,    0.06]
+    - [81364,    0.08]
+    - [96107,    0.093]
+    - [490493,   0.103]
+    - [588593,   0.113]
+    - [980987,   0.123]
+  qss:
+    - [0,        0.01]
+    - [21512,    0.02]
+    - [50998,    0.04]
+    - [80490,    0.06]
+    - [111732,   0.08]
+    - [141212,   0.093]
+    - [721318,   0.103]
+    - [865574,   0.113]
+    - [1442628,  0.123]

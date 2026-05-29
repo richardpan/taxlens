@@ -84,3 +84,29 @@ ctc:
     hoh:    200000
     qss:    400000
   phaseout_per_1000_agi: 50
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 220700
+    mfj:    220700
+    mfs:    110350
+    hoh:    220700
+    qss:    220700
+  exemption:
+    single: 81300
+    mfj:    126500
+    mfs:    63250
+    hoh:    81300
+    qss:    126500
+  exemption_phaseout_start:
+    single: 578150
+    mfj:    1156300
+    mfs:    578150
+    hoh:    578150
+    qss:    1156300
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25

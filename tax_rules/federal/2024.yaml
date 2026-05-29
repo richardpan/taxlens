@@ -93,3 +93,32 @@ ctc:
     hoh:    200000
     qss:    400000
   phaseout_per_1000_agi: 50           # $50 reduction per $1k AGI over threshold
+
+# AMT (Form 6251). 26% on AMTI up to threshold, 28% above. Exemption phases out
+# at 25¢ per $1 of AMTI over the phaseout start (i.e. $1 lost per $4 excess).
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 232600
+    mfj:    232600
+    mfs:    116300
+    hoh:    232600
+    qss:    232600
+  exemption:
+    single: 85700
+    mfj:    133300
+    mfs:    66650
+    hoh:    85700
+    qss:    133300
+  exemption_phaseout_start:
+    single: 609350
+    mfj:    1218700
+    mfs:    609350
+    hoh:    609350
+    qss:    1218700
+  phaseout_rate: 0.25
+
+# Schedule D worksheet cap rates (can override per-year if statute changes).
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25

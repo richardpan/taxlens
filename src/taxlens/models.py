@@ -35,6 +35,10 @@ class Return(BaseModel):
     qualified_dividends: Decimal = Decimal(0)    # line 3a (subset of 3b)
     long_term_capital_gains: Decimal = Decimal(0)
     short_term_capital_gains: Decimal = Decimal(0)
+    # Schedule D worksheet items — special max rates apply (28% and 25% respectively).
+    # Treat as a subset of total long-term gains for income/AGI purposes.
+    collectibles_gains: Decimal = Decimal(0)          # 28%-rate gain (Sch D wksht)
+    unrecaptured_1250_gains: Decimal = Decimal(0)     # 25%-rate gain (Sch D wksht)
     se_income: Decimal = Decimal(0)              # Schedule C net profit
     other_ordinary_income: Decimal = Decimal(0)
 
@@ -44,6 +48,13 @@ class Return(BaseModel):
 
     # Deduction choice
     itemized_deductions: Decimal | None = None   # None → use standard deduction
+
+    # AMT (Form 6251) preference/adjustment add-backs. Most filers leave at 0.
+    amt_preferences: Decimal = Decimal(0)        # e.g. private activity bond interest
+    amt_adjustments: Decimal = Decimal(0)        # e.g. ISO bargain element
+
+    # State (optional). When set, the engine also produces a `state_result` slot.
+    state: str | None = None                     # ISO-3166-2 subdivision, e.g. "CA"
 
     # Withholding & estimated payments (for refund/owed calc)
     federal_withholding: Decimal = Decimal(0)
@@ -93,9 +104,12 @@ class TaxResult(BaseModel):
 
     ordinary_tax: Decimal
     qualified_tax: Decimal
+    collectibles_tax: Decimal = Decimal(0)        # 28%-cap rate
+    unrecaptured_1250_tax: Decimal = Decimal(0)   # 25%-cap rate
     se_tax: Decimal
     additional_medicare_tax: Decimal
     niit: Decimal
+    amt: Decimal = Decimal(0)                     # excess of tentative AMT over regular tax
     credits: Decimal
     total_tax: Decimal
 
@@ -104,6 +118,9 @@ class TaxResult(BaseModel):
     ordinary_bracket_fills: list[BracketFill]
     qualified_bracket_fills: list[BracketFill]
     steps: list[ComputationStep]
+
+    # Optional state computation (populated when Return.state is set).
+    state_result: "StateResult | None" = None
 
     # Reconciliation
     reported_total_tax: Decimal | None = None
@@ -128,3 +145,37 @@ class Rules(BaseModel):
     additional_medicare: dict[str, Any]
     niit: dict[str, Any]
     ctc: dict[str, Any]
+    # AMT (Form 6251) — optional so older year files without it still load.
+    amt: dict[str, Any] | None = None
+    # Schedule D worksheet cap rates — optional; defaults applied in engine.
+    collectibles_rate: Decimal = Decimal("0.28")
+    unrecaptured_1250_rate: Decimal = Decimal("0.25")
+
+
+class StateResult(BaseModel):
+    """Output of a state-level tax computation."""
+    model_config = ConfigDict(frozen=True)
+
+    state: str
+    state_agi: Decimal
+    state_taxable_income: Decimal
+    state_tax: Decimal
+    state_bracket_fills: list[BracketFill]
+    steps: list[ComputationStep]
+
+
+class StateRules(BaseModel):
+    """Parsed contents of a `tax_rules/state/{xx}/{year}.yaml` file."""
+    model_config = ConfigDict(frozen=True)
+
+    state: str
+    year: int
+    standard_deduction: dict[str, Decimal]
+    ordinary_brackets: dict[str, list[tuple[Decimal, Decimal]]]
+    # CA-style: capital gains taxed as ordinary income. Override per-state when needed.
+    qualified_brackets: dict[str, list[tuple[Decimal, Decimal]]] | None = None
+    notes: str | None = None
+
+
+# Forward-reference rebuild now that StateResult exists.
+TaxResult.model_rebuild()
