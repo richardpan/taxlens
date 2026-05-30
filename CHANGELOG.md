@@ -2,6 +2,46 @@
 
 All notable changes to TaxLens.
 
+## [0.27.3] — 2026
+
+### Fixed — H&R Block packed-line layout extracted line numbers instead of values
+
+A real H&R Block PDF revealed the importer was extracting Form 1040 line
+*numbers* (1, 2, 7, 24) as if they were the dollar values. Root cause:
+two unrelated bugs in `taxlens/importers/pdf.py`:
+
+1. **`_is_form_id_digit` false-positive on adjacent money values.** The
+   `_MONEY` regex begins with `\s*`, so a match's `start` points at the
+   leading whitespace, not the first digit. The form-id guard checked
+   `tail[start - 1]` which, for the SECOND value in `7 37,020`, was the
+   `7` from the previous match — alphanumeric, so the real value
+   `37,020` got filtered as if it were part of a form code like `W-2`.
+   Fix: skip leading whitespace before inspecting the preceding char.
+
+2. **Last-money heuristic picked the wrong column on packed rows.** The
+   H&R Block 1040 packs two columns onto one printed line:
+   `3a Qualified dividends ... 3a 1,374 b Ordinary dividends ... 3b 2,223`.
+   Taking the last money returned the ordinary-dividends value (2,223)
+   for the qualified-dividends field. Replaced the `[-1]` rule with
+   `_pick_money`, which prefers the first money whose immediately
+   preceding token looks like a line-number echo (`3a`, `1`, `7`), and
+   falls back to last-money for fixtures where labels and values are
+   separated by long dot-leaders only.
+
+### Added — regression fixture mirroring the real H&R Block layout
+
+`make_hrblock_packed_1040` in `tests/third_party_pdfs.py` builds a 4-page
+PDF reproducing the real-world layout (filing-checklist cover, vendor
+quick-summary page with rounded ≠ real totals, then Form 1040 pages 1-2
+with the packed `<line-no> <label> ... <line-no> <value>` rows and
+two-column packed 2a/2b / 3a/3b rows). All names, SSNs, addresses, bank
+info, and employer names are obvious mock values. Test
+`test_hrblock_packed_layout_with_cover_and_summary` locks in correct
+extraction of wages / interest / qual.div / ord.div / withholding /
+total tax from the packed layout.
+
+All 289 tests passing.
+
 ## [0.27.2] — 2026
 
 ### Fixed — Vendor summary pages were overriding real 1040 values

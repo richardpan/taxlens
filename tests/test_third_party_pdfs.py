@@ -24,6 +24,7 @@ from tests.third_party_pdfs import (
     make_freetaxusa_realistic_1040,
     make_freetaxusa_summary_mismatch_1040,
     make_hrblock_1040,
+    make_hrblock_packed_1040,
     make_turbotax_1040,
 )
 
@@ -131,6 +132,52 @@ def test_freetaxusa_summary_with_wrong_numbers_is_ignored(
     assert imp.ret.federal_withholding == Decimal(18_500)
     assert imp.ret.reported_total_tax == Decimal(11_400)
     assert any("Skipped" in w and "summary" in w.lower() for w in imp.warnings), imp.warnings
+
+
+def test_hrblock_packed_layout_with_cover_and_summary(tmp_path: Path) -> None:
+    """Mirrors a real H&R Block 2020 user PDF (PII redacted, amounts mocked):
+
+      - Page 1 is a "Filing Checklist" cover (must be skipped)
+      - Page 2 is a "Quick Summary" with rounded totals that differ from
+        the real form (must be skipped — extracting from it would poison
+        the dashboard)
+      - Pages 3+ are real Form 1040 pages with the packed-line layout
+        ``1 Wages, salaries, tips, etc. ... 1 176,865`` where the value
+        sits directly after a repeated line-number with only a single
+        space between them.
+
+    Pre-fix regression: the importer extracted the trailing line number
+    (1, 2, 3, 7, 24) as the value because the money regex's ``_is_form_id_digit``
+    guard incorrectly flagged the real value as a "form identifier" — the
+    preceding char was the last digit of the line number.
+    """
+    r = ThirdPartyReturn(
+        tax_year=2020,
+        filing_status_label="Married Filing Jointly",
+        wages=Decimal(176_865),
+        interest=Decimal(481),
+        qual_div=Decimal(1_374),
+        ord_div=Decimal(2_223),
+        withholding=Decimal(24_420),
+        agi=Decimal(242_557),
+        taxable_income=Decimal(217_601),
+        total_tax=Decimal(39_506),
+    )
+    path = tmp_path / "hrblock_packed_2020.pdf"
+    make_hrblock_packed_1040(path, r)
+
+    imp = import_pdf(path)
+    assert imp.ret.tax_year == 2020
+    assert imp.ret.filing_status == FilingStatus.MFJ
+    assert imp.ret.wages == Decimal(176_865), f"wages got {imp.ret.wages}"
+    assert imp.ret.interest_income == Decimal(481), f"interest got {imp.ret.interest_income}"
+    assert imp.ret.qualified_dividends == Decimal(1_374), f"qdiv got {imp.ret.qualified_dividends}"
+    assert imp.ret.ordinary_dividends == Decimal(2_223), f"odiv got {imp.ret.ordinary_dividends}"
+    assert imp.ret.federal_withholding == Decimal(24_420), f"wh got {imp.ret.federal_withholding}"
+    assert imp.ret.reported_total_tax == Decimal(39_506), f"tot got {imp.ret.reported_total_tax}"
+    # Cover + quick-summary pages should both have been skipped (the wrong
+    # totals from the summary must NOT show up anywhere in the result).
+    assert any("Skipped" in w for w in imp.warnings), imp.warnings
 
 
 @pytest.mark.parametrize("label,expected", [

@@ -124,6 +124,163 @@ def make_hrblock_1040(path: Path, r: ThirdPartyReturn) -> None:
     c.save()
 
 
+def make_hrblock_packed_1040(path: Path, r: ThirdPartyReturn) -> None:
+    """H&R Block-realistic export modeled on a real 2020 user PDF (PII redacted
+    and dollar amounts mocked) — exercises three quirks the simpler
+    ``make_hrblock_1040`` fixture didn't cover:
+
+      1. **Filing checklist cover page** ("COVER PAGE / Filing Checklist for ...")
+         that mentions Form W-2 and various 1099 schedule attachments. Importer
+         must skip it.
+      2. **Vendor "Quick Summary" page** with friendly-label, rounded totals
+         (e.g. ``Income $240,000``, ``Tax withheld or paid already $27,000``)
+         that DIFFER from the real 1040 values. Importer must skip this page
+         and NOT poison dashboard values.
+      3. **Packed 1040 line layout** where the line number prints both BEFORE
+         the label and AFTER the value, separated from the dollar by a single
+         space — e.g. ``1 Wages, salaries, tips, etc. ... 1 176,865``. The
+         common parser bug here is mistaking the second line-number ``1`` for
+         the value (or filtering ``176,865`` because the preceding char is a
+         digit from the line number).
+      4. **Two-column packed rows** for lines 2a/2b, 3a/3b, 4a/4b, 5a/5b —
+         e.g. ``Attach 2a Tax-exempt interest ... 2a 0 b Taxable interest ... 2b 481``.
+
+    All PII (names, SSNs, addresses, employer names, bank info) is replaced
+    with obvious mock values that cannot collide with any real person.
+    """
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    width, height = LETTER
+
+    agi = r.agi if r.agi is not None else (r.wages + r.interest + r.ord_div)
+    ti = r.taxable_income if r.taxable_income is not None else (agi - Decimal(24800))
+
+    def page(lines: list[str]) -> None:
+        c.setFont("Courier", 8)
+        y = height - 40
+        for ln in lines:
+            c.drawString(40, y, ln)
+            y -= 10
+        c.showPage()
+
+    def m(d: Decimal) -> str:
+        # H&R Block prints amounts without leading '$' on the form lines.
+        return f"{int(d):,}"
+
+    # ── Page 1: filing-checklist cover (must be skipped) ────────────────────
+    page([
+        "COVER PAGE",
+        f"Filing Checklist for {r.tax_year} Tax Return Filed On Standard Forms",
+        "Prepared on: 04/14/2021 09:44:58 pm",
+        "Return: C:\\Mock\\HRBlock\\Jane Public 2020 Tax Return.T20",
+        "Step 1. Sign and date the return",
+        "Step 2. Assemble the return",
+        "These forms should be assembled behind Form 1040: U.S. Individual Income Tax Return",
+        "- Schedule B",
+        "- Schedule D",
+        "- - Form 8949",
+        "- Form 5329",
+        "- Form 8889",
+        "- Form 8995",
+        "- Form 1040-V",
+        "Staple these documents to the front of the first page of the return:",
+        "Form W-2: Wage and Tax Statement",
+        "1st (ACME CORPORATION)",
+        "2nd (NORTHWIND SCHOOL DISTRICT)",
+        "3rd (FABRIKAM)",
+        f"Make your check or money order for $12500 payable to United States Treasury.",
+    ])
+
+    # ── Page 2: vendor "Quick Summary" (must be skipped) ────────────────────
+    # Values here are deliberately DIFFERENT from the real form values on
+    # page 3+ so a regression in the page-filter would visibly poison the
+    # dashboard.
+    bad_income = r.wages + r.interest + r.ord_div + Decimal(10_000)  # wrong
+    bad_agi = agi + Decimal(5_000)                                   # wrong
+    bad_tax = (r.total_tax or Decimal(0)) + Decimal(3_000)           # wrong
+    bad_wh = r.withholding + Decimal(2_000)                          # wrong
+    page([
+        "- - Background Worksheet",
+        "- - Last Year's Data Worksheet",
+        "- - Form 1099-INT/OID",
+        "- - Form 1099-DIV",
+        f"{r.tax_year} return information - Keep this for your records",
+        "Quick Summary",
+        f"Income ${int(bad_income):,}",
+        "Adjustments - $200",
+        f"Adjusted gross income ${int(bad_agi):,}",
+        "Deductions - $25,000",
+        f"Tax withheld or paid already ${int(bad_wh):,}",
+        f"Actual tax due - ${int(bad_tax):,}",
+    ])
+
+    # ── Page 3: real Form 1040 page 1 with the packed-line layout ───────────
+    page([
+        f"F 1040 {r.tax_year}",
+        "o Department of the Treasury Internal Revenue Service (99)",
+        f"m r U.S. Individual Income Tax Return OMB No. 1545-0074  {r.tax_year}",
+        f"Filing status Single X {r.filing_status_label} Married filing separately (MFS) Head of household (HOH) Qualifying widow(er) (QW)",
+        "Your first name and middle initial Last name Your social security number",
+        "Jane Q Public                                                 111-22-3333",
+        "If joint return, spouse's first name and middle initial Last name Spouse's social security number",
+        "John R Public                                                 222-33-4444",
+        "Home address (number and street)",
+        "1 Example Way",
+        "City, town, or post office. State ZIP code",
+        "Sample WA 98000",
+        # The single-line packing of label + value is the H&R Block quirk:
+        #   `<line-no> <label> ........ <line-no> <value>`
+        f"1 Wages, salaries, tips, etc. Attach Form(s) W-2 . . . . . . . . . . . . . . . . . . . . . . . . . . . 1 {m(r.wages)}",
+        # Two-column packed row: 2a (tax-exempt) and 2b (taxable) on one line:
+        f"Attach 2a Tax-exempt interest . . . . . . . . 2a 0 b Taxable interest . . . . . . . . . . . . . . 2b {m(r.interest)}",
+        "Sch. B if",
+        # 3a (qualified) and 3b (ordinary) packed:
+        f"required. 3a Qualified dividends . . . . . . . . . 3a {m(r.qual_div)} b Ordinary dividends . . . . . . . . . . . . . 3b {m(r.ord_div)}",
+        "4a IRA distributions . . . . . . . . . . 4a b Taxable amount . . . . . . . . . . . . . . 4b 0",
+        "5a Pensions and annuities . . . . . . 5a b Taxable amount . . . . . . . . . . . . . . 5b 0",
+        "6a Social security benefits . . . . . . . 6a b Taxable amount . . . . . . . . . . . . . . 6b",
+        "Standard",
+        "Deduction for-",
+        f"7 Capital gain or (loss). Attach Schedule D if required. If not required, check here . . . . . . . . . . . . . . . . . . 7 {m(Decimal(0))}",
+        f"8 Other income from Schedule 1, line 9 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8 0",
+        f"9 Add lines 1, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income . . . . . . . . . . . . . . . . 9 {m(r.wages + r.interest + r.ord_div)}",
+        "10 Adjustments to income: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .",
+        "a From Schedule 1, line 22 . . . . . . . . . . . . . . . . . . . . . . . . . . 10a 0",
+        "b Charitable contributions if you take the standard deduction. See instructions 10b 0",
+        "c Add lines 10a and 10b. These are your total adjustments to income . . . . . . . . . . . . . . 10c 0",
+        f"11 Subtract line 10c from line 9. This is your adjusted gross income . . . . . . . . . . . . . . . 11 {m(agi)}",
+        "12 Standard deduction or itemized deductions (from Schedule A) . . . . . . . . . . . . . . . . . . 12 24,800",
+        "13 Qualified business income deduction. Attach Form 8995 or Form 8995-A . . . . . . . . . . . . . . 13 0",
+        "14 Add lines 12 and 13 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14 24,800",
+        f"15 Taxable income. Subtract line 14 from line 11. If zero or less, enter -0- . . . . . . . . . . . . . . . 15 {m(ti)}",
+        f"KIA For Disclosure, Privacy Act, and Paperwork Reduction Act Notice, see separate instructions. Form 1040 ({r.tax_year})",
+    ])
+
+    # ── Page 4: Form 1040 page 2 (taxes and payments) ───────────────────────
+    total_tax_str = m(r.total_tax) if r.total_tax else "0"
+    page([
+        f"Form 1040 ({r.tax_year}) Page 2",
+        f"16 Tax (see instructions). Check if any from Form(s): 1 8814 2 4972 3 16 {total_tax_str}",
+        "17 Amount from Schedule 2, line 3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 0",
+        f"18 Add lines 16 and 17 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 {total_tax_str}",
+        "19 Child tax credit or credit for other dependents . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19",
+        "20 Amount from Schedule 3, line 7 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 0",
+        "21 Add lines 19 and 20 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 0",
+        f"22 Subtract line 21 from line 18. If zero or less, enter -0- . . . . . . . . . . . . . . . . . . . . . . . . 22 {total_tax_str}",
+        "23 Other taxes, including self-employment tax, from Schedule 2, line 10 . . . . . . . . . . . . . . . . 23 0",
+        f"24 Add lines 22 and 23. This is your total tax . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 {total_tax_str}",
+        "25 Federal income tax withheld from:",
+        f"a Form(s) W-2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25a {m(r.withholding)}",
+        "b Form(s) 1099 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25b 0",
+        "c Other forms (see instructions) . . . . . . . . . . . . . . . . . . . . . . . 25c 0",
+        f"d Add lines 25a through 25c . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25d {m(r.withholding)}",
+        f"26 {r.tax_year} estimated tax payments and amount applied from prior return . . . . . . . . . . . . . . . . . 26 0",
+        f"33 Add lines 25d, 26, and 32. These are your total payments . . . . . . . . . . . . . . . . . . . . 33 {m(r.withholding)}",
+        f"KIA Go to www.irs.gov/Form1040 for instructions and the latest information. Form 1040 ({r.tax_year})",
+    ])
+
+    c.save()
+
+
 def make_freetaxusa_1040(path: Path, r: ThirdPartyReturn) -> None:
     """FreeTaxUSA-style export: minimalist cover + canonical IRS body."""
     c = canvas.Canvas(str(path), pagesize=LETTER)

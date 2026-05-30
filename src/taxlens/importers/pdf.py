@@ -45,7 +45,19 @@ def _is_form_id_digit(tail: str, start: int) -> bool:
     """True if the money match at `start` is actually part of a form identifier
     like 'W-2', '1099-R', '8949', 'Form 1116', 'Sch B'. Without this guard,
     'Federal income tax withheld from Form(s) W-2' would match '-2' as the
-    withholding amount."""
+    withholding amount.
+
+    Note: the _MONEY regex begins with ``\\s*`` so the match's `start` may
+    point at a leading space rather than the first digit. We skip past any
+    leading whitespace before inspecting the preceding character — otherwise
+    two adjacent money values like ``7 37,020`` would cause the second value
+    to be mis-flagged because the previous char (the last digit of the first
+    value) is alphanumeric.
+    """
+    # Skip leading whitespace within the matched span so we examine the char
+    # before the actual digit/sign, not before the leading space.
+    while start < len(tail) and tail[start].isspace():
+        start += 1
     # Preceded by `[Letter]-` → part of a form code like W-2 / 1099-R.
     if start >= 2 and tail[start - 1] == "-" and tail[start - 2].isalpha():
         return True
@@ -60,6 +72,41 @@ def _money_matches_in(tail: str) -> list:
     """All money matches in `tail` that are not inside form identifiers."""
     money_pat = re.compile(_MONEY)
     return [m for m in money_pat.finditer(tail) if not _is_form_id_digit(tail, m.start())]
+
+
+_LINE_NO_ECHO = re.compile(r"(?:^|\s)(\d{1,2}[a-z]?)\s*$")
+
+
+def _pick_money(tail: str, matches: list) -> "re.Match | None":
+    """Choose the most-likely VALUE match from `matches` (all non-form-id
+    money matches in `tail`).
+
+    IRS / H&R Block packed-row layouts repeat the line number right before
+    the value, e.g.::
+
+        1 Wages, salaries, tips, etc. ......... 1 176,865
+        3a Qualified dividends ....... 3a 1,374 b Ordinary dividends ....... 3b 2,223
+        7 Capital gain or (loss). Attach Sch D ....... 7 37,020
+
+    Naively taking the LAST money picks ``2,223`` (the *next column's* value)
+    on packed rows, and naively taking the FIRST picks the trailing
+    line-number echo (``1``, ``7``).
+
+    Heuristic: prefer the first money whose IMMEDIATELY PRECEDING
+    whitespace-separated token looks like a line-number echo (``\\d{1,2}[a-z]?``).
+    If none qualify, fall back to the last match (preserves the legacy
+    behavior for label-only fixtures where the value just trails the label).
+    """
+    for m in matches:
+        # The text BEFORE this money match, with any leading-of-match
+        # whitespace skipped first (since _MONEY starts with \s*).
+        s = m.start()
+        while s < len(tail) and tail[s].isspace():
+            s += 1
+        prefix = tail[:s]
+        if _LINE_NO_ECHO.search(prefix):
+            return m
+    return matches[-1] if matches else None
 
 
 def _first_money_after(label_re: str, text: str) -> Decimal | None:
@@ -92,10 +139,12 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
             except InvalidOperation:
                 pass
         if money_matches:
-            try:
-                return _money(money_matches[-1].group(0))
-            except InvalidOperation:
-                pass
+            picked = _pick_money(tail, money_matches)
+            if picked is not None:
+                try:
+                    return _money(picked.group(0))
+                except InvalidOperation:
+                    pass
         # Same-line fallback failed — scan up to 5 next non-empty lines,
         # skipping pure noise.
         for j in range(i + 1, min(i + 6, len(lines))):
