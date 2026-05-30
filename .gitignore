@@ -15,3 +15,10 @@ build/
 htmlcov/
 .idea/
 .vscode/
+
+# Mock/sample tax-return PDFs — never check these in.
+# Generated on demand by tests/third_party_pdfs.py (make_turbotax_1040,
+# make_hrblock_1040, make_hrblock_packed_1040, make_freetaxusa_1040, ...)
+# into pytest's tmp_path. Do not commit any generated copies.
+docs/importer_samples/
+*.pdf
