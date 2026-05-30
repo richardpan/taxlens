@@ -160,6 +160,77 @@ def make_freetaxusa_1040(path: Path, r: ThirdPartyReturn) -> None:
     c.save()
 
 
+def make_freetaxusa_summary_mismatch_1040(path: Path, r: ThirdPartyReturn) -> None:
+    """A FreeTaxUSA-style export where the *summary page* has different (wrong)
+    values than the actual Form 1040 body. The importer should ignore the
+    summary and report what's on the real form.
+
+    Real-world cause: vendor summaries sometimes combine wages + Schedule C
+    net profit into a single "Wages and Salaries" total, or omit interest
+    that lands on a Schedule B passthrough — so the cover page rolls things
+    up differently from the underlying 1040 lines. We mimic that here by
+    inflating the summary numbers vs. the form values.
+    """
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    width, height = LETTER
+
+    agi = r.agi if r.agi is not None else (r.wages + r.interest + r.ord_div)
+    ti = r.taxable_income if r.taxable_income is not None else (agi - Decimal(14600))
+
+    # ── Page 1: WRONG summary (inflated values, no IRS markers) ─────────────
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 40, f"FreeTaxUSA — {r.tax_year} Tax Return Summary")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 58, f"Filing Status: {r.filing_status_label}")
+    c.drawString(50, height - 72, f"Tax Year: {r.tax_year}")
+    bad = [
+        ("Wages and Salaries",      _money(r.wages + Decimal(50_000))),  # WRONG
+        ("Taxable Interest",        _money(r.interest + Decimal(900))),  # WRONG
+        ("Ordinary Dividends",      _money(r.ord_div + Decimal(3_000))), # WRONG
+        ("Qualified Dividends",     _money(r.qual_div + Decimal(2_000))),# WRONG
+        ("Adjusted Gross Income",   _money(agi + Decimal(55_000))),      # WRONG
+        ("Taxable Income",          _money(ti + Decimal(55_000))),       # WRONG
+        ("Total Tax",               _money((r.total_tax or Decimal(0)) + Decimal(8_000))),  # WRONG
+        ("Federal Tax Withheld",    _money(r.withholding + Decimal(7_000))),  # WRONG
+    ]
+    y = height - 100
+    for label, value in bad:
+        c.drawString(50, y, label)
+        c.drawRightString(width - 50, y, value)
+        y -= 16
+    c.showPage()
+
+    # ── Page 2: CORRECT IRS Form 1040 body ──────────────────────────────────
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, height - 40, "Form 1040 U.S. Individual Income Tax Return")
+    c.setFont("Helvetica", 8)
+    c.drawString(50, height - 54, f"OMB No. 1545-0074  {r.tax_year}")
+    c.setFont("Helvetica", 9)
+    c.drawString(50, height - 68, "Department of the Treasury — Internal Revenue Service")
+    c.setFont("Helvetica", 10)
+
+    items = [
+        ("1a", "Total amount from Form(s) W-2, box 1", _money(r.wages)),
+        ("1z", "Add lines 1a through 1h", _money(r.wages)),
+        ("2b", "Taxable interest", _money(r.interest)),
+        ("3a", "Qualified dividends", _money(r.qual_div)),
+        ("3b", "Ordinary dividends", _money(r.ord_div)),
+        ("11", "Adjusted gross income. Subtract line 10 from line 9", _money(agi)),
+        ("15", "Taxable income. Subtract line 14 from line 11", _money(ti)),
+        ("24", "Add lines 22 and 23. This is your total tax",
+            _money(r.total_tax) if r.total_tax else "$0"),
+        ("25a", "Federal income tax withheld from Form(s) W-2", _money(r.withholding)),
+    ]
+    y = height - 90
+    for lineno, label, value in items:
+        c.drawString(50, y, lineno)
+        c.drawString(80, y, label)
+        c.drawString(500, y, value)
+        y -= 14
+    c.showPage()
+    c.save()
+
+
 def make_freetaxusa_realistic_1040(path: Path, r: ThirdPartyReturn) -> None:
     """A closer-to-reality FreeTaxUSA export that mimics three quirks we've
     seen break the importer in the wild:

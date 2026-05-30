@@ -22,6 +22,7 @@ from tests.third_party_pdfs import (
     ThirdPartyReturn,
     make_freetaxusa_1040,
     make_freetaxusa_realistic_1040,
+    make_freetaxusa_summary_mismatch_1040,
     make_hrblock_1040,
     make_turbotax_1040,
 )
@@ -109,6 +110,27 @@ def test_freetaxusa_realistic_column_split_imports_cleanly(
     assert imp.ret.ordinary_dividends == Decimal(1_000)
     assert imp.ret.federal_withholding == Decimal(18_500)
     assert imp.ret.reported_total_tax == Decimal(11_400)
+
+
+def test_freetaxusa_summary_with_wrong_numbers_is_ignored(
+    tmp_path: Path, base_return: ThirdPartyReturn
+) -> None:
+    """Page 1 has a FreeTaxUSA-style summary with INFLATED values; page 2 has
+    the real Form 1040 (with OMB number + IRS markers). The importer must
+    extract from the real form and ignore the lying summary."""
+    path = tmp_path / "freetaxusa_summary_lies.pdf"
+    make_freetaxusa_summary_mismatch_1040(path, base_return)
+
+    imp = import_pdf(path)
+    assert imp.ret.tax_year == 2023
+    assert imp.ret.filing_status == FilingStatus.MFJ
+    assert imp.ret.wages == Decimal(120_000), f"got {imp.ret.wages}"
+    assert imp.ret.interest_income == Decimal(450)
+    assert imp.ret.qualified_dividends == Decimal(800)
+    assert imp.ret.ordinary_dividends == Decimal(1_000)
+    assert imp.ret.federal_withholding == Decimal(18_500)
+    assert imp.ret.reported_total_tax == Decimal(11_400)
+    assert any("Skipped" in w and "summary" in w.lower() for w in imp.warnings), imp.warnings
 
 
 @pytest.mark.parametrize("label,expected", [

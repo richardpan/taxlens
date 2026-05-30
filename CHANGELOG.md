@@ -2,6 +2,33 @@
 
 All notable changes to TaxLens.
 
+## [0.27.2] — 2026
+
+### Fixed — Vendor summary pages were overriding real 1040 values
+
+The importer used to extract from ALL pages of the PDF, including the
+vendor-generated "Tax Return Summary" cover page. Real-world summaries
+often present rolled-up / approximated totals that differ from the
+underlying Form 1040 (e.g. combining wages + Schedule C net profit into
+a single "Wages and Salaries" line). When the summary page came first,
+its numbers won the regex race and the dashboard reported wrong values.
+
+Fix: classify each page as either a genuine IRS form (positive markers
+like "Form 1040", "Schedule X (Form 1040)", "OMB No. 1545-XXXX",
+"Department of the Treasury", "Cat. No. NNNN") or a summary / cover
+page (negative markers like "Tax Return Summary"). Only pages that pass
+the form-page filter are scanned for field values. If no page qualifies
+(unusual export), the importer falls back to all pages so it never
+refuses to import anything.
+
+The /api/debug/extract endpoint now reports `is_form_page: true|false`
+per page, and the import warnings include "Skipped N summary / non-IRS-
+form page(s)" so users understand why a familiar cover got ignored.
+
+New golden test where page 1 (summary) has inflated WRONG values and
+page 2 has the real 1040 with correct values — the importer now picks
+the right ones. 288 tests pass.
+
 ## [0.27.1] — 2026
 
 ### Fixed — FreeTaxUSA PDF importer dropping income fields

@@ -31,7 +31,7 @@ _PAREN_NEG = re.compile(r"\(\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*\)")
 #   - parenthetical hint: "(see instructions)" / "(Form 8949)"
 #   - "Attach Schedule ..." or "Attach Form ..." continuations
 _NOISE_LINE = re.compile(
-    r"^\s*(?:[\.\s]+|\d+\s*[a-z]?|\([^)]*\)|Attach\s+(?:Schedule|Form|Form\(s\))\s+\S.*)\s*$",
+    r"^\s*(?:[\.\s]+|\d+\s*[a-z]?|\([^)]*\)|Attach\s+(?:Schedule|Form|Form\(s\))\s+\S.*|[^\w\s]{1,3}|[A-Za-z]{1,3})\s*$",
     re.IGNORECASE,
 )
 
@@ -231,6 +231,69 @@ STATUS_EXPLICIT = [
 
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
 
+# ─── Page classification: only extract from real IRS form pages ──────────────
+# Vendors (FreeTaxUSA, TurboTax, H&R Block) often print a friendly summary
+# page first with rounded / partial figures that don't match the underlying
+# 1040 (e.g. summary "Wages and Salaries" may roll Sch C net profit into a
+# single total). If we extract from those pages, the dashboard reports the
+# wrong numbers. We classify each page and only consider those that look
+# like a genuine IRS form.
+#
+# A page qualifies as an IRS form page if it contains ANY of these strong
+# signals:
+#   - "Form 1040" header next to the IRS phrase or OMB number
+#   - "Schedule X (Form 1040)" header  (X ∈ 1,2,3,A,B,C,D,E,SE,EIC,H,J,R)
+#   - "Form NNNN" with an OMB number nearby
+#   - "Department of the Treasury — Internal Revenue Service" footer
+#   - The IRS Cat. No. footer (e.g. "Cat. No. 11320B")
+_FORM_PAGE_PATTERNS = [
+    re.compile(r"Form\s*1040(?:-SR|-NR|-X)?\b", re.IGNORECASE),
+    re.compile(r"Schedule\s+(?:[1-3]|A|B|C|D|E|SE|EIC|H|J|R|8812)\b\s*\(?\s*Form\s*1040\)?",
+               re.IGNORECASE),
+    re.compile(r"\bForm\s*\d{3,5}[A-Z]?\b", re.IGNORECASE),  # Form 8606, 8949, 2441, etc.
+    re.compile(r"Department\s+of\s+the\s+Treasury", re.IGNORECASE),
+    re.compile(r"Internal\s+Revenue\s+Service", re.IGNORECASE),
+    re.compile(r"OMB\s*No\.\s*1545-\d{4}", re.IGNORECASE),
+    re.compile(r"\bCat\.?\s*No\.\s*\d{4,6}[A-Z]?\b", re.IGNORECASE),
+    re.compile(r"U\.?S\.?\s+Individual\s+Income\s+Tax\s+Return", re.IGNORECASE),
+]
+
+# Pages that match these are explicit summary / cover pages we want to
+# *exclude* even if a stray "Form 1040" mention appears on them.
+_SUMMARY_PAGE_PATTERNS = [
+    re.compile(r"Tax\s+Return\s+Summary", re.IGNORECASE),
+    re.compile(r"Return\s+Summary", re.IGNORECASE),
+    re.compile(r"\bSummary\s+of\s+(?:Your\s+)?(?:Return|Tax)", re.IGNORECASE),
+    re.compile(r"\bElectronic\s+Filing\s+Instructions", re.IGNORECASE),
+    re.compile(r"^\s*Cover\s*Page\s*$", re.IGNORECASE | re.MULTILINE),
+]
+
+
+def _is_form_page(text: str) -> bool:
+    """True iff `text` looks like a real IRS form page (not a vendor summary
+    cover, instruction page, or filing-confirmation page).
+
+    Decision rule: require BOTH (a) a positive IRS-form signal AND (b) no
+    explicit summary-page marker. A single OMB number alone is sufficient
+    because vendor summary pages never include OMB numbers."""
+    if not text or not text.strip():
+        return False
+    for s_pat in _SUMMARY_PAGE_PATTERNS:
+        if s_pat.search(text):
+            return False
+    for pat in _FORM_PAGE_PATTERNS:
+        if pat.search(text):
+            return True
+    return False
+
+
+def _form_pages(pages: list[str]) -> list[str]:
+    """Filter `pages` down to only those that look like real IRS form pages.
+    If NO page qualifies (e.g. unusual export with only a summary), falls
+    back to the original page list so we don't refuse to import anything."""
+    keep = [p for p in pages if _is_form_page(p)]
+    return keep if keep else pages
+
 
 def _extract_text_per_page(path: Path) -> tuple[list[str], bool]:
     """Returns (pages, ocr_used). When pdfplumber finds no text on most pages,
@@ -353,9 +416,16 @@ def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str
 
 def import_pdf(path: Path) -> Imported:
     pages, ocr_used = _extract_text_per_page(path)
-    tax_year = _detect_year(pages)
-    filing_status = _detect_status(pages)
-    fields, children, warnings = _extract_fields(pages)
+    # Restrict extraction to real IRS form pages so vendor summary covers
+    # (which often print rounded / aggregated totals that don't match the
+    # underlying 1040) can't poison the field values. _form_pages() falls
+    # back to all pages if none qualify, so this is non-destructive.
+    form_pages = _form_pages(pages)
+    summary_excluded = len(pages) - len(form_pages)
+
+    tax_year = _detect_year(form_pages) or _detect_year(pages)
+    filing_status = _detect_status(form_pages) or _detect_status(pages)
+    fields, children, warnings = _extract_fields(form_pages)
 
     if tax_year is None:
         raise ValueError(
@@ -386,6 +456,11 @@ def import_pdf(path: Path) -> Imported:
         ) from e
     if ocr_used:
         warnings.insert(0, "PDF appeared to be scanned; used OCR fallback. Results may be approximate — please double-check.")
+    if summary_excluded > 0:
+        warnings.append(
+            f"Skipped {summary_excluded} summary / non-IRS-form page(s) so vendor "
+            f"cover totals don't override the actual 1040 values."
+        )
     return Imported(
         ret=ret,
         source="pdf-ocr" if ocr_used else "pdf",

@@ -1,0 +1,14 @@
+FreeTaxUSA 2023
+Filing Status: Married Filing Jointly
+Form 1040
+For the year Jan. 1 - Dec. 31, 2023
+1a Total amount from Form(s) W-2, box 1 ...... $120,000
+1z Add lines 1a through 1h ...... $120,000
+2b Taxable interest ...... $450
+3a Qualified dividends ...... $800
+3b Ordinary dividends ...... $1,000
+10 Adjustments to income from Schedule 1, line 26 ...... $0
+11 Adjusted gross income ...... $121,450
+15 Taxable income ...... $92,250
+24 Add lines 22 and 23. This is your total tax ...... $11,400
+25a Federal income tax withheld from Form(s) W-2 ...... $18,500

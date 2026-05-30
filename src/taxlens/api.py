@@ -106,6 +106,8 @@ async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
     try:
         if suffix == ".pdf":
             import pdfplumber
+
+            from taxlens.importers.pdf import _is_form_page
             try:
                 with pdfplumber.open(str(tmp_path)) as pdf:
                     pages = [(p.extract_text() or "") for p in pdf.pages]
@@ -114,7 +116,14 @@ async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
                     "kind": "pdf",
                     "page_count": len(pages),
                     "nonempty_pages": sum(1 for p in pages if p.strip()),
-                    "pages": [{"index": i, "text": p[:8000]} for i, p in enumerate(pages)],
+                    "pages": [
+                        {
+                            "index": i,
+                            "is_form_page": _is_form_page(p),
+                            "text": p[:8000],
+                        }
+                        for i, p in enumerate(pages)
+                    ],
                 }
             except Exception as e:
                 return {
