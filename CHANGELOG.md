@@ -2,6 +2,66 @@
 
 All notable changes to TaxLens.
 
+## [0.28.0] — 2026
+
+### Fixed — fillable IRS PDFs imported to $0 because labels and values were on different lines
+
+A user reported that real tax-return PDFs imported successfully (the file
+showed up in the returns list) but the dashboard read $0 for every value.
+Root cause: many real IRS-style PDFs render labels and user-entered
+amounts in **two separate text passes** with a small vertical offset
+(~6pt). pdfplumber's default `extract_text()` uses a ~3pt y-clustering
+tolerance, so it splits each `label` and its `value` onto two
+non-adjacent output lines (sometimes with several unrelated rows in
+between). The importer's same-line and adjacent-line regexes can't pair
+them up, so every money field falls through to its zero default — and
+worse, the adjacent-line fallback occasionally latches onto a *neighbor*
+row's amount, silently writing wrong values to the database.
+
+### Added — layout-aware extraction with multiple y-tolerances
+
+`taxlens/importers/pdf.py` now produces **three parallel text streams**
+per page and runs the field regexes against each:
+
+- **default text** — `page.extract_text()` (unchanged baseline).
+- **tight layout (3pt)** — words clustered by `top` via
+  `page.extract_words()`, then sorted by `x0`. Recovers values that the
+  default extractor split across wide column gaps.
+- **loose layout (8pt)** — same clustering with a larger tolerance.
+  Merges label rows with value rows drawn at small vertical offsets, which
+  is the exact failure mode that caused $0 imports on fillable forms.
+
+The merge prefers the **most-complete** stream (largest field dict, ties
+broken in default-text order) rather than first-wins-per-field. This
+matters because the default stream can extract a *wrong-but-truthy*
+value (an adjacent row's amount or a bare line-number); per-field
+merging would let it overwrite the correct loose-layout value. Streams
+that recover additional fields are still folded in.
+
+### Added — diagnostics
+
+- `import_pdf` now emits a `WARNING` when an IRS form page is detected
+  but zero money fields are extracted, pointing users to
+  `POST /api/debug/extract`.
+- `import_pdf` emits a per-import warning naming exactly which fields
+  were recovered by layout-aware extraction (so power users can see
+  *why* a given import worked).
+- `POST /api/debug/extract` now returns the tight-layout text, the
+  loose-layout text, and per-stream field-extraction results side by
+  side. Useful for diagnosing why a specific PDF imports as $0.
+
+### Tests
+
+- New fixture `make_fillable_offset_1040` (in `tests/third_party_pdfs.py`)
+  draws labels at one y and values 6pt above — pdfplumber's default
+  extractor splits them, but the loose-layout pass merges them back.
+- New regression test `test_fillable_offset_layout_recovered_by_loose_layout`
+  locks in correct extraction of all eight key fields (wages, interest,
+  qual/ord dividends, AGI, taxable income, total tax, federal withholding)
+  and verifies the user-visible "Layout-aware extraction recovered N
+  field(s)" warning fires.
+- **290 tests passing** (was 289).
+
 ## [0.27.3] — 2026
 
 ### Fixed — H&R Block packed-line layout extracted line numbers instead of values

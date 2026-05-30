@@ -281,6 +281,66 @@ def make_hrblock_packed_1040(path: Path, r: ThirdPartyReturn) -> None:
     c.save()
 
 
+def make_fillable_offset_1040(out_path: Path, r: ThirdPartyReturn) -> None:
+    """IRS-fillable-form-style export where labels and user-entered values
+    are drawn in two SEPARATE rendering passes with a small vertical
+    offset (~6pt) between them -- mimicking the failure mode where a real
+    fillable PDF places form-field text a few points off the label baseline.
+
+    pdfplumber's default ``extract_text()`` (and a tight y-tolerance
+    layout pass) sees the labels and the values as two distinct rows of
+    text, so the importer's same-line and adjacent-line regexes can't
+    pair them up -- every money field comes out as $0. The loose-tolerance
+    layout pass (introduced alongside this fixture) merges the offset
+    rows back into single visual rows so extraction succeeds.
+
+    This regression test locks in the loose-tolerance behavior.
+    """
+    c = canvas.Canvas(str(out_path), pagesize=LETTER)
+    width, height = LETTER
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, height - 40, "Form 1040 U.S. Individual Income Tax Return")
+    c.setFont("Helvetica", 8)
+    c.drawString(50, height - 54, f"OMB No. 1545-0074  {r.tax_year}")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 70, f"Filing Status: {r.filing_status_label}")
+
+    agi = r.agi if r.agi is not None else (r.wages + r.interest + r.ord_div)
+    ti = r.taxable_income if r.taxable_income is not None else (agi - Decimal(14_600))
+
+    rows = [
+        ("1a", "Total amount from Form(s) W-2, box 1", r.wages),
+        ("2b", "Taxable interest", r.interest),
+        ("3a", "Qualified dividends", r.qual_div),
+        ("3b", "Ordinary dividends", r.ord_div),
+        ("11", "Adjusted gross income", agi),
+        ("15", "Taxable income", ti),
+        ("24", "Add lines 22 and 23. This is your total tax",
+            r.total_tax if r.total_tax else Decimal(0)),
+        ("25a", "Federal income tax withheld from Form(s) W-2", r.withholding),
+    ]
+
+    # PASS 1: labels at baseline y.
+    y = height - 110
+    for lineno, label, _v in rows:
+        c.drawString(50, y, lineno)
+        c.drawString(80, y, label)
+        y -= 24
+
+    # PASS 2: values 6pt above the label baseline (outside pdfplumber's
+    # default ~3pt y-clustering tolerance, so default extraction splits
+    # them onto separate output rows).
+    y = height - 110 + 6
+    for _ln, _lab, v in rows:
+        c.drawRightString(560, y, f"{int(v):,}")
+        y -= 24
+
+    c.showPage()
+    c.save()
+
+
+
 def make_freetaxusa_1040(path: Path, r: ThirdPartyReturn) -> None:
     """FreeTaxUSA-style export: minimalist cover + canonical IRS body."""
     c = canvas.Canvas(str(path), pagesize=LETTER)

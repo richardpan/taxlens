@@ -344,16 +344,93 @@ def _form_pages(pages: list[str]) -> list[str]:
     return keep if keep else pages
 
 
-def _extract_text_per_page(path: Path) -> tuple[list[str], bool]:
-    """Returns (pages, ocr_used). When pdfplumber finds no text on most pages,
-    we fall back to Tesseract OCR via `pytesseract` + `pdf2image` (if installed)."""
-    pages: list[str] = []
+def _layout_text(page, y_tol: float = 3.0) -> str:
+    """Reconstruct a page's text from positioned words, clustering by
+    y-coordinate so each visual row becomes ONE text line.
+
+    Why this is needed: pdfplumber's default ``page.extract_text()`` walks
+    the page's text stream in PDF source order. When an IRS-form PDF
+    renders labels in a left column and amounts in a far-right "box" column
+    with a wide gap between them — or worse, renders all labels first and
+    all amounts in a second pass at slightly different y coordinates (which
+    is what many fillable/printed IRS PDFs actually do) — the default
+    extractor emits the label and the amount on *separate* output lines
+    (sometimes with several unrelated rows in between), which our
+    same-line regexes can't navigate. The result is an import where
+    everything parses to $0.
+
+    By contrast, ``extract_words()`` returns each word with its (x0, top,
+    x1, bottom) bounding box. We cluster on ``top`` (within ``y_tol``) to
+    recover the visual row, then sort each cluster by ``x0`` so the label
+    and its amount end up on the same reconstructed line — which the
+    existing regex/value picker can then handle correctly.
+
+    Pass a larger ``y_tol`` to merge label rows with value rows that were
+    drawn at a small vertical offset (common in fillable forms where the
+    user-entered value is placed a few points above or below the label
+    baseline).
+
+    Returns an empty string if pdfplumber can't yield words for the page.
+    """
+    try:
+        words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+    except Exception:
+        return ""
+    if not words:
+        return ""
+    words.sort(key=lambda w: (w["top"], w["x0"]))
+    lines: list[str] = []
+    cur: list[dict] = []
+    cur_y: float | None = None
+    for w in words:
+        if cur_y is None or abs(w["top"] - cur_y) <= y_tol:
+            cur.append(w)
+            if cur_y is None:
+                cur_y = w["top"]
+        else:
+            cur.sort(key=lambda x: x["x0"])
+            lines.append(" ".join(x["text"] for x in cur))
+            cur = [w]
+            cur_y = w["top"]
+    if cur:
+        cur.sort(key=lambda x: x["x0"])
+        lines.append(" ".join(x["text"] for x in cur))
+    return "\n".join(lines)
+
+
+def _extract_text_per_page(path: Path) -> tuple[list[str], list[list[str]], bool]:
+    """Returns (default_text_pages, layout_text_streams, ocr_used).
+
+    Multiple parallel text streams are produced for each page:
+
+    - ``default_text_pages[i]`` is whatever ``page.extract_text()`` returns
+      (PDF source-order text reconstruction, what we've always used).
+    - ``layout_text_streams[k][i]`` is rebuilt by clustering
+      ``extract_words()`` output by y-coordinate so each visual row becomes
+      one text line. We produce streams at two y-tolerances:
+        - tight (3pt) preserves distinct form rows cleanly
+        - loose (8pt) merges label and value rows that were drawn at small
+          vertical offsets — common in fillable IRS forms where the
+          user-entered amount sits a few points above/below the label
+          baseline, which otherwise causes the default extractor (and the
+          tight layout pass) to split them onto separate output lines.
+
+    All streams are passed to field extraction so a label/value pair
+    broken in one stream can still match in another. When pdfplumber finds
+    no text on most pages (scanned PDFs without a text layer), we fall
+    back to Tesseract OCR — in which case the OCR text is reused as the
+    sole stream.
+    """
+    default_pages: list[str] = []
+    layout_tight: list[str] = []
+    layout_loose: list[str] = []
     try:
         with pdfplumber.open(str(path)) as pdf:
             for p in pdf.pages:
-                pages.append(p.extract_text() or "")
+                default_pages.append(p.extract_text() or "")
+                layout_tight.append(_layout_text(p, y_tol=3.0))
+                layout_loose.append(_layout_text(p, y_tol=8.0))
     except Exception as e:
-        # Common cases: encrypted PDF, malformed xref, pdfplumber/pdfminer crash.
         msg = str(e).lower()
         if "encrypt" in msg or "password" in msg:
             raise ValueError(
@@ -365,31 +442,27 @@ def _extract_text_per_page(path: Path) -> tuple[list[str], bool]:
             f"Try POST /api/debug/extract to diagnose."
         ) from e
 
-    nonempty = sum(1 for p in pages if p.strip())
-    if nonempty >= max(1, len(pages) // 2):
-        return pages, False
+    nonempty = sum(1 for p in default_pages if p.strip())
+    if nonempty >= max(1, len(default_pages) // 2):
+        return default_pages, [layout_tight, layout_loose], False
 
-    # Fallback to OCR. Soft-deps: pytesseract + pdf2image + Poppler binaries +
-    # Tesseract binary. If any are missing we keep the empty result and let the
-    # caller surface a warning rather than crashing the import.
+    # OCR fallback (soft-deps).
     try:
         import pdf2image                          # type: ignore[import-not-found]
         import pytesseract                        # type: ignore[import-not-found]
     except Exception:
-        return pages, False
-
+        return default_pages, [layout_tight, layout_loose], False
     try:
         images = pdf2image.convert_from_path(str(path), dpi=300)
     except Exception:
-        return pages, False
-
+        return default_pages, [layout_tight, layout_loose], False
     ocr_pages: list[str] = []
     for img in images:
         try:
             ocr_pages.append(pytesseract.image_to_string(img))
         except Exception:
             ocr_pages.append("")
-    return ocr_pages, True
+    return ocr_pages, [list(ocr_pages)], True
 
 
 def _detect_year(pages: list[str]) -> int | None:
@@ -463,18 +536,101 @@ def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str
     return out, qualifying_children, warnings
 
 
-def import_pdf(path: Path) -> Imported:
-    pages, ocr_used = _extract_text_per_page(path)
-    # Restrict extraction to real IRS form pages so vendor summary covers
-    # (which often print rounded / aggregated totals that don't match the
-    # underlying 1040) can't poison the field values. _form_pages() falls
-    # back to all pages if none qualify, so this is non-destructive.
-    form_pages = _form_pages(pages)
-    summary_excluded = len(pages) - len(form_pages)
+def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) -> tuple[dict[str, Decimal], int, list[str]]:
+    """Pick the most-complete (fields, children, warnings) tuple from
+    ``results``. The "winner" is the result with the largest dict; ties
+    are broken in argument order so existing fixtures (where default-text
+    extraction has always worked) keep their prior behavior.
 
-    tax_year = _detect_year(form_pages) or _detect_year(pages)
-    filing_status = _detect_status(form_pages) or _detect_status(pages)
-    fields, children, warnings = _extract_fields(form_pages)
+    Why "most complete" instead of "first non-None per field":
+    default-text extraction on PDFs whose labels and values are rendered
+    on separate lines (e.g. fillable IRS forms) sometimes still produces
+    a value — but it's the WRONG value (an adjacent row's amount or a
+    bare line-number). Per-field merging treats those wrong values as
+    truthy and lets them poison the result. Picking the single stream
+    that recovered the most fields is safer: it lets the loose-layout
+    pass replace a broken default-text pass wholesale, instead of being
+    overwritten field-by-field.
+
+    Fields from runner-up streams that aren't in the winner are still
+    folded in (set-default semantics) so a partial recovery from another
+    stream isn't discarded entirely.
+    """
+    if not results:
+        return {}, 0, []
+    winner_idx = max(range(len(results)), key=lambda i: len(results[i][0]))
+    base_fields, base_children, base_warnings = results[winner_idx]
+    merged = dict(base_fields)
+    children = base_children
+    warnings = list(base_warnings)
+    for i, (fields, ch, ws) in enumerate(results):
+        if i == winner_idx:
+            continue
+        for k, v in fields.items():
+            merged.setdefault(k, v)
+        if ch and not children:
+            children = ch
+        for w in ws:
+            if w not in warnings:
+                warnings.append(w)
+    return merged, children, warnings
+
+
+def import_pdf(path: Path) -> Imported:
+    default_pages, layout_streams, ocr_used = _extract_text_per_page(path)
+    # A page qualifies as a real IRS form page if EITHER its default text or
+    # any of its layout-reconstructed texts shows IRS-form markers, and no
+    # stream shows an explicit summary marker.
+    def keep_page(idx: int) -> bool:
+        d = default_pages[idx]
+        layouts = [ls[idx] for ls in layout_streams]
+        for text in [d, *layouts]:
+            if any(p.search(text) for p in _SUMMARY_PAGE_PATTERNS):
+                return False
+        return _is_form_page(d) or any(_is_form_page(l) for l in layouts)
+
+    form_indices = [i for i in range(len(default_pages)) if keep_page(i)]
+    if not form_indices:
+        form_indices = list(range(len(default_pages)))
+    default_form_pages = [default_pages[i] for i in form_indices]
+    layout_form_streams = [[ls[i] for i in form_indices] for ls in layout_streams]
+    summary_excluded = len(default_pages) - len(form_indices)
+
+    # Detect year/status from any available stream.
+    tax_year: int | None = None
+    filing_status: FilingStatus | None = None
+    for stream in [default_form_pages, *layout_form_streams, default_pages, *layout_streams]:
+        if tax_year is None:
+            tax_year = _detect_year(stream)
+        if filing_status is None:
+            filing_status = _detect_status(stream)
+        if tax_year is not None and filing_status is not None:
+            break
+
+    # Run field extraction against EVERY text stream; the first stream that
+    # produces a value for a given field wins, in priority order:
+    #   1. default text  (most conservative; preserves prior behavior)
+    #   2. tight layout  (handles wide column gaps)
+    #   3. loose layout  (handles small vertical offsets in fillable forms)
+    # This is the key robustness fix: a label/value pair that one stream
+    # splits across non-adjacent lines will still be recovered from another.
+    default_result = _extract_fields(default_form_pages)
+    layout_results = [_extract_fields(stream) for stream in layout_form_streams]
+    fields, children, fwarnings = _merge_field_results(default_result, *layout_results)
+    warnings = list(fwarnings)
+    # If a layout stream recovered fields the default missed (or replaced
+    # buggy default-extraction values wholesale), surface that — it's the
+    # single most useful signal when diagnosing user reports of zero-value
+    # imports.
+    layout_only = set()
+    for lr in layout_results:
+        layout_only |= set(lr[0].keys())
+    layout_only -= set(default_result[0].keys())
+    if layout_only:
+        warnings.append(
+            f"Layout-aware extraction recovered {len(layout_only)} field(s) that "
+            f"default text extraction missed: {sorted(layout_only)}."
+        )
 
     if tax_year is None:
         raise ValueError(
@@ -488,6 +644,13 @@ def import_pdf(path: Path) -> Imported:
     reported_total_tax = fields.pop("total_tax_reported", None)
     fields.pop("agi_reported", None)
     fields.pop("taxable_income_reported", None)
+
+    if not fields and reported_total_tax is None and summary_excluded < len(default_pages):
+        warnings.append(
+            "WARNING: detected an IRS-form page but extracted no money values. "
+            "This usually means the PDF uses a non-standard layout. Upload to "
+            "POST /api/debug/extract to inspect what the importer is seeing."
+        )
 
     try:
         ret = Return(

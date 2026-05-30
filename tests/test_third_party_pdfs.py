@@ -20,6 +20,7 @@ from taxlens.models import FilingStatus
 
 from tests.third_party_pdfs import (
     ThirdPartyReturn,
+    make_fillable_offset_1040,
     make_freetaxusa_1040,
     make_freetaxusa_realistic_1040,
     make_freetaxusa_summary_mismatch_1040,
@@ -233,3 +234,24 @@ def test_year_detection_handles_third_party_headers(tmp_path: Path) -> None:
         make(path, r)
         imp = import_pdf(path)
         assert imp.ret.tax_year == year, f"{vendor} {year}: got {imp.ret.tax_year}"
+
+
+def test_fillable_offset_layout_recovered_by_loose_layout(tmp_path: Path, base_return: ThirdPartyReturn) -> None:
+    """Regression: real fillable-form PDFs render label and user-entered
+    value with a ~6pt vertical offset. Before the loose-tolerance layout
+    extraction, every money field came back as $0 because pdfplumber's
+    default extractor split the offset rows. The loose-layout pass must
+    merge them back so all key fields parse correctly."""
+    p = tmp_path / "fillable_offset_2023.pdf"
+    make_fillable_offset_1040(p, base_return)
+
+    imp = import_pdf(p)
+    assert imp.ret.tax_year == 2023
+    assert imp.ret.wages == Decimal(120_000)
+    assert imp.ret.interest_income == Decimal(450)
+    assert imp.ret.qualified_dividends == Decimal(800)
+    assert imp.ret.ordinary_dividends == Decimal(1_000)
+    assert imp.ret.federal_withholding == Decimal(18_500)
+    assert imp.ret.reported_total_tax == Decimal(11_400)
+    assert any("Layout-aware extraction recovered" in w for w in imp.warnings), \
+        f"expected a layout-recovery warning, got: {imp.warnings}"

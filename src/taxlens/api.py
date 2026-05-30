@@ -107,22 +107,47 @@ async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
         if suffix == ".pdf":
             import pdfplumber
 
-            from taxlens.importers.pdf import _is_form_page
+            from taxlens.importers.pdf import (
+                _is_form_page,
+                _layout_text,
+                _extract_fields,
+                LINE_PATTERNS,
+            )
             try:
                 with pdfplumber.open(str(tmp_path)) as pdf:
-                    pages = [(p.extract_text() or "") for p in pdf.pages]
+                    page_texts: list[tuple[str, str, str]] = []
+                    for p in pdf.pages:
+                        page_texts.append((
+                            p.extract_text() or "",
+                            _layout_text(p, y_tol=3.0),
+                            _layout_text(p, y_tol=8.0),
+                        ))
+                default_pages = [d for d, _, _ in page_texts]
+                tight_pages = [t for _, t, _ in page_texts]
+                loose_pages = [l for _, _, l in page_texts]
+                default_fields, _, _ = _extract_fields(default_pages)
+                tight_fields, _, _ = _extract_fields(tight_pages)
+                loose_fields, _, _ = _extract_fields(loose_pages)
+                only_layout = (set(tight_fields) | set(loose_fields)) - set(default_fields)
                 return {
                     "filename": file.filename,
                     "kind": "pdf",
-                    "page_count": len(pages),
-                    "nonempty_pages": sum(1 for p in pages if p.strip()),
+                    "page_count": len(page_texts),
+                    "nonempty_pages": sum(1 for d, _, _ in page_texts if d.strip()),
+                    "fields_default_text": {k: str(v) for k, v in default_fields.items()},
+                    "fields_layout_tight": {k: str(v) for k, v in tight_fields.items()},
+                    "fields_layout_loose": {k: str(v) for k, v in loose_fields.items()},
+                    "fields_only_in_layout": sorted(only_layout),
+                    "known_field_names": sorted(LINE_PATTERNS.keys()),
                     "pages": [
                         {
                             "index": i,
-                            "is_form_page": _is_form_page(p),
-                            "text": p[:8000],
+                            "is_form_page": _is_form_page(d) or _is_form_page(t) or _is_form_page(l),
+                            "text": d[:8000],
+                            "layout_tight": t[:8000],
+                            "layout_loose": l[:8000],
                         }
-                        for i, p in enumerate(pages)
+                        for i, (d, t, l) in enumerate(page_texts)
                     ],
                 }
             except Exception as e:
