@@ -2,6 +2,59 @@
 
 All notable changes to TaxLens.
 
+## [0.33.0] — 2026
+
+### Privacy — Vendored CDN assets; no external network calls
+
+The dashboard's `index.html` used to load Tailwind CSS and Chart.js
+from `cdn.tailwindcss.com` and `cdn.jsdelivr.net`. Every page open
+sent the user's IP + browser fingerprint to those CDNs, which
+contradicts TaxLens's local-first promise even though no tax data
+was leaked.
+
+**Both libraries are now vendored** into `src/taxlens/web/vendor/` and
+served via the existing `/static` mount. The dashboard now runs with
+**zero external network calls** end-to-end.
+
+**Defense-in-depth: strict Content-Security-Policy.** The `/` response
+now sets:
+
+```
+Content-Security-Policy: default-src 'self';
+  script-src 'self' 'unsafe-inline' 'unsafe-eval';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data:;
+  connect-src 'self';
+  font-src 'self' data:;
+  frame-ancestors 'none'
+```
+
+The critical clause is `connect-src 'self'` — even if a future change
+accidentally adds back a CDN `<script>`, the browser blocks the load.
+`'unsafe-eval'` is required by Tailwind's runtime JIT compiler.
+
+### Tests
+
+New `tests/test_no_external_urls.py` (4 tests):
+
+- `test_index_has_no_external_urls` — fails CI if any `http://` /
+  `https://` reference reappears in the served HTML.
+- `test_vendored_assets_are_present` — guards against an empty or
+  truncated vendor download.
+- `test_index_response_has_strict_csp` — verifies the CSP header
+  contains both `default-src 'self'` and `connect-src 'self'`.
+- `test_vendor_assets_served_at_static_paths` — end-to-end check that
+  `/static/vendor/tailwind.js` and `/static/vendor/chart.umd.min.js`
+  return 200.
+
+**320 tests passing** (was 316).
+
+### Wheel size
+
+Adds ~650 KB to the installed package (Tailwind runtime ~450 KB,
+Chart.js UMD ~205 KB). Acceptable cost for closing the only remaining
+external dependency.
+
 ## [0.32.1] — 2026
 
 ### Refactor — Typed compute context

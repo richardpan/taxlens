@@ -268,6 +268,21 @@ if WEB_DIR.exists():
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
                 "Expires": "0",
+                # Defense-in-depth: even if someone adds a CDN <script> tag
+                # later, this CSP blocks the browser from making the
+                # external request. Tailwind's runtime JIT compiler uses
+                # eval() so we have to allow 'unsafe-eval'; the critical
+                # restriction is ``connect-src 'self'`` which prevents
+                # any fetch/XHR/WebSocket leaving the local server.
+                "Content-Security-Policy": (
+                    "default-src 'self'; "
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                    "style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; "
+                    "connect-src 'self'; "
+                    "font-src 'self' data:; "
+                    "frame-ancestors 'none'"
+                ),
             },
         )
 else:
