@@ -20,6 +20,7 @@ from taxlens.models import FilingStatus
 
 from tests.third_party_pdfs import (
     ThirdPartyReturn,
+    make_acroform_1040,
     make_fillable_offset_1040,
     make_freetaxusa_1040,
     make_freetaxusa_realistic_1040,
@@ -255,3 +256,26 @@ def test_fillable_offset_layout_recovered_by_loose_layout(tmp_path: Path, base_r
     assert imp.ret.reported_total_tax == Decimal(11_400)
     assert any("Layout-aware extraction recovered" in w for w in imp.warnings), \
         f"expected a layout-recovery warning, got: {imp.warnings}"
+
+
+def test_acroform_widget_values_extracted(tmp_path: Path, base_return: ThirdPartyReturn) -> None:
+    """AcroForm fillable PDFs: values live in form-field widgets, not in
+    the rendered text stream. The importer must read them directly via
+    pypdf, otherwise every money field would default to $0 (the v0.28.0
+    layout-aware text extractor cannot help here because there is
+    nothing to extract from the text layer).
+    """
+    p = tmp_path / "acroform_2023.pdf"
+    make_acroform_1040(p, base_return)
+
+    imp = import_pdf(p)
+    assert imp.ret.tax_year == 2023
+    assert imp.ret.filing_status == FilingStatus.MFJ
+    assert imp.ret.wages == Decimal(120_000)
+    assert imp.ret.interest_income == Decimal(450)
+    assert imp.ret.qualified_dividends == Decimal(800)
+    assert imp.ret.ordinary_dividends == Decimal(1_000)
+    assert imp.ret.federal_withholding == Decimal(18_500)
+    assert imp.ret.reported_total_tax == Decimal(11_400)
+    assert any("AcroForm extraction supplied" in w for w in imp.warnings), \
+        f"expected an AcroForm warning, got: {imp.warnings}"

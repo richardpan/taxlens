@@ -113,6 +113,8 @@ async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
                 _extract_fields,
                 LINE_PATTERNS,
             )
+            from taxlens.importers.acroform import extract_acroform_fields
+            acroform_fields, acroform_warnings = extract_acroform_fields(tmp_path)
             try:
                 with pdfplumber.open(str(tmp_path)) as pdf:
                     page_texts: list[tuple[str, str, str]] = []
@@ -134,6 +136,8 @@ async def debug_extract(file: UploadFile = File(...)) -> dict[str, Any]:
                     "kind": "pdf",
                     "page_count": len(page_texts),
                     "nonempty_pages": sum(1 for d, _, _ in page_texts if d.strip()),
+                    "fields_acroform": {k: str(v) for k, v in acroform_fields.items()},
+                    "acroform_warnings": acroform_warnings,
                     "fields_default_text": {k: str(v) for k, v in default_fields.items()},
                     "fields_layout_tight": {k: str(v) for k, v in tight_fields.items()},
                     "fields_layout_loose": {k: str(v) for k, v in loose_fields.items()},

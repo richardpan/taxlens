@@ -2,6 +2,60 @@
 
 All notable changes to TaxLens.
 
+## [0.28.1] — 2026
+
+### Added — AcroForm extractor (offline, authoritative)
+
+Many real tax PDFs (IRS fillable forms, several vendor exports) embed
+user-entered values as **AcroForm widgets** rather than rasterising them
+into the page text stream. Text-based extraction is fundamentally
+unable to see those values — they're stored as form-field data, not as
+rendered text. Symptom: import succeeds, dashboard shows $0 everywhere.
+
+New `src/taxlens/importers/acroform.py` reads values directly from the
+PDF form dictionary via `pypdf.PdfReader.get_fields()`. Each field
+carries an optional tooltip (`/TU`) that, on official IRS PDFs, is the
+printed line description verbatim (e.g. `"Wages, salaries, tips, etc.
+Attach Form(s) W-2"`). We match that tooltip against the same
+`LINE_PATTERNS` regexes the text extractor uses, so AcroForm support
+works on any vendor that honors the IRS tooltip convention — no
+vendor-specific field-name knowledge required. A name-based fallback
+handles vendors that strip tooltips.
+
+### Integration into `import_pdf`
+
+AcroForm extraction runs as **PASS 0**, before text/layout extraction.
+When the form dictionary yields any mapped values they **override** the
+text-derived ones — the form dictionary is the authoritative source, and
+text extraction is at best OCR-ing the rendered version of the same
+data. The text/layout passes still run to (a) detect tax year and
+filing status, (b) fill in fields whose form widgets weren't classified,
+and (c) handle PDFs with no AcroForm at all.
+
+User-visible warnings name exactly which fields came from AcroForm, which
+were added that text extraction had missed, and any overrides where
+AcroForm and text disagreed (worth a sanity check on the dashboard).
+
+### Diagnostics
+
+`POST /api/debug/extract` now returns `fields_acroform` and
+`acroform_warnings` alongside the existing text/layout streams.
+
+### Tests
+
+- New fixture `make_acroform_1040` writes a fillable PDF where values
+  exist ONLY as AcroForm widgets (never in the text layer). The
+  v0.28.0 layout-aware extractor cannot recover those values — the
+  AcroForm pass is required.
+- New `test_acroform_widget_values_extracted` locks in correct
+  extraction of all eight key fields.
+- **291 tests passing** (was 290).
+
+### Dependencies
+
+Added `pypdf>=5.0` to runtime requirements (pure-Python, MIT, no
+binary deps; ~600KB installed).
+
 ## [0.28.0] — 2026
 
 ### Fixed — fillable IRS PDFs imported to $0 because labels and values were on different lines

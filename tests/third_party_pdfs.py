@@ -341,6 +341,66 @@ def make_fillable_offset_1040(out_path: Path, r: ThirdPartyReturn) -> None:
 
 
 
+def make_acroform_1040(out_path: Path, r: ThirdPartyReturn) -> None:
+    """IRS-fillable-form-style export where the user-entered values live
+    in AcroForm text-field widgets, NOT in the page text stream. Each
+    widget carries an IRS-style tooltip (/TU) that matches the printed
+    line description verbatim, exactly like real fillable IRS PDFs do.
+
+    This is the failure mode the v0.28.0 layout-aware text extractor
+    cannot handle: there is nothing to extract from the text layer
+    because the values were never rasterised. The AcroForm extractor
+    must read them directly from the form dictionary.
+    """
+    c = canvas.Canvas(str(out_path), pagesize=LETTER)
+    width, height = LETTER
+    form = c.acroForm
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, height - 40, "Form 1040 U.S. Individual Income Tax Return")
+    c.setFont("Helvetica", 8)
+    c.drawString(50, height - 54, f"OMB No. 1545-0074  {r.tax_year}")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 70, f"Filing Status: {r.filing_status_label}")
+
+    agi = r.agi if r.agi is not None else (r.wages + r.interest + r.ord_div)
+    ti = r.taxable_income if r.taxable_income is not None else (agi - Decimal(14_600))
+
+    rows = [
+        ("1a", "Total amount from Form(s) W-2, box 1",
+            "Wages, salaries, tips, etc. Attach Form(s) W-2", r.wages),
+        ("2b", "Taxable interest", "Taxable interest", r.interest),
+        ("3a", "Qualified dividends", "Qualified dividends", r.qual_div),
+        ("3b", "Ordinary dividends", "Ordinary dividends", r.ord_div),
+        ("11", "Adjusted gross income", "Adjusted gross income", agi),
+        ("15", "Taxable income", "Taxable income", ti),
+        ("24", "Add lines 22 and 23. This is your total tax",
+            "Add lines 22 and 23. This is your total tax",
+            r.total_tax if r.total_tax else Decimal(0)),
+        ("25a", "Federal income tax withheld from Form(s) W-2",
+            "Federal income tax withheld from Form(s) W-2", r.withholding),
+    ]
+
+    y = height - 110
+    for lineno, label, tooltip, value in rows:
+        c.drawString(50, y, lineno)
+        c.drawString(80, y, label)
+        # Value goes ONLY into the AcroForm widget, never into the text layer.
+        form.textfield(
+            name=f"f_{lineno}_{label[:6].strip().replace(' ', '_').lower()}",
+            tooltip=tooltip,
+            x=420, y=y - 3, width=120, height=14,
+            fontSize=9,
+            value=str(int(value)),
+            borderWidth=0,
+        )
+        y -= 24
+
+    c.showPage()
+    c.save()
+
+
+
 def make_freetaxusa_1040(path: Path, r: ThirdPartyReturn) -> None:
     """FreeTaxUSA-style export: minimalist cover + canonical IRS body."""
     c = canvas.Canvas(str(path), pagesize=LETTER)

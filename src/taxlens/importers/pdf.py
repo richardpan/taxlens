@@ -577,6 +577,16 @@ def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) ->
 
 
 def import_pdf(path: Path) -> Imported:
+    # PASS 0: AcroForm widgets. If the PDF embeds field values directly
+    # (most IRS fillable forms and many vendor exports do), reading them
+    # from the form dictionary is dramatically more reliable than scraping
+    # the rendered text — values come straight from the source instead of
+    # being inferred from layout. We still run the text-based extractor
+    # to fill in any gaps and to detect year/status.
+    from taxlens.importers.acroform import extract_acroform_fields, extract_acroform_meta
+    acroform_fields, acroform_warnings = extract_acroform_fields(path)
+    acroform_meta = extract_acroform_meta(path) if acroform_fields else {}
+
     default_pages, layout_streams, ocr_used = _extract_text_per_page(path)
     # A page qualifies as a real IRS form page if EITHER its default text or
     # any of its layout-reconstructed texts shows IRS-form markers, and no
@@ -597,7 +607,7 @@ def import_pdf(path: Path) -> Imported:
     summary_excluded = len(default_pages) - len(form_indices)
 
     # Detect year/status from any available stream.
-    tax_year: int | None = None
+    tax_year: int | None = acroform_meta.get("tax_year")
     filing_status: FilingStatus | None = None
     for stream in [default_form_pages, *layout_form_streams, default_pages, *layout_streams]:
         if tax_year is None:
@@ -631,6 +641,32 @@ def import_pdf(path: Path) -> Imported:
             f"Layout-aware extraction recovered {len(layout_only)} field(s) that "
             f"default text extraction missed: {sorted(layout_only)}."
         )
+
+    # AcroForm values OVERRIDE text-derived values. The form dictionary is
+    # the authoritative source — text extraction is, at best, OCR-ing the
+    # rendered version of the same data — so when both agree we waste no
+    # cycles, and when they disagree the AcroForm value is the one we
+    # trust. Surface a warning whenever an override actually happens so
+    # the user can spot any unexpected discrepancies on the dashboard.
+    if acroform_fields:
+        overrides: list[str] = []
+        new_keys: list[str] = []
+        for k, v in acroform_fields.items():
+            existing = fields.get(k)
+            if existing is None:
+                new_keys.append(k)
+            elif existing != v:
+                overrides.append(f"{k}: text={existing} → acroform={v}")
+            fields[k] = v
+        warnings.append(
+            f"AcroForm extraction supplied {len(acroform_fields)} field(s) "
+            f"directly from PDF form widgets (the authoritative source)."
+        )
+        if new_keys:
+            warnings.append(f"AcroForm added: {sorted(new_keys)}.")
+        if overrides:
+            warnings.append("AcroForm overrode text-extracted values: " + "; ".join(overrides))
+        warnings.extend(acroform_warnings)
 
     if tax_year is None:
         raise ValueError(

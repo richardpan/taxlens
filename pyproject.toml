@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "taxlens"
-version = "0.28.0"
+version = "0.28.1"
 description = "Local-first multi-year US tax return analyzer with transparent math."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,6 +18,7 @@ dependencies = [
   "uvicorn[standard]>=0.27",
   "python-multipart>=0.0.9",
   "pdfplumber>=0.11",
+  "pypdf>=5.0",
   "typer>=0.12",
   "rich>=13.0",
   "cryptography>=42",
