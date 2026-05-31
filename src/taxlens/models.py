@@ -45,6 +45,17 @@ class RentalProperty(BaseModel):
     disposed_year: int | None = None
     disposed_month: int | None = None
     sale_price: Decimal = Decimal(0)            # gross sale proceeds
+    # §469 per-activity suspended-loss tracking (opt-in). When any rental
+    # property carries a non-zero ``suspended_loss_in``, the engine routes
+    # through the per-activity PAL algorithm:
+    #   - Each property maintains its own suspended-loss balance.
+    #   - On complete disposition, ONLY this property's suspended loss is
+    #     released (the scalar ``Return.suspended_passive_losses_carryforward``
+    #     remains parked for other activities).
+    #   - The service threads ``suspended_loss_in`` per property across years.
+    # When all properties leave this at zero, the engine falls back to the
+    # aggregate scalar model — back-compat with v0.30 fixtures.
+    suspended_loss_in: Decimal = Decimal(0)
 
 
 class Return(BaseModel):
@@ -167,6 +178,14 @@ class Return(BaseModel):
 
     # Other multi-year carryforwards (also auto-reflowed by the service).
     nol_carryforward_in: Decimal = Decimal(0)             # §172 NOL (positive = available)
+    # Per-vintage NOL lots so the service can age pre-TCJA vintages out at
+    # 20 years (§172(b)(1)(A)(ii) pre-2018). Each entry is
+    # ``{"year": <year_generated>, "amount": <remaining>}``. Post-TCJA
+    # vintages (year ≥ 2018) carry forward indefinitely and are never
+    # aged out. When provided, this is the authoritative source; the
+    # scalar ``nol_carryforward_in`` is the sum (and used as a fallback
+    # when no lots are provided, treated as a single ``year-1`` vintage).
+    nol_carryforward_lots_in: list[dict[str, Any]] = Field(default_factory=list)
     amt_credit_carryforward_in: Decimal = Decimal(0)      # Form 8801 prior-year min tax credit
     ftc_carryforward_in: Decimal = Decimal(0)             # §904 unused FTC (10yr)
     charitable_carryover_in: Decimal = Decimal(0)         # §170(d) 5yr carryover
@@ -323,6 +342,10 @@ class TaxResult(BaseModel):
     schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
     passive_loss_released_on_disposition: Decimal = Decimal(0)  # §469(g) — suspended PALs freed by a complete disposition this year
+    # Per-activity suspended PAL balances (§469) keyed by property id.
+    # Populated when any RentalProperty.suspended_loss_in is provided.
+    # The service threads these forward year-to-year alongside the scalar.
+    per_activity_suspended_pal_out: dict[str, Decimal] = Field(default_factory=dict)
     depreciation_current_year: Decimal = Decimal(0)        # total MACRS deduction this year
     depreciation_accumulated_out: dict[str, Decimal] = Field(default_factory=dict)  # per-property running total
     eitc: Decimal = Decimal(0)                             # Schedule EIC (refundable)
@@ -352,6 +375,8 @@ class TaxResult(BaseModel):
     clean_vehicle_credit: Decimal = Decimal(0)             # Form 8936 (nonrefundable)
     capital_loss_carryforward_out: Decimal = Decimal(0)  # §1212(b) — to use in a future year
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
+    nol_carryforward_lots_out: list[dict[str, Any]] = Field(default_factory=list)
+    nol_expired_this_year: Decimal = Decimal(0)          # pre-TCJA NOL dropped after 20 years
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
     ftc_carryforward_out: Decimal = Decimal(0)           # §904 — to use in a future year (10y)
     # Per-vintage FTC carryforward lots so the service can age them out at
@@ -371,6 +396,14 @@ class TaxResult(BaseModel):
     excess_ira_contributions_out: Decimal = Decimal(0)
     rmd_shortfall: Decimal = Decimal(0)
     rmd_shortfall_excise: Decimal = Decimal(0)
+    # §408A(c)(3) Roth IRA contribution after MAGI phaseout. ``roth_disallowed``
+    # is the portion that became an excess contribution subject to the 6%
+    # excise unless removed by the filing deadline (already rolled into
+    # ``excess_ira_contribution_excise``). Surfaced separately so the UI
+    # can show *what* the phaseout did to the requested contribution, not
+    # just the resulting penalty.
+    roth_contribution_allowed: Decimal = Decimal(0)
+    roth_contribution_disallowed: Decimal = Decimal(0)
     credits: Decimal
     total_tax: Decimal
 

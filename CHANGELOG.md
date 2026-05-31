@@ -2,6 +2,76 @@
 
 All notable changes to TaxLens.
 
+## [0.31.0] — 2026
+
+Federal-depth backlog cleanup. This release closes out the three
+deferred items called out at the end of v0.30.0.
+
+### Added — Roth IRA phaseout result fields
+
+`TaxResult.roth_contribution_allowed` and `roth_contribution_disallowed`
+now surface what §408A(c)(3) MAGI phaseout did to the requested Roth
+contribution. Previously the engine computed the limit internally and
+only exposed the resulting §4973 6% excise — fine for tax math but
+opaque to the user. UI explanations can now say *"$3,200 of your $7,000
+Roth contribution was disallowed due to MAGI phaseout."*
+
+### Added — §172 NOL pre-TCJA vintage aging
+
+`Return.nol_carryforward_lots_in: list[{"year", "amount"}]` and
+`TaxResult.nol_carryforward_lots_out` thread per-vintage NOLs forward
+across years. The engine:
+
+1. **Drops pre-2018 lots after 20 years** (§172(b)(1)(A)(ii) as in
+   effect before TCJA) and reports the amount in
+   `TaxResult.nol_expired_this_year`.
+2. **Sorts FIFO with pre-TCJA vintages first**, then post-TCJA by year.
+   Post-TCJA vintages have indefinite shelf life so we burn the finite
+   ones first.
+3. **Consumes against the §172(a)(2) 80%-of-taxable-income cap** (or
+   100% for pre-TCJA when `rules.nol_full_offset` is true).
+4. **Carries unused balances forward** with their original vintage
+   preserved, so future-year aging works correctly.
+
+Back-compat: when `lots_in` is empty but the scalar
+`nol_carryforward_in` is set, the engine back-fills a single year-1
+vintage. Service threads lots through `recompute_all`.
+
+### Added — §469 per-activity suspended-PAL tracking
+
+`RentalProperty.suspended_loss_in` is now respected when set. The
+engine routes through a per-activity algorithm:
+
+- Each property's bucket carries forward independently.
+- On complete disposition (§469(g)) only THAT property's suspended loss
+  is released — the others keep accumulating.
+- Real estate professional status (§469(c)(7)) still releases
+  everything in one go.
+
+`TaxResult.per_activity_suspended_pal_out: dict[str, Decimal]` exposes
+the remaining buckets keyed by property id, and the service threads
+them forward year-to-year alongside the per-property depreciation
+accumulator.
+
+Back-compat: when no property has `suspended_loss_in` set, the
+engine continues using the aggregate scalar `suspended_passive_losses_carryforward`
+exactly as before — all v0.30 fixtures stay green.
+
+### Tests
+
+New `tests/test_federal_depth_v031.py` (10 tests):
+- Roth phaseout disallows + allows in full
+- NOL pre-TCJA 20y expiry
+- NOL post-TCJA never expires
+- NOL FIFO oldest-first
+- NOL service threading
+- Per-activity release only the disposed property
+- Per-activity back-compat with aggregate model
+- Per-activity RE-pro releases all buckets
+- Per-activity service threading end-to-end
+
+**316 tests passing** (was 306).
+
 ## [0.30.0] — 2026
 
 ### §469 Passive Activity Loss depth

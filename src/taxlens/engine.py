@@ -63,27 +63,28 @@ class _StepRecorder:
 
 # ────────────────────────── individual computation stages ──────────────────────────
 
-def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal, Decimal]:
-    """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward, released_on_disposition).
+def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal, Decimal, dict[str, Decimal]]:
+    """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward,
+    released_on_disposition, per_activity_suspended_out).
 
     Form 8582 model (§469):
       - Rentals are passive by default.
       - **§469(c)(7) Real estate professional**: if ``is_real_estate_professional``
         is set, rentals are non-passive; rental losses deduct in full against
         any income, no $25k cap, no MAGI phaseout. Suspended PALs from prior
-        years also become deductible in the year the taxpayer first qualifies
-        (here we release them whenever the flag is set — the user is
-        asserting eligibility).
+        years also become deductible (per-activity buckets included).
       - **§469(i) $25k active-participation allowance**: up to $25,000 of
         rental losses against non-passive income for active participants,
         phased out 50¢/$1 over §469(i)(3)(F) MAGI of $100k, fully gone at
         $150k.
       - **§469(g) Complete disposition**: when a rental property is fully
-        disposed (``disposed_year == tax_year``) in a taxable transaction
-        to an unrelated party, ALL suspended losses become deductible
-        against any income. We trigger full release whenever any property
-        is disposed this year — a simplification, since we track suspended
-        losses in aggregate rather than per-activity.
+        disposed (``disposed_year == tax_year``) in a taxable transaction,
+        ALL suspended losses **for that activity** become deductible
+        against any income. With per-activity tracking on, only the
+        disposed property's bucket is released. With per-activity tracking
+        off (no ``RentalProperty.suspended_loss_in`` set), we release the
+        entire scalar pool whenever any property is disposed — a
+        simplification documented as a known generosity.
       - Royalties and K-1 ordinary business income are treated as non-passive.
     """
     royalties = ret.royalty_income
@@ -91,18 +92,24 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
     rental = ret.rental_net_income
     suspended_in = ret.suspended_passive_losses_carryforward
 
-    disposed_this_year = any(
-        p.disposed_year == ret.tax_year for p in ret.rental_properties
-    )
+    # Per-activity buckets (opt-in: only when any property declares one).
+    per_activity_in = {p.id: p.suspended_loss_in for p in ret.rental_properties
+                       if p.suspended_loss_in > 0}
+    use_per_activity = bool(per_activity_in)
+    disposed_ids = {p.id for p in ret.rental_properties
+                    if p.disposed_year == ret.tax_year}
+    disposed_this_year = bool(disposed_ids)
 
     # ── §469(c)(7) Real estate professional: rentals are non-passive ──
     if ret.is_real_estate_professional:
-        net_passive = rental - suspended_in  # full deduction, all prior losses released
-        released = suspended_in
+        per_activity_released = sum(per_activity_in.values(), ZERO)
+        released = suspended_in + per_activity_released
+        net_passive = rental - suspended_in - per_activity_released
         rec.add(
             "Schedule E — real estate professional (§469(c)(7))",
-            "rental_net - suspended_in (no $25k cap, no MAGI phaseout)",
-            {"rental": rental, "suspended_in": suspended_in, "released": released},
+            "rental_net - suspended_in - per_activity_buckets (no $25k cap, no MAGI phaseout)",
+            {"rental": rental, "suspended_in": suspended_in,
+             "per_activity_in": per_activity_released, "released": released},
             net_passive,
         )
         net_e = royalties + k1_active + net_passive
@@ -112,12 +119,51 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
             {"rental_after_pal": net_passive, "royalty": royalties, "k1_obi": k1_active},
             net_e,
         )
-        return net_e, ZERO, ZERO, _money(released)
+        return net_e, ZERO, ZERO, _money(released), {}
 
-    # ── §469(g) Complete disposition releases all suspended losses ──
+    if use_per_activity:
+        # Per-activity §469(g) release: only disposed buckets are freed; non-
+        # disposed buckets carry forward unchanged. Current-year rental
+        # income/loss continues to flow through the aggregate $25k allowance
+        # path against the scalar suspended balance.
+        released_per_activity = sum(
+            (amt for pid, amt in per_activity_in.items() if pid in disposed_ids),
+            ZERO,
+        )
+        per_activity_out = {pid: amt for pid, amt in per_activity_in.items()
+                            if pid not in disposed_ids}
+
+        # Now run the scalar path against rental + scalar suspended_in.
+        rental_for_offset = rental - suspended_in
+        if rental_for_offset >= 0:
+            allowed_loss = ZERO
+            new_carry = ZERO
+            net_passive = rental_for_offset
+        else:
+            loss = -rental_for_offset
+            allowance = _pal_allowance(ret)
+            allowed_loss = min(loss, allowance)
+            new_carry = loss - allowed_loss
+            net_passive = -allowed_loss
+
+        # Subtract released per-activity losses (these come out FREE against
+        # any income on a disposition, per §469(g)).
+        net_passive_total = net_passive - released_per_activity
+
+        net_e = royalties + k1_active + net_passive_total
+        rec.add(
+            "Schedule E — per-activity PAL tracking",
+            "scalar path against rental_net; per-activity buckets released on disposition",
+            {"rental": rental, "scalar_suspended_in": suspended_in,
+             "per_activity_in": sum(per_activity_in.values(), ZERO),
+             "released_per_activity": released_per_activity,
+             "new_carry_scalar": new_carry},
+            net_e,
+        )
+        return net_e, _money(new_carry), _money(new_carry), _money(released_per_activity), per_activity_out
+
+    # ── §469(g) Complete disposition releases all suspended losses (aggregate model) ──
     if disposed_this_year:
-        # rental can be negative this year too; combined with released suspended
-        # losses, the whole thing is deductible.
         net_passive = rental - suspended_in
         released = suspended_in
         rec.add(
@@ -133,54 +179,16 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
             {"rental_after_pal": net_passive, "royalty": royalties, "k1_obi": k1_active},
             net_e,
         )
-        return net_e, ZERO, ZERO, _money(released)
+        return net_e, ZERO, ZERO, _money(released), {}
 
     rental_for_offset = rental - suspended_in  # negative = additional loss
     if rental_for_offset >= 0:
-        # Net positive: prior suspended losses fully absorbed; nothing carries.
         allowed_loss = ZERO
         new_carry = ZERO
         net_passive = rental_for_offset
     else:
-        # We have a passive loss. Apply $25k active-participation allowance with phaseout.
         loss = -rental_for_offset
-        if ret.is_active_real_estate_participant:
-            # §469(i)(3)(F) MAGI: AGI excluding the passive loss itself, the
-            # IRA deduction, taxable SS, and a few other items. Practically
-            # we approximate by summing gross-income components BEFORE the
-            # rental loss (so the loss doesn't reduce the very income that
-            # gates its own allowance) and excluding social-security benefits
-            # entirely (close enough — most filers with rentals don't yet
-            # collect SS, and the spec explicitly excludes the taxable SS
-            # portion).
-            magi_proxy = (
-                ret.wages
-                + ret.interest_income
-                + ret.ordinary_dividends
-                + ret.long_term_capital_gains
-                + ret.short_term_capital_gains
-                + ret.se_income
-                + ret.k1_ordinary_business_income
-                + ret.k1_interest
-                + ret.k1_ordinary_dividends
-                + ret.k1_long_term_gains
-                + ret.k1_short_term_gains
-                + ret.royalty_income
-                + ret.pension_distributions_taxable
-                + ret.ira_distributions_taxable
-                + ret.other_ordinary_income
-                + ret.unemployment_compensation
-            )
-            phaseout_start = Decimal(100_000)
-            phaseout_end = Decimal(150_000)
-            if magi_proxy <= phaseout_start:
-                allowance = Decimal(25_000)
-            elif magi_proxy >= phaseout_end:
-                allowance = ZERO
-            else:
-                allowance = Decimal(25_000) - (magi_proxy - phaseout_start) * Decimal("0.5")
-        else:
-            allowance = ZERO
+        allowance = _pal_allowance(ret)
         allowed_loss = min(loss, allowance)
         new_carry = loss - allowed_loss
         net_passive = -allowed_loss
@@ -195,7 +203,40 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
         },
         net_e,
     )
-    return net_e, _money(new_carry), _money(new_carry), ZERO
+    return net_e, _money(new_carry), _money(new_carry), ZERO, {}
+
+
+def _pal_allowance(ret: Return) -> Decimal:
+    """Compute the §469(i) $25k active-participation allowance after the
+    §469(i)(3)(F) MAGI phaseout. Returns 0 if the taxpayer is not an active
+    participant."""
+    if not ret.is_active_real_estate_participant:
+        return ZERO
+    magi_proxy = (
+        ret.wages
+        + ret.interest_income
+        + ret.ordinary_dividends
+        + ret.long_term_capital_gains
+        + ret.short_term_capital_gains
+        + ret.se_income
+        + ret.k1_ordinary_business_income
+        + ret.k1_interest
+        + ret.k1_ordinary_dividends
+        + ret.k1_long_term_gains
+        + ret.k1_short_term_gains
+        + ret.royalty_income
+        + ret.pension_distributions_taxable
+        + ret.ira_distributions_taxable
+        + ret.other_ordinary_income
+        + ret.unemployment_compensation
+    )
+    phaseout_start = Decimal(100_000)
+    phaseout_end = Decimal(150_000)
+    if magi_proxy <= phaseout_start:
+        return Decimal(25_000)
+    if magi_proxy >= phaseout_end:
+        return ZERO
+    return Decimal(25_000) - (magi_proxy - phaseout_start) * Decimal("0.5")
 
 
 def _compute_qbi(ret: Return, taxable_before_qbi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
@@ -346,10 +387,11 @@ def _compute_form_5329(
     agi: Decimal,
     rules: Rules,
     rec: _StepRecorder,
-) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal, Decimal]:
     """Form 5329 — Excess IRA contributions (§4973) and RMD shortfall (§4974).
 
-    Returns (excess_excise, excess_carry_out, rmd_shortfall, rmd_excise).
+    Returns ``(excess_excise, excess_carry_out, rmd_shortfall, rmd_excise,
+    roth_contribution_allowed, roth_contribution_disallowed)``.
 
     Excess-contribution model (Parts III/IV):
       - allowed_trad = annual IRA cap (incl. 50+ catchup if taxpayer_age known)
@@ -371,6 +413,8 @@ def _compute_form_5329(
     excess_out = ZERO
     rmd_shortfall = ZERO
     rmd_excise = ZERO
+    roth_allowed = ZERO
+    roth_disallowed = ZERO
 
     limits = (rules.contribution_limits or {})
     annual_cap = Decimal(str(limits.get("ira_contribution", 0)))
@@ -410,6 +454,12 @@ def _compute_form_5329(
         excess_trad = max(ZERO, trad - allowed_trad)
         excess_roth = max(ZERO, roth - allowed_roth)
         new_excess = excess_trad + excess_roth
+        # Expose Roth-specific allowed/disallowed so callers can show the
+        # user *what* phaseout did to their contribution, not just the
+        # resulting §4973 excise. ``roth_disallowed`` includes both the
+        # MAGI-phased piece and any over-the-combined-cap excess.
+        roth_allowed = min(roth, allowed_roth)
+        roth_disallowed = excess_roth
 
         carried_in = max(ZERO, ret.excess_ira_contributions_in - ret.excess_ira_contributions_removed)
         balance = carried_in + new_excess
@@ -455,7 +505,8 @@ def _compute_form_5329(
                 rmd_excise,
             )
 
-    return excess_excise, _money(excess_out), _money(rmd_shortfall), rmd_excise
+    return (excess_excise, _money(excess_out), _money(rmd_shortfall), rmd_excise,
+            _money(roth_allowed), _money(roth_disallowed))
 
 
 def _compute_taxable_ss(
@@ -915,28 +966,75 @@ def _compute_taxable_income(
 
     # NOL §172: post-TCJA, NOL offsets up to 80% of pre-NOL taxable income.
     # Pre-TCJA (rules.nol_full_offset = True): can fully offset taxable income.
-    # Excess NOL carries forward indefinitely.
-    nol_in = ret.nol_carryforward_in or ZERO
+    # Excess NOL carries forward — indefinitely for post-2017 vintages,
+    # capped at 20 years (§172(b)(1)(A)(ii) pre-amendment) for pre-2018
+    # vintages. The engine consumes FIFO so older vintages get used up
+    # before they expire.
+    nol_in_scalar = ret.nol_carryforward_in or ZERO
+    nol_lots_in: list[dict[str, Any]] = []
+    if ret.nol_carryforward_lots_in:
+        for lot in ret.nol_carryforward_lots_in:
+            amt = Decimal(str(lot.get("amount", 0)))
+            yr = int(lot.get("year", ret.tax_year - 1))
+            if amt > 0:
+                nol_lots_in.append({"year": yr, "amount": amt})
+    elif nol_in_scalar > 0:
+        # Back-compat: treat the scalar as a single year-1 vintage.
+        nol_lots_in.append({"year": ret.tax_year - 1, "amount": nol_in_scalar})
+
+    # Age out pre-TCJA vintages > 20 years old.
+    nol_expired = ZERO
+    surviving: list[dict[str, Any]] = []
+    for lot in nol_lots_in:
+        age = ret.tax_year - lot["year"]
+        if lot["year"] < 2018 and age > 20:
+            nol_expired += lot["amount"]
+        else:
+            surviving.append(lot)
+    # Sort FIFO (oldest first); use pre-TCJA before post-TCJA at the same age
+    # so finite-shelf-life lots are consumed first.
+    surviving.sort(key=lambda l: (l["year"] >= 2018, l["year"]))
+
+    nol_in = sum((l["amount"] for l in surviving), ZERO)
     nol_used = ZERO
     nol_out = ZERO
+    nol_lots_out: list[dict[str, Any]] = []
     if nol_in > 0 and taxable > 0:
         if rules.nol_full_offset:
             cap = taxable
         else:
             cap = (taxable * Decimal("0.80")).quantize(Decimal("0.01"))
         nol_used = min(nol_in, cap)
+        remaining_to_consume = nol_used
+        for lot in surviving:
+            if remaining_to_consume <= 0:
+                nol_lots_out.append(lot)
+                continue
+            consumed = min(lot["amount"], remaining_to_consume)
+            remaining_to_consume -= consumed
+            leftover = lot["amount"] - consumed
+            if leftover > 0:
+                nol_lots_out.append({"year": lot["year"], "amount": leftover})
         nol_out = nol_in - nol_used
         taxable = taxable - nol_used
         rec.add(
             "NOL §172 applied",
-            "min(nol_in, cap × taxable); excess carries forward",
+            "min(nol_in, cap × taxable); excess carries forward (pre-2018 vintages expire at 20y)",
             {"nol_in": nol_in, "cap": cap, "nol_used": nol_used, "nol_out": nol_out,
+             "expired_this_year": nol_expired,
              "full_offset_pre_tcja": rules.nol_full_offset},
             taxable,
         )
     elif nol_in > 0:
-        # Taxable income is already 0; entire NOL carries forward.
         nol_out = nol_in
+        nol_lots_out = list(surviving)
+        if nol_expired > 0:
+            rec.add(
+                "NOL §172 — pre-TCJA vintages expired",
+                "lots older than 20 years dropped (§172(b)(1)(A)(ii))",
+                {"nol_in": nol_in, "expired_this_year": nol_expired},
+                nol_out,
+            )
 
     rec.add(
         "Taxable income",
@@ -947,6 +1045,8 @@ def _compute_taxable_income(
     # Stash nol_out + charitable_carry_out + pe + pease on the recorder so
     # compute() can pluck them without changing the return tuple shape.
     rec._nol_out = nol_out  # type: ignore[attr-defined]
+    rec._nol_lots_out = nol_lots_out  # type: ignore[attr-defined]
+    rec._nol_expired = nol_expired  # type: ignore[attr-defined]
     rec._charitable_out = charitable_carry_out  # type: ignore[attr-defined]
     rec._pe_used = pe_used  # type: ignore[attr-defined]
     rec._pease_reduction = pease_reduction  # type: ignore[attr-defined]
@@ -1896,7 +1996,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         })
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
-    sch_e_net, pal_carry, _, pal_released = _compute_schedule_e(ret, rec)
+    sch_e_net, pal_carry, _, pal_released, per_activity_pal_out = _compute_schedule_e(ret, rec)
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rules, rec)
     taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
     charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
@@ -1975,7 +2075,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         )
 
     # Form 5329 — §4973 excess IRA contribution excise + §4974 RMD shortfall excise.
-    excess_ira_excise, excess_ira_out, rmd_shortfall_amt, rmd_excise = _compute_form_5329(
+    excess_ira_excise, excess_ira_out, rmd_shortfall_amt, rmd_excise, roth_allowed, roth_disallowed = _compute_form_5329(
         ret, agi, rules, rec,
     )
 
@@ -2052,6 +2152,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,
         passive_loss_released_on_disposition=pal_released,
+        per_activity_suspended_pal_out=per_activity_pal_out,
         depreciation_current_year=_money(total_depreciation),
         depreciation_accumulated_out=accumulated_map,
         eitc=eitc,
@@ -2078,6 +2179,9 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         clean_vehicle_credit=cvc_credit,
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
+        nol_carryforward_lots_out=[{"year": l["year"], "amount": str(_money(l["amount"]))}
+                                    for l in getattr(rec, "_nol_lots_out", [])],
+        nol_expired_this_year=_money(getattr(rec, "_nol_expired", ZERO)),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),
         ftc_carryforward_out=_money(ftc_carry_out),
         ftc_carryforward_lots_out=[{"year": l["year"], "amount": str(_money(l["amount"]))}
@@ -2096,6 +2200,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         excess_ira_contributions_out=excess_ira_out,
         rmd_shortfall=rmd_shortfall_amt,
         rmd_shortfall_excise=rmd_excise,
+        roth_contribution_allowed=roth_allowed,
+        roth_contribution_disallowed=roth_disallowed,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )

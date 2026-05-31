@@ -130,22 +130,32 @@ class TaxLensService:
             # entries; entries older than 10 years are dropped inside the
             # engine's _compute_ftc.
             ftc_lots_state: list[dict[str, Any]] = []
+            # Structured NOL carryforward lots (per §172 pre-TCJA 20-year aging).
+            nol_lots_state: list[dict[str, Any]] = []
+            # Per-activity suspended PAL balances threaded across years.
+            per_activity_pal_state: dict[str, Decimal] = {}
             prev_year: int | None = None
             for row in rows:
                 if prev_year is not None and row.tax_year - prev_year > 1:
                     carry_state = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
                     prop_accum = {}
                     ftc_lots_state = []
+                    nol_lots_state = []
+                    per_activity_pal_state = {}
                 data = json.loads(row.return_json)
                 for in_k, _ in carryforward_keys:
                     data[in_k] = str(carry_state[in_k])
                 data["ftc_carryforward_lots_in"] = ftc_lots_state
+                data["nol_carryforward_lots_in"] = nol_lots_state
                 # Update prior_accumulated_depreciation on each rental property
-                # from the running per-property accumulator.
+                # from the running per-property accumulator. Also thread
+                # per-activity suspended-loss buckets forward.
                 for p in data.get("rental_properties", []) or []:
                     pid = p.get("id")
                     if pid and pid in prop_accum:
                         p["prior_accumulated_depreciation"] = str(prop_accum[pid])
+                    if pid and pid in per_activity_pal_state:
+                        p["suspended_loss_in"] = str(per_activity_pal_state[pid])
                 ret = Return(**self._decimalize(data))
                 result = compute(ret)
                 row.return_json = dumps(ret.model_dump(mode="json"))
@@ -158,6 +168,13 @@ class TaxLensService:
                     carry_state[in_k] = getattr(result, out_k, None) or Decimal("0")
                 # Thread FTC lots forward as well.
                 ftc_lots_state = list(getattr(result, "ftc_carryforward_lots_out", []) or [])
+                # And NOL lots (pre-TCJA vintages age out at 20 years inside the engine).
+                nol_lots_state = list(getattr(result, "nol_carryforward_lots_out", []) or [])
+                # And per-activity PAL buckets.
+                per_activity_pal_state = {
+                    pid: Decimal(str(amt))
+                    for pid, amt in (result.per_activity_suspended_pal_out or {}).items()
+                }
                 for pid, accum in (result.depreciation_accumulated_out or {}).items():
                     prop_accum[pid] = Decimal(str(accum))
                 prev_year = row.tax_year
