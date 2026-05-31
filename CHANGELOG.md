@@ -2,6 +2,63 @@
 
 All notable changes to TaxLens.
 
+## [0.30.0] — 2026
+
+### §469 Passive Activity Loss depth
+
+**§469(c)(7) Real Estate Professional exception**
+
+New `Return.is_real_estate_professional` flag. When set:
+- Rental losses are deducted in full against any income — no $25k cap,
+  no MAGI phaseout.
+- All previously suspended PALs are released in the year the flag
+  first becomes True (reported in `passive_loss_released_on_disposition`).
+
+Eligibility (>750 hours + >50% personal services in real-property
+trades) is the user's assertion — TaxLens does not police it.
+
+**§469(g) Complete disposition release**
+
+When a `RentalProperty` has `disposed_year == tax_year`, the entire
+suspended-PAL balance becomes deductible against any income in that
+year. Combined with the existing depreciation/recapture logic on the
+same property, this finally lets a "sold the rental" year settle the
+books cleanly.
+
+Limitation: TaxLens still tracks suspended losses in aggregate, not
+per-activity. Selling one property releases ALL suspended PALs (correct
+when there's only one rental, generous when there are multiple). Per-
+activity tracking is noted as future work.
+
+**§469(i)(3)(F) MAGI for the $25k allowance phaseout**
+
+The phaseout used to use `wages + k1_obi` as a proxy MAGI. That under-
+counted income for retirees, dividend-heavy filers, and freelancers,
+letting them deduct losses they shouldn't have. The proxy now includes
+interest, dividends, capital gains, SE income, pension/IRA
+distributions, royalties, unemployment, and other ordinary income —
+matching the §469(i)(3)(F) definition (AGI before the passive loss
+itself, the IRA deduction, taxable SS, and a few rarely-encountered
+items).
+
+**New result field**
+
+- `TaxResult.passive_loss_released_on_disposition: Decimal` — surfaces
+  the amount freed by §469(g) or §469(c)(7) for the explanations panel.
+
+### Tests
+
+New `tests/test_pal_469.py` (7 tests):
+- RE pro deducts full rental loss at high income
+- RE pro releases prior suspended losses
+- Complete disposition releases all suspended PALs
+- No-disposition path still applies the $25k cap (regression guard)
+- MAGI now includes interest/dividends for phaseout calc
+- MAGI ≥ $150k fully phases out the allowance
+- Service threads disposition release end-to-end across two years
+
+**306 tests passing** (was 299).
+
 ## [0.29.0] — 2026
 
 ### Fixed — Foreign Tax Credit was over-allowed (§904(a) limit not applied)

@@ -77,6 +77,12 @@ class Return(BaseModel):
     rental_net_income: Decimal = Decimal(0)        # net of expenses & depreciation; can be < 0
     royalty_income: Decimal = Decimal(0)
     is_active_real_estate_participant: bool = False  # gates the $25k PAL allowance
+    # §469(c)(7) Real estate professional. If True, rental activities are NOT
+    # passive (provided the taxpayer materially participates), and rental
+    # losses are deductible against ANY income with no $25k cap and no MAGI
+    # phaseout. Requires (i) >750 hours in real property trades/businesses,
+    # (ii) >50% of personal services in those trades. We trust the flag.
+    is_real_estate_professional: bool = False
     suspended_passive_losses_carryforward: Decimal = Decimal(0)
 
     # Per-property MACRS depreciation. When non-empty, the engine subtracts
@@ -316,6 +322,7 @@ class TaxResult(BaseModel):
     qbi_deduction: Decimal = Decimal(0)           # Form 8995 / 8995-A
     schedule_e_income: Decimal = Decimal(0)       # net rental + royalty + K-1 passthrough (post-PAL)
     passive_loss_disallowed: Decimal = Decimal(0) # losses parked on Form 8582 carryforward
+    passive_loss_released_on_disposition: Decimal = Decimal(0)  # §469(g) — suspended PALs freed by a complete disposition this year
     depreciation_current_year: Decimal = Decimal(0)        # total MACRS deduction this year
     depreciation_accumulated_out: dict[str, Decimal] = Field(default_factory=dict)  # per-property running total
     eitc: Decimal = Decimal(0)                             # Schedule EIC (refundable)

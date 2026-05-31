@@ -63,24 +63,77 @@ class _StepRecorder:
 
 # ────────────────────────── individual computation stages ──────────────────────────
 
-def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal]:
-    """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward).
+def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward, released_on_disposition).
 
-    Simplified Form 8582 model:
-      - Rentals are passive by default. Up to $25,000 of rental losses are
-        allowed against non-passive income for active participants (phased
-        out 50¢/$1 over modified AGI $100k, fully gone at $150k — we apply
-        the phaseout against gross income proxy = wages, since we haven't
-        computed AGI yet at this stage; it's a defensible simplification).
-      - Royalties are non-passive.
-      - K-1 ordinary business income is treated as non-passive here (most
-        active S-corp/LLC owners). Passive K-1 is a v1.x refinement.
-      - Suspended losses from prior years are released up to the allowance.
+    Form 8582 model (§469):
+      - Rentals are passive by default.
+      - **§469(c)(7) Real estate professional**: if ``is_real_estate_professional``
+        is set, rentals are non-passive; rental losses deduct in full against
+        any income, no $25k cap, no MAGI phaseout. Suspended PALs from prior
+        years also become deductible in the year the taxpayer first qualifies
+        (here we release them whenever the flag is set — the user is
+        asserting eligibility).
+      - **§469(i) $25k active-participation allowance**: up to $25,000 of
+        rental losses against non-passive income for active participants,
+        phased out 50¢/$1 over §469(i)(3)(F) MAGI of $100k, fully gone at
+        $150k.
+      - **§469(g) Complete disposition**: when a rental property is fully
+        disposed (``disposed_year == tax_year``) in a taxable transaction
+        to an unrelated party, ALL suspended losses become deductible
+        against any income. We trigger full release whenever any property
+        is disposed this year — a simplification, since we track suspended
+        losses in aggregate rather than per-activity.
+      - Royalties and K-1 ordinary business income are treated as non-passive.
     """
     royalties = ret.royalty_income
     k1_active = ret.k1_ordinary_business_income
     rental = ret.rental_net_income
     suspended_in = ret.suspended_passive_losses_carryforward
+
+    disposed_this_year = any(
+        p.disposed_year == ret.tax_year for p in ret.rental_properties
+    )
+
+    # ── §469(c)(7) Real estate professional: rentals are non-passive ──
+    if ret.is_real_estate_professional:
+        net_passive = rental - suspended_in  # full deduction, all prior losses released
+        released = suspended_in
+        rec.add(
+            "Schedule E — real estate professional (§469(c)(7))",
+            "rental_net - suspended_in (no $25k cap, no MAGI phaseout)",
+            {"rental": rental, "suspended_in": suspended_in, "released": released},
+            net_passive,
+        )
+        net_e = royalties + k1_active + net_passive
+        rec.add(
+            "Schedule E net (rental + royalty + K-1 active)",
+            "rental_non_passive + royalty + k1_obi",
+            {"rental_after_pal": net_passive, "royalty": royalties, "k1_obi": k1_active},
+            net_e,
+        )
+        return net_e, ZERO, ZERO, _money(released)
+
+    # ── §469(g) Complete disposition releases all suspended losses ──
+    if disposed_this_year:
+        # rental can be negative this year too; combined with released suspended
+        # losses, the whole thing is deductible.
+        net_passive = rental - suspended_in
+        released = suspended_in
+        rec.add(
+            "Schedule E — complete disposition releases suspended PALs (§469(g))",
+            "rental_net - suspended_in (fully deductible on disposition)",
+            {"rental": rental, "suspended_in": suspended_in, "released": released},
+            net_passive,
+        )
+        net_e = royalties + k1_active + net_passive
+        rec.add(
+            "Schedule E net (rental + royalty + K-1 active)",
+            "rental_after_pal_release + royalty + k1_obi",
+            {"rental_after_pal": net_passive, "royalty": royalties, "k1_obi": k1_active},
+            net_e,
+        )
+        return net_e, ZERO, ZERO, _money(released)
 
     rental_for_offset = rental - suspended_in  # negative = additional loss
     if rental_for_offset >= 0:
@@ -92,7 +145,32 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
         # We have a passive loss. Apply $25k active-participation allowance with phaseout.
         loss = -rental_for_offset
         if ret.is_active_real_estate_participant:
-            magi_proxy = ret.wages + ret.k1_ordinary_business_income
+            # §469(i)(3)(F) MAGI: AGI excluding the passive loss itself, the
+            # IRA deduction, taxable SS, and a few other items. Practically
+            # we approximate by summing gross-income components BEFORE the
+            # rental loss (so the loss doesn't reduce the very income that
+            # gates its own allowance) and excluding social-security benefits
+            # entirely (close enough — most filers with rentals don't yet
+            # collect SS, and the spec explicitly excludes the taxable SS
+            # portion).
+            magi_proxy = (
+                ret.wages
+                + ret.interest_income
+                + ret.ordinary_dividends
+                + ret.long_term_capital_gains
+                + ret.short_term_capital_gains
+                + ret.se_income
+                + ret.k1_ordinary_business_income
+                + ret.k1_interest
+                + ret.k1_ordinary_dividends
+                + ret.k1_long_term_gains
+                + ret.k1_short_term_gains
+                + ret.royalty_income
+                + ret.pension_distributions_taxable
+                + ret.ira_distributions_taxable
+                + ret.other_ordinary_income
+                + ret.unemployment_compensation
+            )
             phaseout_start = Decimal(100_000)
             phaseout_end = Decimal(150_000)
             if magi_proxy <= phaseout_start:
@@ -117,7 +195,7 @@ def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decim
         },
         net_e,
     )
-    return net_e, _money(new_carry), _money(new_carry)
+    return net_e, _money(new_carry), _money(new_carry), ZERO
 
 
 def _compute_qbi(ret: Return, taxable_before_qbi: Decimal, rules: Rules, rec: _StepRecorder) -> Decimal:
@@ -1818,7 +1896,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         })
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
-    sch_e_net, pal_carry, _ = _compute_schedule_e(ret, rec)
+    sch_e_net, pal_carry, _, pal_released = _compute_schedule_e(ret, rec)
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rules, rec)
     taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
     charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
@@ -1973,6 +2051,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         qbi_deduction=qbi_ded,
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,
+        passive_loss_released_on_disposition=pal_released,
         depreciation_current_year=_money(total_depreciation),
         depreciation_accumulated_out=accumulated_map,
         eitc=eitc,
