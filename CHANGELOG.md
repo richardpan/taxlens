@@ -2,6 +2,40 @@
 
 All notable changes to TaxLens.
 
+## [0.32.0] — 2026
+
+### UX — Federal-depth fields surfaced in the dashboard
+
+The v0.29–v0.31 federal-depth releases added several new TaxResult
+fields that were computed but invisible to the user. This release
+surfaces them.
+
+**Year-detail breakdown grid** now shows tiles for:
+
+- `Suspended PAL released on disposition (§469(g))` — when a rental
+  was sold this year and the suspended-loss bucket was freed.
+- `Suspended PAL by property` — a compact `prop_A: $X · prop_B: $Y`
+  listing when per-activity tracking is in use.
+- `FTC expired (>10y old, §904(c))` — when a foreign-tax-credit
+  vintage aged out.
+- `NOL expired (pre-TCJA >20y, §172)` — when a pre-2018 NOL vintage
+  aged out.
+- `Roth contribution disallowed (MAGI phaseout, §408A(c)(3))` — what
+  the phaseout actually did to the requested contribution, not just
+  the resulting §4973 excise.
+
+**Carryforward chart tooltip** now appends a per-vintage breakdown
+(FTC and NOL lots, oldest-first) plus any expirations recorded in the
+hovered year — so the user can see *which year* a carryforward was
+generated and how close to expiry it is, not just the running total.
+
+The tile-renderer also learned to skip `fmt()` on already-formatted
+display strings (e.g., the per-activity PAL listing) so they don't
+render as `$NaN`.
+
+No engine changes; no new tests required (UI rendering doesn't have
+unit tests). **316 tests still passing.**
+
 ## [0.31.0] — 2026
 
 Federal-depth backlog cleanup. This release closes out the three

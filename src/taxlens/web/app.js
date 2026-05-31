@@ -497,7 +497,38 @@ function drawCarryforwards(fulls) {
       maintainAspectRatio: false,
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 10 } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } }
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`,
+            // After the headline values, append per-vintage lot detail for
+            // FTC and NOL (§904(c) / §172) plus any expirations this year.
+            afterBody: (items) => {
+              const idx = items[0].dataIndex;
+              const f = fulls[idx];
+              const r = f.result;
+              const lines = [];
+              const fmtLots = (lots) => lots
+                .slice()
+                .sort((a, b) => Number(a.year) - Number(b.year))
+                .map(l => `  ${l.year}: ${fmt(l.amount)}`).join('\n');
+              if (r.ftc_carryforward_lots_out && r.ftc_carryforward_lots_out.length) {
+                lines.push('FTC vintages:');
+                lines.push(fmtLots(r.ftc_carryforward_lots_out));
+              }
+              if (Number(r.ftc_expired_this_year || 0) > 0) {
+                lines.push(`FTC expired this year: ${fmt(r.ftc_expired_this_year)}`);
+              }
+              if (r.nol_carryforward_lots_out && r.nol_carryforward_lots_out.length) {
+                lines.push('NOL vintages:');
+                lines.push(fmtLots(r.nol_carryforward_lots_out));
+              }
+              if (Number(r.nol_expired_this_year || 0) > 0) {
+                lines.push(`NOL expired this year: ${fmt(r.nol_expired_this_year)}`);
+              }
+              return lines;
+            }
+          }
+        }
       },
       scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } } }
     }
@@ -706,13 +737,31 @@ async function renderYearDetail() {
         ? [['MACRS depreciation (Form 4562)', '-' + r.depreciation_current_year]] : []),
     ...(Number(r.passive_loss_disallowed || 0) > 0
         ? [['Passive loss carried (Form 8582)', r.passive_loss_disallowed]] : []),
+    ...(Number(r.passive_loss_released_on_disposition || 0) > 0
+        ? [['Suspended PAL released on disposition (§469(g))', '-' + r.passive_loss_released_on_disposition]] : []),
+    ...(r.per_activity_suspended_pal_out && Object.keys(r.per_activity_suspended_pal_out).length > 0
+        ? [['Suspended PAL by property',
+            Object.entries(r.per_activity_suspended_pal_out)
+              .map(([k, v]) => `${k}: ${fmt(v)}`).join(' · ')]] : []),
+    ...(Number(r.ftc_expired_this_year || 0) > 0
+        ? [['FTC expired (>10y old, §904(c))', r.ftc_expired_this_year]] : []),
+    ...(Number(r.nol_expired_this_year || 0) > 0
+        ? [['NOL expired (pre-TCJA >20y, §172)', r.nol_expired_this_year]] : []),
+    ...(Number(r.roth_contribution_disallowed || 0) > 0
+        ? [['Roth contribution disallowed (MAGI phaseout, §408A(c)(3))', r.roth_contribution_disallowed]] : []),
     ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
     ...(r.state_result && r.state_result.locality
         ? [[`${r.state_result.locality} locality tax`, r.state_result.locality_tax]] : []),
     ['Withholding + estimated', String(Number(ret.federal_withholding) + Number(ret.estimated_payments))],
     ['Refund/owed', r.refund_or_owed],
-  ].map(([k,v]) => `<div class="border border-slate-200 rounded-lg p-3">
-    <div class="text-xs text-slate-500">${k}</div><div class="font-mono text-lg">${fmt(v)}</div></div>`).join('');
+  ].map(([k,v]) => {
+    // String values that already contain ':' (e.g. per-activity PAL breakdown
+    // "prop_A: $15,000 · prop_B: $25,000") are rendered as-is; everything else
+    // is a money value run through fmt().
+    const displayVal = (typeof v === 'string' && v.includes(':')) ? v : fmt(v);
+    return `<div class="border border-slate-200 rounded-lg p-3">
+    <div class="text-xs text-slate-500">${k}</div><div class="font-mono text-lg">${displayVal}</div></div>`;
+  }).join('');
 
   drawSankey(full);
 }
