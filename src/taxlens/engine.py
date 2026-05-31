@@ -875,30 +875,128 @@ def _compute_taxable_income(
     return taxable, deduction, kind, nol_out
 
 
-def _compute_ftc(ret: Return, regular_tax: Decimal, agi: Decimal,
-                  rec: _StepRecorder) -> tuple[Decimal, Decimal]:
-    """Foreign Tax Credit §901/§904. Returns (ftc_used, ftc_carry_out).
+def _compute_ftc(ret: Return, regular_tax: Decimal, taxable_income: Decimal,
+                  agi: Decimal, rec: _StepRecorder) -> tuple[Decimal, Decimal, list[dict], Decimal]:
+    """Foreign Tax Credit §901 / §904. Returns
+    ``(ftc_used, ftc_carry_out_total, lots_out, expired_this_year)``.
 
-    Simplified §904 limitation: FTC capped at (foreign income / total income) ×
-    pre-FTC regular tax. We don't have foreign-income tracked separately, so
-    we approximate the limit as the smaller of (foreign_taxes_paid + carry_in)
-    and the regular tax itself. Excess carries forward 10 years.
+    §904(a) limitation (the "FTC limit"):
+
+        limit = (foreign source taxable income / total taxable income) × pre-FTC US tax
+
+    The credit usable this year is ``min(foreign_taxes_paid + carry_in, limit)``;
+    anything left over carries forward up to 10 years (§904(c)).
+
+    **Aging (§904(c)):** when ``ret.ftc_carryforward_lots_in`` is populated
+    (the service threads per-vintage lots forward across years), this
+    function:
+
+    1. Drops any lot whose ``year`` is more than 10 tax years before the
+       current ``ret.tax_year`` (those entries are reported separately
+       as ``expired_this_year``).
+    2. Consumes lots FIFO (oldest first) against the §904(a) limit, then
+       consumes the current year's ``foreign_taxes_paid``.
+    3. Emits an updated lots list with the current year's unused amount
+       appended as a new vintage.
+
+    When the user hasn't provided lots (first import, no history), we
+    fall back to the scalar ``ftc_carryforward_in`` treated as a single
+    "current year minus 1" lot — close enough for one-shot imports.
+
+    **De minimis (§904(k)):** an individual whose only foreign tax is
+    from 1099-DIV/INT passive-category investments AND whose total
+    foreign tax is ≤ $300 ($600 MFJ) may take the entire credit without
+    filing Form 1116. We detect this case by absence of
+    ``foreign_source_income`` plus a small foreign-tax amount and skip
+    the proportional limit (round-trips to the same number anyway).
     """
-    available = (ret.foreign_taxes_paid or ZERO) + (ret.ftc_carryforward_in or ZERO)
+    fsi = getattr(ret, "foreign_source_income", ZERO) or ZERO
+    current_year_taxes = ret.foreign_taxes_paid or ZERO
+
+    # Normalize the incoming lots to a list of {"year": int, "amount": Decimal}.
+    raw_lots = list(getattr(ret, "ftc_carryforward_lots_in", []) or [])
+    if raw_lots:
+        lots = [{"year": int(d["year"]), "amount": Decimal(str(d["amount"]))}
+                for d in raw_lots]
+    elif (ret.ftc_carryforward_in or ZERO) > 0:
+        # Back-compat: treat scalar carry-in as a single lot from the prior
+        # year (no real vintage info available).
+        lots = [{"year": ret.tax_year - 1, "amount": Decimal(ret.ftc_carryforward_in)}]
+    else:
+        lots = []
+
+    # 1. Age out expired lots (>10 tax years old per §904(c)).
+    expired = ZERO
+    fresh_lots: list[dict] = []
+    for lot in lots:
+        if ret.tax_year - lot["year"] > 10:
+            expired += lot["amount"]
+        elif lot["amount"] > 0:
+            fresh_lots.append(lot)
+    lots = sorted(fresh_lots, key=lambda x: x["year"])
+
+    available = current_year_taxes + sum((l["amount"] for l in lots), ZERO)
+    if available <= 0 and expired <= 0:
+        return ZERO, ZERO, [], ZERO
     if available <= 0:
-        return ZERO, ZERO
-    # Limit at regular tax (simplified §904).
-    used = min(available, max(regular_tax, ZERO))
-    carry_out = available - used
+        # Nothing usable, but we still record the expiry.
+        rec.add("FTC §904(c) carryforward expired",
+                f"{expired} of FTC older than 10 years dropped",
+                {"expired": expired}, ZERO)
+        return ZERO, ZERO, [], expired
+
+    de_minimis_cap = Decimal(600) if ret.filing_status == FilingStatus.MFJ else Decimal(300)
+    using_de_minimis = (fsi <= 0) and (current_year_taxes <= de_minimis_cap)
+
+    if fsi > 0 and taxable_income > 0:
+        fraction = min(Decimal(1), fsi / taxable_income)
+        limit = (fraction * max(regular_tax, ZERO)).quantize(Decimal("0.01"))
+        limit_basis = f"({fsi} / {taxable_income}) × {regular_tax}"
+    else:
+        limit = max(regular_tax, ZERO)
+        limit_basis = ("de minimis: total foreign tax ≤ $300/$600 — full credit allowed"
+                       if using_de_minimis
+                       else "no foreign_source_income provided; using simplified limit = US tax")
+
+    # 2. FIFO consume: oldest carryforward first, then current year.
+    remaining_limit = limit
+    used = ZERO
+    new_lots: list[dict] = []
+    for lot in lots:
+        if remaining_limit <= 0:
+            new_lots.append(dict(lot))
+            continue
+        take = min(lot["amount"], remaining_limit)
+        used += take
+        remaining_limit -= take
+        leftover = lot["amount"] - take
+        if leftover > 0:
+            new_lots.append({"year": lot["year"], "amount": leftover})
+    # Current year contribution.
+    take_current = min(current_year_taxes, remaining_limit) if remaining_limit > 0 else ZERO
+    used += take_current
+    current_leftover = current_year_taxes - take_current
+    if current_leftover > 0:
+        new_lots.append({"year": ret.tax_year, "amount": current_leftover})
+
+    carry_out_total = sum((l["amount"] for l in new_lots), ZERO)
+
     rec.add(
-        "Foreign Tax Credit §901/§904",
-        "min(foreign_taxes + carry_in, regular_tax); excess carries 10y",
-        {"foreign_taxes_paid": ret.foreign_taxes_paid,
-         "carry_in": ret.ftc_carryforward_in, "limit": regular_tax,
-         "used": used, "carry_out": carry_out},
+        "Foreign Tax Credit §901 / §904(a) limit",
+        limit_basis,
+        {"foreign_taxes_paid": current_year_taxes,
+         "carry_in_lots": [(l["year"], str(l["amount"])) for l in lots],
+         "foreign_source_income": fsi,
+         "taxable_income": taxable_income,
+         "limit": limit,
+         "used": used,
+         "carry_out_total": carry_out_total,
+         "carry_out_lots": [(l["year"], str(l["amount"])) for l in new_lots],
+         "expired_this_year": expired,
+         "de_minimis": using_de_minimis},
         used,
     )
-    return used, carry_out
+    return used, carry_out_total, new_lots, expired
 
 
 def _compute_amt_credit(ret: Return, regular_tax: Decimal, amt: Decimal,
@@ -1747,7 +1845,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     rce_credit = _compute_residential_clean_energy_credit(ret, rules, rec)
     cvc_credit = _compute_clean_vehicle_credit(ret, agi, rules, rec)
     net_ptc, aptc_repayment = _compute_ptc(ret, agi, rules, rec)
-    ftc_used, ftc_carry_out = _compute_ftc(ret, pre_amt_regular, agi, rec)
+    ftc_used, ftc_carry_out, ftc_lots_out, ftc_expired = _compute_ftc(
+        ret, pre_amt_regular, taxable, agi, rec)
     amt_credit_used, amt_credit_carry_out = _compute_amt_credit(ret, pre_amt_regular, amt, rec)
 
     # ── ACTC (Form 8812) — refundable portion of CTC ──
@@ -1902,6 +2001,9 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         nol_carryforward_out=_money(nol_carry_out),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),
         ftc_carryforward_out=_money(ftc_carry_out),
+        ftc_carryforward_lots_out=[{"year": l["year"], "amount": str(_money(l["amount"]))}
+                                    for l in ftc_lots_out],
+        ftc_expired_this_year=_money(ftc_expired),
         charitable_carryover_out=_money(charitable_carry_out),
         # Form 8606 basis: basis_out = basis_after_distribution + this year's
         # newly-nondeductible contribution (§219(g) disallowed portion).

@@ -125,14 +125,21 @@ class TaxLensService:
             # Per-property accumulated depreciation, keyed by property id, threaded
             # forward across years like the scalar carryforwards above.
             prop_accum: dict[str, Decimal] = {}
+            # Structured FTC carryforward lots (per §904(c) 10-year aging).
+            # Threaded forward as a list of {"year": int, "amount": Decimal}
+            # entries; entries older than 10 years are dropped inside the
+            # engine's _compute_ftc.
+            ftc_lots_state: list[dict[str, Any]] = []
             prev_year: int | None = None
             for row in rows:
                 if prev_year is not None and row.tax_year - prev_year > 1:
                     carry_state = {in_k: Decimal("0") for in_k, _ in carryforward_keys}
                     prop_accum = {}
+                    ftc_lots_state = []
                 data = json.loads(row.return_json)
                 for in_k, _ in carryforward_keys:
                     data[in_k] = str(carry_state[in_k])
+                data["ftc_carryforward_lots_in"] = ftc_lots_state
                 # Update prior_accumulated_depreciation on each rental property
                 # from the running per-property accumulator.
                 for p in data.get("rental_properties", []) or []:
@@ -149,6 +156,8 @@ class TaxLensService:
                 # Propagate each chain forward.
                 for in_k, out_k in carryforward_keys:
                     carry_state[in_k] = getattr(result, out_k, None) or Decimal("0")
+                # Thread FTC lots forward as well.
+                ftc_lots_state = list(getattr(result, "ftc_carryforward_lots_out", []) or [])
                 for pid, accum in (result.depreciation_accumulated_out or {}).items():
                     prop_accum[pid] = Decimal(str(accum))
                 prev_year = row.tax_year

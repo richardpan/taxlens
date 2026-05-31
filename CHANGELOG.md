@@ -2,6 +2,70 @@
 
 All notable changes to TaxLens.
 
+## [0.29.0] — 2026
+
+### Fixed — Foreign Tax Credit was over-allowed (§904(a) limit not applied)
+
+The pre-v0.29 engine capped the FTC at the entire pre-FTC US tax. The
+real §904(a) limit caps it at the **foreign-source share of total
+taxable income** × pre-FTC US tax — meaning someone with a small
+foreign holding and a big US salary was getting credit for substantially
+more foreign tax than they were actually entitled to use.
+
+`_compute_ftc` in `taxlens/engine.py` now applies the proper
+proportional limit when the user provides `foreign_source_income`
+(Form 1116 line 1a). When omitted, the engine falls back to the
+simplified "limit = full US tax" — which is correct under the
+**§904(k) de minimis exception**: an individual with ≤$300 ($600 MFJ)
+of passive-category foreign tax is exempt from Form 1116 and takes the
+full credit. The engine detects this case and skips the limit math
+(it would round-trip to the same number anyway).
+
+### Added — §904(c) 10-year carryforward aging
+
+`Return.ftc_carryforward_lots_in: list[{"year", "amount"}]` and the
+mirror `TaxResult.ftc_carryforward_lots_out` thread per-vintage FTC
+forward across years. The engine:
+
+1. **Drops lots older than 10 tax years** (§904(c) expiration) and
+   reports the amount in `TaxResult.ftc_expired_this_year`.
+2. **Consumes lots FIFO** (oldest first) against the §904(a) limit, so
+   younger vintages preserve their remaining shelf life.
+3. **Appends the current year's unused FTC** as a new vintage in the
+   lots-out list.
+
+`TaxLensService.recompute_all` now threads `ftc_carryforward_lots_in`
+alongside the existing scalar carryforwards. On a year gap (>1 year
+missing), lots are reset along with the other chains — we can't infer
+what happened in the missing years.
+
+When `lots_in` is empty but the scalar `ftc_carryforward_in` is set
+(common for the very first import of a year that has prior history),
+the engine back-fills a synthetic "year - 1" vintage so legacy data
+keeps working.
+
+### Tests
+
+New `tests/test_ftc_904.py` (8 tests):
+- §904(a) limit caps credit below full US tax
+- §904(k) de minimis exception ($300 single, $600 MFJ)
+- 10-year aging drops 11y-old vintages
+- FIFO consumption — oldest lots first
+- FIFO partial consumption preserves younger vintages
+- Lots threaded forward by service across consecutive years
+- No-foreign-tax baseline produces no carryforward and no expiry
+
+**299 tests passing** (was 291).
+
+### Known gaps (future work)
+
+- §904(c) one-year carryback is not modeled. Users would amend the
+  prior return manually.
+- §904(d) FTC categories ("baskets") are not separated — passive,
+  general, GILTI, and branch baskets are all pooled. For individuals
+  this is rarely material since most foreign tax on a 1040 is from
+  passive-category 1099-DIV/INT.
+
 ## [0.28.1] — 2026
 
 ### Added — AcroForm extractor (offline, authoritative)

@@ -181,6 +181,22 @@ class Return(BaseModel):
 
     # Foreign taxes paid (for FTC) and itemized charitable already above.
     foreign_taxes_paid: Decimal = Decimal(0)
+    # Foreign source TAXABLE income for the §904(a) FTC limit (Form 1116
+    # line 1a less allocated deductions). When omitted, the engine falls
+    # back to the simplified limit of "full US tax" — fine for taxpayers
+    # who qualify for the §904(k) de minimis exception (≤$300/$600 of
+    # foreign tax, passive category only) but too generous for anyone
+    # else. Provide a value here if you actually have a Form 1116.
+    foreign_source_income: Decimal = Decimal(0)
+    # FTC carryforward LOTS — §904(c) ages out unused FTC after 10 years
+    # (one-year carryback exists too but we don't model it; you'd amend
+    # the prior return manually). Each entry is {"year": <year_generated>,
+    # "amount": <remaining>}. When provided, this is the authoritative
+    # source; the scalar ``ftc_carryforward_in`` is the sum (and used as
+    # a fallback when no lots are provided, e.g. for the very first
+    # imported year with prior history). The service auto-threads lots
+    # forward across years and drops entries older than 10 years.
+    ftc_carryforward_lots_in: list[dict[str, Any]] = Field(default_factory=list)
 
     # Education credits (Form 8863).
     #   - aotc_qualified_expenses: one entry per qualifying student (max 4),
@@ -331,6 +347,10 @@ class TaxResult(BaseModel):
     nol_carryforward_out: Decimal = Decimal(0)           # §172 — to use in a future year
     amt_credit_carryforward_out: Decimal = Decimal(0)    # Form 8801 — to use in a future year
     ftc_carryforward_out: Decimal = Decimal(0)           # §904 — to use in a future year (10y)
+    # Per-vintage FTC carryforward lots so the service can age them out at
+    # 10 years per §904(c). Sum equals ``ftc_carryforward_out``.
+    ftc_carryforward_lots_out: list[dict[str, Any]] = Field(default_factory=list)
+    ftc_expired_this_year: Decimal = Decimal(0)          # FTC dropped because >10y old
     charitable_carryover_out: Decimal = Decimal(0)       # §170(d) — to use in a future year (5y)
     # Form 8606 — nondeductible IRA basis. `ira_basis_out` is what carries to next year.
     # `ira_distribution_nontaxable` is the portion of this year's IRA distribution that
