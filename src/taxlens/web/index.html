@@ -302,6 +302,20 @@
       <svg id="trendsTaxStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="font-semibold">Bracket fill across years</div>
+        <div class="text-xs text-slate-500">Color intensity = $ in that bracket. Brackets shown match each year's filing-status schedule.</div>
+      </div>
+      <svg id="trendsBracketHeat" viewBox="0 0 800 320" class="w-full"></svg>
+    </div>
+    <div id="trendsCarryCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="font-semibold">Carryforward vintage composition</div>
+        <div class="text-xs text-slate-500">Each stacked bar = end-of-year balance broken down by vintage (origination year). Older vintages first.</div>
+      </div>
+      <svg id="trendsCarryVintages" viewBox="0 0 800 360" class="w-full"></svg>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
       <div class="font-semibold mb-2">Year-over-year changes</div>
       <div id="trendsYoyTable" class="overflow-x-auto text-sm"></div>
     </div>
@@ -311,7 +325,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.27.2
+  TaxLens · local-first · v0.34.0
 </footer>
 
 <script src="/static/app.js"></script>

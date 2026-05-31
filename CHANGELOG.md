@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.34.0] — 2026
+
+### Visualizations — Bracket-fill heatmap + carryforward vintage composition
+
+Two new Trends-tab charts that turn previously textual data into
+glanceable visuals:
+
+**1. Bracket-fill across years (heatmap).** A year × bracket grid where
+each cell's color intensity is proportional to dollars filled in that
+bracket that year. Hue shifts cool→warm as the marginal rate climbs
+(10% → 37%). Hovering a cell shows the exact amount + tax owed.
+Useful for spotting how a one-off event (RSU vesting, Roth conversion)
+pushed a year into a higher band, or how steady income growth slowly
+climbs through brackets year over year.
+
+**2. Carryforward vintage composition.** When FTC §904(c) and/or NOL
+§172 lots are present, a per-type stacked-bar chart shows end-of-year
+balance broken down by vintage (origination year). Older vintages sit
+at the bottom in darker shades; a red bar to the right of each year
+flags amounts that expired (FTC at 10y, pre-TCJA NOL at 20y). This
+turns the abstract "carryforward shelf life" concern into something
+you can see aging across the timeline.
+
+Both charts auto-hide gracefully when the underlying data is empty.
+Pure SVG (no Chart.js dep) — consistent with the existing Trends-tab
+style. 6 new tests in `tests/test_visualizations.py` guard the DOM
+wiring and field-name contracts against future drift.
+
+**Total tests:** 326 passing (320 → 326).
+
 ## [0.33.0] — 2026
 
 ### Privacy — Vendored CDN assets; no external network calls

@@ -1319,6 +1319,193 @@ async function renderTrends() {
   }).join('');
   document.getElementById('trendsYoyTable').innerHTML =
     `<table class="w-full"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+
+  // Bracket-fill heatmap — rows = years, cols = ordinary brackets, color = $ filled
+  drawBracketHeatmap('trendsBracketHeat', fulls);
+
+  // Carryforward vintage composition (FTC §904(c) + NOL §172 lots)
+  drawCarryforwardVintages('trendsCarryVintages', 'trendsCarryCard', fulls);
+}
+
+function drawBracketHeatmap(svgId, fulls) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  // Build a row per year. Use that year's own brackets (rate sequence may differ
+  // across MFJ vs single — we key columns by the rate, then label the band
+  // with min–max across years).
+  const rows = fulls.map(f => ({
+    year: f.return.tax_year,
+    fills: (f.result.ordinary_bracket_fills || []).map(b => ({
+      rate: Number(b.rate),
+      lo: Number(b.lower),
+      hi: b.upper == null ? Infinity : Number(b.upper),
+      amt: Number(b.amount_in_bracket),
+      tax: Number(b.tax_in_bracket),
+    })),
+  }));
+  const rateSet = new Set();
+  rows.forEach(r => r.fills.forEach(f => rateSet.add(f.rate)));
+  const rates = Array.from(rateSet).sort((a, b) => a - b);
+  if (rates.length === 0 || rows.length === 0) {
+    svg.innerHTML = '<text x="20" y="40" font-size="12" fill="#94a3b8">No bracket data yet.</text>';
+    return;
+  }
+  const rowH = 28;
+  const headerH = 40, footerH = 28, leftW = 60;
+  const H = headerH + rowH * rows.length + footerH;
+  const W = 800;
+  const innerW = W - leftW - 20;
+  const cellW = innerW / rates.length;
+  // Color scale: log-ish — sqrt of (amt / max) so wide-but-thin lower brackets remain visible
+  const maxAmt = Math.max(1, ...rows.flatMap(r => r.fills.map(f => f.amt)));
+  const intensity = (amt) => amt <= 0 ? 0 : Math.min(1, Math.sqrt(amt / maxAmt));
+  const colorFor = (rate, amt) => {
+    // Hue by rate band (cool→warm as rate climbs); alpha by intensity
+    const hueMap = { 0.10: 200, 0.12: 195, 0.22: 35, 0.24: 28, 0.32: 18, 0.35: 12, 0.37: 0 };
+    const h = hueMap[rate] != null ? hueMap[rate] : 220;
+    const a = intensity(amt);
+    if (a === 0) return '#f8fafc';
+    return `hsla(${h}, 80%, ${65 - 25 * a}%, ${0.25 + 0.75 * a})`;
+  };
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  let html = '';
+  // Column headers (rate)
+  rates.forEach((rate, i) => {
+    const x = leftW + i * cellW + cellW / 2;
+    html += `<text x="${x}" y="${headerH - 18}" font-size="11" font-weight="600" fill="#334155" text-anchor="middle">${(rate*100).toFixed(0)}%</text>`;
+    // Bracket range subtext — take min lo / max hi across years for this rate
+    const matching = rows.flatMap(r => r.fills.filter(f => f.rate === rate));
+    if (matching.length) {
+      const lo = Math.min(...matching.map(m => m.lo));
+      const hi = Math.max(...matching.map(m => m.hi));
+      const fmtK = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'k' : String(v);
+      const range = isFinite(hi) ? `${fmtK(lo)}–${fmtK(hi)}` : `${fmtK(lo)}+`;
+      html += `<text x="${x}" y="${headerH - 4}" font-size="9" fill="#94a3b8" text-anchor="middle">${range}</text>`;
+    }
+  });
+  // Rows
+  rows.forEach((row, ri) => {
+    const y = headerH + ri * rowH;
+    html += `<text x="${leftW - 8}" y="${y + rowH/2 + 4}" font-size="11" fill="#475569" text-anchor="end">${row.year}</text>`;
+    rates.forEach((rate, ci) => {
+      const cellX = leftW + ci * cellW;
+      const fill = row.fills.find(f => f.rate === rate);
+      const amt = fill ? fill.amt : 0;
+      const c = colorFor(rate, amt);
+      html += `<rect x="${cellX+1}" y="${y+2}" width="${cellW-2}" height="${rowH-4}" fill="${c}" stroke="#e2e8f0">`;
+      if (fill) {
+        html += `<title>${row.year} · ${(rate*100).toFixed(0)}% bracket\n  In bracket: ${fmt(amt)}\n  Tax owed:  ${fmt(fill.tax)}</title>`;
+      }
+      html += `</rect>`;
+      if (amt > 0 && cellW > 50) {
+        const label = amt >= 1000 ? '$' + (amt/1000).toFixed(0) + 'k' : '$' + Math.round(amt);
+        html += `<text x="${cellX + cellW/2}" y="${y + rowH/2 + 4}" font-size="10" fill="#0f172a" text-anchor="middle">${label}</text>`;
+      }
+    });
+  });
+  // Footer legend
+  const legY = headerH + rows.length * rowH + 14;
+  html += `<text x="${leftW}" y="${legY}" font-size="10" fill="#64748b">Bracket rate →</text>`;
+  html += `<text x="${W - 20}" y="${legY}" font-size="10" fill="#64748b" text-anchor="end">Darker = more $ filled that bracket</text>`;
+  svg.innerHTML = html;
+}
+
+function drawCarryforwardVintages(svgId, cardId, fulls) {
+  const svg = document.getElementById(svgId);
+  const card = document.getElementById(cardId);
+  if (!svg || !card) return;
+  const series = [
+    { kind: 'FTC', lotsKey: 'ftc_carryforward_lots_out', expiredKey: 'ftc_expired_this_year', hueBase: 200 },
+    { kind: 'NOL', lotsKey: 'nol_carryforward_lots_out', expiredKey: 'nol_expired_this_year', hueBase: 30 },
+  ];
+  // Filter to only kinds with at least one non-empty lot list
+  const active = series.filter(s =>
+    fulls.some(f => Array.isArray(f.result[s.lotsKey]) && f.result[s.lotsKey].length > 0)
+  );
+  if (active.length === 0) { card.classList.add('hidden'); svg.innerHTML = ''; return; }
+  card.classList.remove('hidden');
+
+  const W = 800;
+  const panelH = 160;
+  const H = active.length * (panelH + 50) + 30;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  let html = '';
+
+  active.forEach((s, panelIdx) => {
+    const offsetY = panelIdx * (panelH + 50) + 20;
+    html += `<text x="20" y="${offsetY - 4}" font-size="13" font-weight="600" fill="#0f172a">${s.kind} carryforward by vintage</text>`;
+    const P = { l: 60, r: 160, t: offsetY + 8, b: 28 };
+    const innerW = W - P.l - P.r, innerH = panelH - 36;
+
+    // Build vintage union across years
+    const vintageSet = new Set();
+    const expired = [];
+    const stacks = fulls.map(f => {
+      const lots = Array.isArray(f.result[s.lotsKey]) ? f.result[s.lotsKey] : [];
+      lots.forEach(l => vintageSet.add(Number(l.year)));
+      expired.push(Number(f.result[s.expiredKey] || 0));
+      return lots;
+    });
+    const vintages = Array.from(vintageSet).sort((a, b) => a - b);
+    const totals = stacks.map(lots => lots.reduce((sum, l) => sum + Number(l.amount), 0));
+    const ymax = Math.max(1, ...totals, ...expired);
+    const ypos = v => P.t + innerH - (v / ymax) * innerH;
+    const slot = innerW / Math.max(fulls.length, 1);
+    const barW = slot * 0.45;
+
+    // Y gridlines
+    for (let i = 0; i <= 3; i++) {
+      const v = ymax * (i / 3);
+      const y = ypos(v);
+      html += `<line x1="${P.l}" y1="${y}" x2="${W - P.r}" y2="${y}" stroke="#e2e8f0"/>`;
+      html += `<text x="${P.l - 6}" y="${y + 4}" font-size="9" fill="#64748b" text-anchor="end">${fmt(v)}</text>`;
+    }
+    // Bars
+    fulls.forEach((f, i) => {
+      const cx = P.l + slot * (i + 0.5);
+      const balX = cx - barW;
+      const expX = cx + 4;
+      // Stacked balance (oldest at bottom)
+      let acc = 0;
+      const lots = stacks[i].slice().sort((a, b) => Number(a.year) - Number(b.year));
+      lots.forEach(lot => {
+        const amt = Number(lot.amount);
+        if (amt <= 0) return;
+        const y0 = ypos(acc + amt), y1 = ypos(acc);
+        const ageYears = f.return.tax_year - Number(lot.year);
+        const sat = Math.min(80, 30 + ageYears * 6);
+        const lum = Math.max(35, 70 - ageYears * 3);
+        const fill = `hsl(${s.hueBase}, ${sat}%, ${lum}%)`;
+        html += `<rect x="${balX}" y="${y0}" width="${barW * 0.9}" height="${Math.max(0, y1 - y0)}" fill="${fill}" stroke="#fff" stroke-width="0.5"><title>${f.return.tax_year} ${s.kind} vintage ${lot.year} (age ${ageYears}y): ${fmt(amt)}</title></rect>`;
+        acc += amt;
+      });
+      // Expired-this-year bar (red)
+      const exp = expired[i];
+      if (exp > 0) {
+        const y0 = ypos(exp);
+        html += `<rect x="${expX}" y="${y0}" width="${barW * 0.7}" height="${ypos(0) - y0}" fill="#fecaca" stroke="#dc2626"><title>${f.return.tax_year} ${s.kind} expired this year: ${fmt(exp)}</title></rect>`;
+      }
+      html += `<text x="${cx}" y="${P.t + innerH + 16}" font-size="10" fill="#475569" text-anchor="middle">${f.return.tax_year}</text>`;
+    });
+    // Legend
+    const legX = W - P.r + 10;
+    const recentVintages = vintages.slice(-6);
+    recentVintages.forEach((v, i) => {
+      const y = P.t + i * 16;
+      const maxYear = Math.max(...fulls.map(f => f.return.tax_year));
+      const ageYears = maxYear - v;
+      const sat = Math.min(80, 30 + ageYears * 6);
+      const lum = Math.max(35, 70 - ageYears * 3);
+      const fill = `hsl(${s.hueBase}, ${sat}%, ${lum}%)`;
+      html += `<rect x="${legX}" y="${y}" width="10" height="10" fill="${fill}"/>`;
+      html += `<text x="${legX + 14}" y="${y + 9}" font-size="10" fill="#334155">${s.kind} ${v}</text>`;
+    });
+    const legY = P.t + recentVintages.length * 16 + 4;
+    html += `<rect x="${legX}" y="${legY}" width="10" height="10" fill="#fecaca" stroke="#dc2626"/>`;
+    html += `<text x="${legX + 14}" y="${legY + 9}" font-size="10" fill="#334155">expired</text>`;
+  });
+
+  svg.innerHTML = html;
 }
 
 function drawLineChart(svgId, xs, series, opts = {}) {
