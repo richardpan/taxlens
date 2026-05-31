@@ -2,6 +2,37 @@
 
 All notable changes to TaxLens.
 
+## [0.32.1] — 2026
+
+### Refactor — Typed compute context
+
+The engine used a "side-channel" pattern where helper functions stashed
+extra outputs on the `_StepRecorder` via `rec._foo = x  # type: ignore[attr-defined]`
+and the top-level `compute()` retrieved them via
+`getattr(rec, "_foo", ZERO)`. Fourteen fields used this pattern with no
+type safety or discoverability.
+
+Replaced with a typed `_ComputeContext` dataclass attached to the
+recorder as `rec.ctx`. Now writes are `rec.ctx.taxable_ss = x` and reads
+are `rec.ctx.taxable_ss` — fully type-checkable, no defaults needed,
+no `# type: ignore` comments.
+
+### Refactor — NOL extraction
+
+Pulled the §172 NOL block (~80 lines) out of `_compute_taxable_income`
+into a dedicated `_apply_nol` helper with a clear return tuple. The
+host function dropped from 195 → 126 lines and reads top-to-bottom as
+deduction → personal exemption → NOL → taxable income.
+
+### Refactor — Hoisted depreciation import
+
+Moved the lazy `from .depreciation import compute_all` out of
+`compute()`'s body to the module's top-level imports. No circular
+import risk; the inline import was a workaround that's no longer
+needed.
+
+No engine behavior changes; **316 tests still passing**.
+
 ## [0.32.0] — 2026
 
 ### UX — Federal-depth fields surfaced in the dashboard

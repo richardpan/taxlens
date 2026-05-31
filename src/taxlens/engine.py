@@ -8,10 +8,12 @@ Architectural rules:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from taxlens.brackets import walk_brackets
+from taxlens.depreciation import compute_all as _dep_compute_all
 from taxlens.models import (
     BracketFill,
     ComputationStep,
@@ -37,11 +39,45 @@ def _status(ret: Return) -> str:
     return ret.filing_status.value
 
 
+@dataclass
+class _ComputeContext:
+    """Typed side-channel for values that downstream stages need but don't
+    fit cleanly in a return tuple. Replaces the old ``rec._foo = x`` /
+    ``getattr(rec, "_foo", ZERO)`` pattern with discoverable, typed fields.
+    All fields default to ZERO / empty so a fresh context is safe to read
+    even before any stage writes to it.
+    """
+    # Set by _compute_ira_basis_pro_rata
+    ira_taxable_after_basis: Decimal = ZERO
+    ira_nontaxable_recovered: Decimal = ZERO
+    ira_basis_after_distrib: Decimal = ZERO
+    # Set by _compute_agi (via _compute_taxable_ss / _compute_*_deduction)
+    taxable_ss: Decimal = ZERO
+    sli_deduction: Decimal = ZERO
+    educator_deduction: Decimal = ZERO
+    ira_deduction_allowed: Decimal = ZERO
+    ira_deduction_disallowed: Decimal = ZERO
+    # Set by _compute_taxable_income
+    nol_out: Decimal = ZERO
+    nol_lots_out: list[dict[str, Any]] = field(default_factory=list)
+    nol_expired: Decimal = ZERO
+    charitable_out: Decimal = ZERO
+    pe_used: Decimal = ZERO
+    pease_reduction: Decimal = ZERO
+
+
 class _StepRecorder:
-    """Accumulates ComputationStep entries in declaration order."""
+    """Accumulates ComputationStep entries in declaration order.
+
+    Also carries a typed ``ctx`` (``_ComputeContext``) so helper functions
+    can publish extra outputs without bloating their return tuples. The
+    top-level ``compute()`` reads ``rec.ctx.<field>`` rather than the old
+    ``getattr(rec, "_field", ZERO)`` dance.
+    """
 
     def __init__(self) -> None:
         self._steps: list[ComputationStep] = []
+        self.ctx: _ComputeContext = _ComputeContext()
 
     def add(self, label: str, formula: str, inputs: dict[str, Any], output: Decimal) -> Decimal:
         rounded = _money(output)
@@ -611,9 +647,9 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         year_end_value=ret.ira_year_end_value or ZERO,
         rec=rec,
     )
-    rec._ira_taxable_after_basis = ira_taxable_after_basis  # type: ignore[attr-defined]
-    rec._ira_nontaxable_recovered = ira_nontaxable_recovered  # type: ignore[attr-defined]
-    rec._ira_basis_after_distrib = ira_basis_after_distrib  # type: ignore[attr-defined]
+    rec.ctx.ira_taxable_after_basis = ira_taxable_after_basis
+    rec.ctx.ira_nontaxable_recovered = ira_nontaxable_recovered
+    rec.ctx.ira_basis_after_distrib = ira_basis_after_distrib
 
     gross_excl_ss = (
         ret.wages
@@ -650,7 +686,7 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         gross,
     )
     # Stash for TaxResult so the UI / math view can show retirement-income breakdown.
-    rec._taxable_ss = taxable_ss  # type: ignore[attr-defined]
+    rec.ctx.taxable_ss = taxable_ss
 
     # ── Traditional IRA deduction (§219) ──────────────────────────────────
     # Step A: compute "MAGI for IRA" = AGI as it would be WITHOUT the IRA
@@ -665,8 +701,8 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     )
     magi_for_sli = gross - pre_sli_adjustments
     sli_ded = _compute_sli_deduction(ret, magi_for_sli, rules, rec)
-    rec._sli_deduction = sli_ded  # type: ignore[attr-defined]
-    rec._educator_deduction = educator_ded  # type: ignore[attr-defined]
+    rec.ctx.sli_deduction = sli_ded
+    rec.ctx.educator_deduction = educator_ded
 
     other_adjustments_total = (
         ret.hsa_deduction + ret.other_adjustments + half_se_tax
@@ -676,8 +712,8 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     ira_deduction_allowed, ira_deduction_disallowed = _compute_ira_deduction(
         ret, magi_for_ira, rules, rec
     )
-    rec._ira_deduction_allowed = ira_deduction_allowed  # type: ignore[attr-defined]
-    rec._ira_deduction_disallowed = ira_deduction_disallowed  # type: ignore[attr-defined]
+    rec.ctx.ira_deduction_allowed = ira_deduction_allowed
+    rec.ctx.ira_deduction_disallowed = ira_deduction_disallowed
 
     adjustments = (
         ret.hsa_deduction
@@ -964,12 +1000,39 @@ def _compute_taxable_income(
         )
     taxable = max(ZERO, agi - deduction - pe_used)
 
-    # NOL §172: post-TCJA, NOL offsets up to 80% of pre-NOL taxable income.
-    # Pre-TCJA (rules.nol_full_offset = True): can fully offset taxable income.
-    # Excess NOL carries forward — indefinitely for post-2017 vintages,
-    # capped at 20 years (§172(b)(1)(A)(ii) pre-amendment) for pre-2018
-    # vintages. The engine consumes FIFO so older vintages get used up
-    # before they expire.
+    taxable, nol_used, nol_out, nol_lots_out, nol_expired = _apply_nol(
+        ret, taxable, rules, rec
+    )
+
+    rec.add(
+        "Taxable income",
+        "max(0, agi − deduction − personal_exemption − nol_used)",
+        {"agi": agi, "deduction": deduction, "personal_exemption": pe_used, "nol_used": nol_used},
+        taxable,
+    )
+    # Stash side outputs the orchestrator needs.
+    rec.ctx.nol_out = nol_out
+    rec.ctx.nol_lots_out = nol_lots_out
+    rec.ctx.nol_expired = nol_expired
+    rec.ctx.charitable_out = charitable_carry_out
+    rec.ctx.pe_used = pe_used
+    rec.ctx.pease_reduction = pease_reduction
+    return taxable, deduction, kind, nol_out
+
+
+def _apply_nol(
+    ret: Return, taxable: Decimal, rules: Rules, rec: _StepRecorder,
+) -> tuple[Decimal, Decimal, Decimal, list[dict[str, Any]], Decimal]:
+    """§172 NOL deduction with §172(b)(1)(A)(ii) pre-TCJA 20-year aging.
+
+    Returns ``(taxable_after, nol_used, nol_out, nol_lots_out, nol_expired)``.
+
+    Post-TCJA (year ≥ 2018) NOL offsets up to 80% of pre-NOL taxable income
+    and carries forward indefinitely. Pre-TCJA NOL fully offsets taxable
+    income (``rules.nol_full_offset = True``) and carries forward 20 years.
+    Lots are consumed FIFO with pre-TCJA vintages first so the finite-shelf
+    ones get used before expiry.
+    """
     nol_in_scalar = ret.nol_carryforward_in or ZERO
     nol_lots_in: list[dict[str, Any]] = []
     if ret.nol_carryforward_lots_in:
@@ -979,7 +1042,6 @@ def _compute_taxable_income(
             if amt > 0:
                 nol_lots_in.append({"year": yr, "amount": amt})
     elif nol_in_scalar > 0:
-        # Back-compat: treat the scalar as a single year-1 vintage.
         nol_lots_in.append({"year": ret.tax_year - 1, "amount": nol_in_scalar})
 
     # Age out pre-TCJA vintages > 20 years old.
@@ -991,7 +1053,7 @@ def _compute_taxable_income(
             nol_expired += lot["amount"]
         else:
             surviving.append(lot)
-    # Sort FIFO (oldest first); use pre-TCJA before post-TCJA at the same age
+    # Sort FIFO (oldest first); pre-TCJA before post-TCJA at the same age
     # so finite-shelf-life lots are consumed first.
     surviving.sort(key=lambda l: (l["year"] >= 2018, l["year"]))
 
@@ -1000,18 +1062,15 @@ def _compute_taxable_income(
     nol_out = ZERO
     nol_lots_out: list[dict[str, Any]] = []
     if nol_in > 0 and taxable > 0:
-        if rules.nol_full_offset:
-            cap = taxable
-        else:
-            cap = (taxable * Decimal("0.80")).quantize(Decimal("0.01"))
+        cap = taxable if rules.nol_full_offset else (taxable * Decimal("0.80")).quantize(CENT)
         nol_used = min(nol_in, cap)
-        remaining_to_consume = nol_used
+        remaining = nol_used
         for lot in surviving:
-            if remaining_to_consume <= 0:
+            if remaining <= 0:
                 nol_lots_out.append(lot)
                 continue
-            consumed = min(lot["amount"], remaining_to_consume)
-            remaining_to_consume -= consumed
+            consumed = min(lot["amount"], remaining)
+            remaining -= consumed
             leftover = lot["amount"] - consumed
             if leftover > 0:
                 nol_lots_out.append({"year": lot["year"], "amount": leftover})
@@ -1035,22 +1094,7 @@ def _compute_taxable_income(
                 {"nol_in": nol_in, "expired_this_year": nol_expired},
                 nol_out,
             )
-
-    rec.add(
-        "Taxable income",
-        "max(0, agi − deduction − personal_exemption − nol_used)",
-        {"agi": agi, "deduction": deduction, "personal_exemption": pe_used, "nol_used": nol_used},
-        taxable,
-    )
-    # Stash nol_out + charitable_carry_out + pe + pease on the recorder so
-    # compute() can pluck them without changing the return tuple shape.
-    rec._nol_out = nol_out  # type: ignore[attr-defined]
-    rec._nol_lots_out = nol_lots_out  # type: ignore[attr-defined]
-    rec._nol_expired = nol_expired  # type: ignore[attr-defined]
-    rec._charitable_out = charitable_carry_out  # type: ignore[attr-defined]
-    rec._pe_used = pe_used  # type: ignore[attr-defined]
-    rec._pease_reduction = pease_reduction  # type: ignore[attr-defined]
-    return taxable, deduction, kind, nol_out
+    return taxable, nol_used, nol_out, nol_lots_out, nol_expired
 
 
 def _compute_ftc(ret: Return, regular_tax: Decimal, taxable_income: Decimal,
@@ -1966,7 +2010,6 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     # ── Schedule E MACRS depreciation (Form 4562) ──
     # Compute per-property MACRS depreciation and any disposition gain/recapture,
     # then fold the results into an "effective" Return that downstream stages see.
-    from .depreciation import compute_all as _dep_compute_all
     prop_results = _dep_compute_all(ret.rental_properties, ret.tax_year)
     total_depreciation = sum((p.current_year_deduction for p in prop_results), ZERO)
     total_recapture_1250 = sum((p.sale_recapture_1250 for p in prop_results), ZERO)
@@ -1999,9 +2042,9 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     sch_e_net, pal_carry, _, pal_released, per_activity_pal_out = _compute_schedule_e(ret, rec)
     agi, capital_loss_carry_out = _compute_agi(ret, half_se_tax, sch_e_net, rules, rec)
     taxable_pre_qbi, deduction, deduction_kind, nol_carry_out = _compute_taxable_income(ret, agi, rules, rec)
-    charitable_carry_out = getattr(rec, "_charitable_out", ZERO)
-    pe_used = getattr(rec, "_pe_used", ZERO)
-    pease_reduction = getattr(rec, "_pease_reduction", ZERO)
+    charitable_carry_out = rec.ctx.charitable_out
+    pe_used = rec.ctx.pe_used
+    pease_reduction = rec.ctx.pease_reduction
     qbi_ded = _compute_qbi(ret, taxable_pre_qbi, rules, rec)
     taxable = max(ZERO, taxable_pre_qbi - qbi_ded)
     if qbi_ded > 0:
@@ -2165,14 +2208,14 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         ptc_excess_aptc_repayment=aptc_repayment,
         personal_exemption_used=_money(pe_used),
         pease_reduction=_money(pease_reduction),
-        social_security_taxable=_money(getattr(rec, "_taxable_ss", ZERO)),
+        social_security_taxable=_money(rec.ctx.taxable_ss),
         pension_taxable=_money(ret.pension_distributions_taxable),
         ira_taxable=_money(ret.ira_distributions_taxable),
         early_withdrawal_penalty=early_withdrawal_penalty,
-        ira_deduction_allowed=_money(getattr(rec, "_ira_deduction_allowed", ZERO)),
-        ira_deduction_disallowed=_money(getattr(rec, "_ira_deduction_disallowed", ZERO)),
-        student_loan_interest_deduction=_money(getattr(rec, "_sli_deduction", ZERO)),
-        educator_expense_deduction=_money(getattr(rec, "_educator_deduction", ZERO)),
+        ira_deduction_allowed=_money(rec.ctx.ira_deduction_allowed),
+        ira_deduction_disallowed=_money(rec.ctx.ira_deduction_disallowed),
+        student_loan_interest_deduction=_money(rec.ctx.sli_deduction),
+        educator_expense_deduction=_money(rec.ctx.educator_deduction),
         dependent_care_credit=dcc_nonref,
         dependent_care_credit_refundable=dcc_ref,
         residential_clean_energy_credit=rce_credit,
@@ -2180,8 +2223,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         capital_loss_carryforward_out=_money(capital_loss_carry_out),
         nol_carryforward_out=_money(nol_carry_out),
         nol_carryforward_lots_out=[{"year": l["year"], "amount": str(_money(l["amount"]))}
-                                    for l in getattr(rec, "_nol_lots_out", [])],
-        nol_expired_this_year=_money(getattr(rec, "_nol_expired", ZERO)),
+                                    for l in rec.ctx.nol_lots_out],
+        nol_expired_this_year=_money(rec.ctx.nol_expired),
         amt_credit_carryforward_out=_money(amt_credit_carry_out),
         ftc_carryforward_out=_money(ftc_carry_out),
         ftc_carryforward_lots_out=[{"year": l["year"], "amount": str(_money(l["amount"]))}
@@ -2191,11 +2234,11 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         # Form 8606 basis: basis_out = basis_after_distribution + this year's
         # newly-nondeductible contribution (§219(g) disallowed portion).
         ira_basis_out=_money(
-            getattr(rec, "_ira_basis_after_distrib", ZERO)
-            + getattr(rec, "_ira_deduction_disallowed", ZERO)
+            rec.ctx.ira_basis_after_distrib
+            + rec.ctx.ira_deduction_disallowed
         ),
-        ira_distribution_nontaxable=_money(getattr(rec, "_ira_nontaxable_recovered", ZERO)),
-        ira_taxable_after_basis=_money(getattr(rec, "_ira_taxable_after_basis", ZERO)),
+        ira_distribution_nontaxable=_money(rec.ctx.ira_nontaxable_recovered),
+        ira_taxable_after_basis=_money(rec.ctx.ira_taxable_after_basis),
         excess_ira_contribution_excise=excess_ira_excise,
         excess_ira_contributions_out=excess_ira_out,
         rmd_shortfall=rmd_shortfall_amt,
