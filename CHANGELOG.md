@@ -2,6 +2,31 @@
 
 All notable changes to TaxLens.
 
+## [0.34.1] — 2026
+
+### Fix — Release installer assets had stale `0.27.2` filenames
+
+Every release from **v0.27.3 through v0.34.0** uploaded installer
+artifacts named `TaxLens-0.27.2.*` regardless of the actual tag.
+Root cause: `desktop/package.json` had a hardcoded `"version": "0.27.2"`
+that nobody bumped, and electron-builder uses that field to name its
+output (the binaries themselves were built from each tag's commit and
+are functionally correct — only the filenames were misleading).
+
+**Fixes shipped:**
+
+- `desktop/package.json` bumped and a new test
+  (`test_release_version_sync.py`) enforces that it stays in lock-step
+  with `pyproject.toml`.
+- The release workflow now has a **"Sync desktop/package.json version
+  from tag"** step that rewrites the version on the runner before
+  electron-builder runs, so even if someone forgets to bump the file
+  the installer filenames will still match the tag.
+- Backfill: re-running the release workflow against each affected tag
+  (v0.28.0 – v0.34.0) will produce correctly-named assets alongside
+  the existing misnamed ones; the stale `0.27.2.*` files can then be
+  deleted from each release page.
+
 ## [0.34.0] — 2026
 
 ### Visualizations — Bracket-fill heatmap + carryforward vintage composition

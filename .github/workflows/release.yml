@@ -58,6 +58,26 @@ jobs:
           pip install -e ".[dev]"
           pip install pyinstaller
 
+      - name: Sync desktop/package.json version from tag
+        # electron-builder names artifacts using desktop/package.json's
+        # `version` field. Without this step we'd ship every release with
+        # the stale checked-in version baked into the artifact filenames.
+        # We rewrite the file on the runner (no commit) so the artifacts
+        # produced below carry the correct version even when re-running
+        # the workflow against an older tag whose package.json was stale.
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          python - <<PY
+          import json, pathlib
+          p = pathlib.Path("desktop/package.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          data["version"] = "${version}"
+          p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+          print(f"desktop/package.json version -> ${version}")
+          PY
+
       - name: Run tests
         run: pytest -q
 
