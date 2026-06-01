@@ -728,6 +728,107 @@ def _detect_status(pages: list[str]) -> FilingStatus | None:
     return None
 
 
+# W-2 Box 12 elective-deferral parser. The 1040 itself doesn't show 401(k)
+# contributions (they're already excluded from Box 1 wages), so the only
+# way to recover them is to look at the W-2 form text — which is included
+# in many vendor-bundled PDF returns. Codes we map:
+#   D   → traditional 401(k)              traditional_401k_contributions
+#   AA  → Roth 401(k)                     roth_401k_contributions
+#   BB  → Roth 403(b)                     roth_401k_contributions (bucketed)
+#   EE  → Roth governmental 457(b)        roth_401k_contributions (bucketed)
+#   E   → 403(b) salary reduction         traditional_401k_contributions (bucketed)
+#   G   → 457(b) salary reduction         traditional_401k_contributions (bucketed)
+#   S   → SIMPLE 401(k) / 408(p)          traditional_401k_contributions (bucketed)
+# We sum across multiple W-2s (joint returns / multiple employers).
+_W2_FINGERPRINT = re.compile(
+    r"\bForm\s*W-?2\b|Wage\s+and\s+Tax\s+Statement|\bBox\s*12[a-d]?\b",
+    re.IGNORECASE,
+)
+# Match "12a D 19,500.00" / "12b  AA 5000" / "D 19500.00" inside a Box 12 region.
+_BOX12_ROW = re.compile(
+    r"(?:^|\s)(?:12[a-d]\s+)?([A-Z]{1,2})\s+\$?\s*"
+    r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\b"
+)
+_TRAD_CODES = {"D", "E", "F", "G", "H", "S"}
+_ROTH_CODES = {"AA", "BB", "EE"}
+
+def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
+    """Return totals across all W-2 forms in the joined PDF text for
+    pre-tax (traditional) and Roth elective deferrals reported in Box 12.
+    Returns {} if no W-2 fingerprint is found.
+    """
+    if not _W2_FINGERPRINT.search(joined_text):
+        return {}
+    trad = Decimal(0)
+    roth = Decimal(0)
+    # Walk line by line, only consider lines that appear to be Box-12 data
+    # (line starts with "12a"/"12b"/etc OR appears within ~10 lines after
+    # a "Box 12" marker). This avoids picking up "Form 1099-R" code letters
+    # or unrelated capital-letter prose like "AA" used in addresses.
+    lines = joined_text.splitlines()
+    in_box12 = 0
+
+    def consume_row(raw_line: str) -> bool:
+        """Try to pull a code+amount pair from this line. Returns True if
+        we matched a known code (used to extend the in-region window)."""
+        nonlocal trad, roth
+        matched = False
+        # Strict full-line form: "[Box ]?12a D 19,500.00" — possibly the
+        # whole line. The regex permits leading "Box " and optional
+        # 12<letter> prefix.
+        full = re.match(
+            r"^\s*(?:Box\s*)?(?:12[a-d]\s+)?([A-Z]{1,2})\s+\$?\s*"
+            r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*$",
+            raw_line,
+            re.IGNORECASE,
+        )
+        rows: list[tuple[str, str]] = []
+        if full:
+            rows.append((full.group(1), full.group(2)))
+        else:
+            # Mid-line form: "Box 12a D 19500.00 12b AA 5000.00".
+            for m in re.finditer(
+                r"(?:^|\s)(?:Box\s*)?12[a-d]\s+([A-Z]{1,2})\s+\$?\s*"
+                r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\b",
+                raw_line,
+                re.IGNORECASE,
+            ):
+                rows.append((m.group(1), m.group(2)))
+        for code, amt in rows:
+            code = code.upper()
+            try:
+                v = _money(amt)
+            except InvalidOperation:
+                continue
+            if v <= 0:
+                continue
+            if code in _TRAD_CODES:
+                trad += v
+                matched = True
+            elif code in _ROTH_CODES:
+                roth += v
+                matched = True
+        return matched
+
+    for raw in lines:
+        is_marker = re.search(r"\bBox\s*12[a-d]?\b", raw, re.IGNORECASE)
+        starts_with_12letter = bool(re.match(r"^\s*12[a-d]\b", raw))
+        if is_marker or starts_with_12letter:
+            consume_row(raw)
+            in_box12 = 6
+            continue
+        if in_box12 > 0:
+            in_box12 -= 1
+            if consume_row(raw):
+                in_box12 = 4
+    out: dict[str, Decimal] = {}
+    if trad > 0:
+        out["traditional_401k_contributions"] = trad
+    if roth > 0:
+        out["roth_401k_contributions"] = roth
+    return out
+
+
 def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str]]:
     out: dict[str, Decimal] = {}
     warnings: list[str] = []
@@ -923,6 +1024,26 @@ def import_pdf(path: Path) -> Imported:
                     "to avoid double-counting; assigned the residual to other "
                     "ordinary income."
                 )
+
+    # Recover W-2 box 12 elective deferrals (codes D/AA/etc) — the 1040
+    # itself doesn't show 401(k) contributions, so this is the only way
+    # to capture them when the W-2 is bundled in the same PDF.
+    w2_text = "\n".join(default_pages)
+    for stream in layout_form_streams:
+        w2_text += "\n" + "\n".join(stream)
+    box12 = _extract_w2_box12_deferrals(w2_text)
+    box12_added: list[str] = []
+    for k, v in box12.items():
+        # Only add — never override a value that text or AcroForm already
+        # supplied (the user may have manually entered totals elsewhere).
+        if fields.get(k) in (None, Decimal(0)):
+            fields[k] = v
+            box12_added.append(f"{k}=${int(v):,}")
+    if box12_added:
+        warnings.append(
+            "Recovered 401(k) elective deferrals from W-2 box 12: "
+            + ", ".join(box12_added)
+        )
 
     if not fields and reported_total_tax is None and summary_excluded < len(default_pages):
         warnings.append(

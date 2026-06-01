@@ -2,6 +2,43 @@
 
 All notable changes to TaxLens.
 
+## [0.37.0] — 2026
+
+### 401(k) capture from W-2 box 12 + per-visualization help tooltips
+
+Two user-reported gaps:
+
+**1. 401(k) contributions weren't being detected.** The 1040 itself
+doesn't show elective deferrals — they're already excluded from Box 1
+wages. The only path to recover them when text-extracting is the W-2
+itself, which is bundled in many vendor returns. Now:
+
+- New `_extract_w2_box12_deferrals` parser sums box-12 codes across
+  all W-2s in the PDF:
+  - **D / E / F / G / H / S** → `traditional_401k_contributions`
+  - **AA / BB / EE** → `roth_401k_contributions` (Roth 401(k), Roth
+    403(b), Roth governmental 457(b))
+- Handles same-line packed format ("Box 12a D 19,500.00"), inline
+  multi-code rows, and column-layout (code on one row, amount on the
+  next).
+- Never overrides AcroForm or text-extracted values that already
+  populated the field — it only *adds* when the slot is empty.
+- What-if editor now exposes `traditional_401k_contributions` and
+  `roth_401k_contributions` as editable inputs so users with
+  1040-only PDFs (no bundled W-2) can fill in the numbers manually
+  and instantly see the tax impact.
+
+**2. Help tooltips on every visualization.** Each chart title (16
+charts across Dashboard, Year detail, Math, Trends) now sports a
+small `?` icon. Hovering reveals a popover explaining what the chart
+shows and how to use it — useful for non-CPAs learning what each view
+is for. Pure CSS-only popover, no extra JS state, works without a
+network request.
+
+10 new tests in `test_w2_box12_deferrals.py` — **366 tests passing**.
+
+---
+
 ## [0.36.0] — 2026
 
 ### PDF importer accuracy — packed-row form parsing

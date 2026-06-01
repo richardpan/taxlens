@@ -11,6 +11,31 @@
   details > summary { list-style: none; cursor: pointer; }
   details > summary::-webkit-details-marker { display: none; }
   .tab.active { background: #0f172a; color: white; }
+  /* Per-visualization help tooltip — injected next to any element with
+     [data-help]. Pure CSS hover popover so it works without JS state. */
+  .viz-help {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; margin-left: 6px; vertical-align: middle;
+    border-radius: 50%; background: #e2e8f0; color: #475569;
+    font-size: 11px; font-weight: 600; line-height: 1; cursor: help;
+    position: relative; user-select: none;
+  }
+  .viz-help:hover, .viz-help:focus { background: #10b981; color: white; outline: none; }
+  .viz-tip {
+    visibility: hidden; opacity: 0; transition: opacity 120ms ease;
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(100% + 8px);
+    width: 280px; padding: 10px 12px;
+    background: #0f172a; color: #f8fafc;
+    font-size: 12px; font-weight: 400; line-height: 1.45;
+    border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+    z-index: 50; text-align: left; pointer-events: none; white-space: normal;
+  }
+  .viz-help:hover .viz-tip, .viz-help:focus .viz-tip { visibility: visible; opacity: 1; }
+  .viz-tip::after {
+    content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #0f172a;
+  }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -88,27 +113,27 @@
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" id="kpis"></div>
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="font-semibold mb-3">Income composition by year</div>
+        <div class="font-semibold mb-3" data-help="Stacked bars showing the dollar amount of each income source (wages, interest, dividends, capital gains, retirement, business, other) for every year imported. Use to spot how your income mix has shifted year over year and which streams are growing.">Income composition by year</div>
         <div class="relative h-64"><canvas id="incomeStack"></canvas></div>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="font-semibold mb-3">Effective vs. marginal rate</div>
+        <div class="font-semibold mb-3" data-help="Effective rate = total tax ÷ AGI (average rate on every dollar). Marginal rate = the bracket your next dollar falls into. Use to see whether a Roth conversion or extra deduction would move you across a bracket boundary.">Effective vs. marginal rate</div>
         <canvas id="rateLine" height="180"></canvas>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="font-semibold mb-3">Tax composition (latest year)</div>
+        <div class="font-semibold mb-3" data-help="Donut breakdown of every dollar of tax owed in the most recent year: ordinary income tax, capital-gains tax, SE tax, NIIT, Additional Medicare, and state. Hover slices for exact amounts.">Tax composition (latest year)</div>
         <canvas id="taxDonut" height="180"></canvas>
       </div>
       <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="font-semibold">Tax composition by year</div>
+          <div class="font-semibold" data-help="Stacked bars showing every dollar of federal + state liability split by tax type (ordinary income, capital gains, SE, NIIT, Add'l Medicare, state) year over year. Use to see which tax category drives the most of your bill.">Tax composition by year</div>
           <div class="text-xs text-slate-500">Stacked: every dollar of federal + state liability, year over year</div>
         </div>
         <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
       <div id="carryCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="font-semibold">Carryforward balances by year</div>
+          <div class="font-semibold" data-help="End-of-year balances for every carryforward bucket: capital losses, NOLs, AMT credit, foreign tax credit, charitable contribution carryovers, and IRA basis. Hover bars to see expiration windows (FTC > 10 years, pre-TCJA NOL > 20 years).">Carryforward balances by year</div>
           <div class="text-xs text-slate-500">Capital loss · NOL · AMT credit · Foreign tax credit · Charitable · IRA basis — end-of-year balances. Hover for expirations (FTC >10y, pre-TCJA NOL >20y).</div>
         </div>
         <div class="relative h-64"><canvas id="carryChart"></canvas></div>
@@ -135,23 +160,23 @@
   <p class="text-slate-500 mb-6">Income flow + how the federal brackets were filled.</p>
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3">Income → take-home waterfall</div>
+      <div class="font-semibold mb-3" data-help="Bar waterfall from gross income down to take-home pay: each step deducts a category (pre-tax retirement, HSA, federal tax, state tax, FICA) so you can see exactly where each dollar went.">Income → take-home waterfall</div>
       <canvas id="waterfall" height="180"></canvas>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3">Federal bracket fill</div>
+      <div class="font-semibold mb-3" data-help="Each bar represents one federal tax bracket. The bar's height shows how many dollars of your taxable income fall in that bracket and the tax owed on it. Use to see how much room you have before hitting the next bracket.">Federal bracket fill</div>
       <div class="relative h-56"><canvas id="brackets"></canvas></div>
       <div class="text-xs text-slate-500 mt-2">Each bar shows how much taxable income sits in that bracket and the tax owed on it.</div>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
       <div class="flex items-baseline justify-between mb-3">
-        <div class="font-semibold">Income sources → tax buckets</div>
+        <div class="font-semibold" data-help="Sankey diagram: each income source on the left flows into one of the tax pools on the right (ordinary income tax, qualified-dividend/LTCG tax, SE tax, NIIT). Flow widths are proportional to dollars — wider ribbons = more dollars.">Income sources → tax buckets</div>
         <div class="text-xs text-slate-500">Flow widths are proportional to dollars</div>
       </div>
       <div id="sankey" class="w-full"></div>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3">Tax breakdown</div>
+      <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax: ordinary income tax, capital-gains tax, SE tax, NIIT, Additional Medicare, state, and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
       <div id="taxBreakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"></div>
     </div>
   </div>
@@ -166,7 +191,7 @@
   <p class="text-slate-500 mb-6">Every step of the computation, in order.</p>
   <div id="mathSteps" class="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100"></div>
   <div id="mathBrackets" class="mt-6 bg-white rounded-2xl border border-slate-200 p-5">
-    <div class="font-semibold mb-3">Bracket walk</div>
+    <div class="font-semibold mb-3" data-help="Walks every federal bracket in order, showing how much of your taxable income filled each bracket and the tax owed on that slice. Qualified dividends + LTCG are shown separately because they're taxed at preferential rates stacked above ordinary income.">Bracket walk</div>
     <div id="ordinaryBrackets"></div>
     <div id="qualifiedBracketsSection" class="mt-6 hidden">
       <div class="font-medium mb-2">Qualified dividends + LTCG (stacked above ordinary)</div>
@@ -286,37 +311,37 @@
   </div>
   <div class="grid md:grid-cols-2 gap-6">
     <div class="bg-white border border-slate-200 rounded-2xl p-5">
-      <div class="font-semibold mb-2">AGI &amp; Total Tax</div>
+      <div class="font-semibold mb-2" data-help="Two lines per year: Adjusted Gross Income (top, money you earned) and total federal + state tax (bottom). Use to spot when tax rose faster than income.">AGI &amp; Total Tax</div>
       <svg id="trendsAgiTax" viewBox="0 0 600 280" class="w-full h-64"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5">
-      <div class="font-semibold mb-2">Effective vs Marginal Rate</div>
+      <div class="font-semibold mb-2" data-help="Effective rate (total tax ÷ AGI) vs. marginal rate (the bracket your last dollar fell in) over time. A widening gap usually means lots of income at low brackets (e.g. LTCG) — narrowing means you're moving up the schedule.">Effective vs Marginal Rate</div>
       <svg id="trendsRates" viewBox="0 0 600 280" class="w-full h-64"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-      <div class="font-semibold mb-2">Income composition by year</div>
+      <div class="font-semibold mb-2" data-help="Stacked area showing how the share of each income source (wages, interest, dividends, capital gains, retirement, business, other) has changed across years. Use to see the shape of your income — wages-heavy vs. investment-heavy.">Income composition by year</div>
       <svg id="trendsStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-      <div class="font-semibold mb-2">Tax composition by year</div>
+      <div class="font-semibold mb-2" data-help="Stacked area of every dollar of federal + state liability by tax category (ordinary, capital gains, SE, NIIT, Add'l Medicare, state) over the years imported.">Tax composition by year</div>
       <svg id="trendsTaxStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
       <div class="flex items-baseline justify-between mb-2">
-        <div class="font-semibold">Bracket fill across years</div>
+        <div class="font-semibold" data-help="Heatmap of how much taxable income sat in each federal bracket across years. Darker cell = more dollars in that bracket. Use to track whether you've been creeping into higher brackets year over year.">Bracket fill across years</div>
         <div class="text-xs text-slate-500">Color intensity = $ in that bracket. Brackets shown match each year's filing-status schedule.</div>
       </div>
       <svg id="trendsBracketHeat" viewBox="0 0 800 320" class="w-full"></svg>
     </div>
     <div id="trendsCarryCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
       <div class="flex items-baseline justify-between mb-2">
-        <div class="font-semibold">Carryforward vintage composition</div>
+        <div class="font-semibold" data-help="Each stacked bar = end-of-year balance for a carryforward (capital loss, NOL, FTC) broken down by vintage (year of origination). Older vintages stacked first. Bars are flagged when a vintage is approaching its expiration (FTC > 10y, pre-TCJA NOL > 20y).">Carryforward vintage composition</div>
         <div class="text-xs text-slate-500">Each stacked bar = end-of-year balance broken down by vintage (origination year). Older vintages first.</div>
       </div>
       <svg id="trendsCarryVintages" viewBox="0 0 800 360" class="w-full"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-      <div class="font-semibold mb-2">Year-over-year changes</div>
+      <div class="font-semibold mb-2" data-help="Side-by-side table showing the percentage change in every major line (AGI, taxable income, total tax, effective rate, etc.) from one year to the next.">Year-over-year changes</div>
       <div id="trendsYoyTable" class="overflow-x-auto text-sm"></div>
     </div>
   </div>
@@ -325,7 +350,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.36.0
+  TaxLens · local-first · v0.37.0
 </footer>
 
 <script src="/static/app.js"></script>

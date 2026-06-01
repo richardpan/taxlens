@@ -5,6 +5,30 @@ const fmt = (n) => n == null ? '—' : '$' + Number(n).toLocaleString(undefined,
 const fmtPct = (n) => (Number(n) * 100).toFixed(1) + '%';
 const charts = {};
 
+// Inject a "?" help icon next to every element annotated with [data-help].
+// The icon hosts a CSS-only hover popover defined in index.html. Safe to
+// call repeatedly — it skips elements that already have an icon.
+function attachHelpIcons(root = document) {
+  root.querySelectorAll('[data-help]').forEach(el => {
+    if (el.dataset.helpAttached) return;
+    const tip = el.getAttribute('data-help');
+    if (!tip) return;
+    const btn = document.createElement('span');
+    btn.className = 'viz-help';
+    btn.setAttribute('tabindex', '0');
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('aria-label', 'About this visualization');
+    btn.textContent = '?';
+    const bubble = document.createElement('span');
+    bubble.className = 'viz-tip';
+    bubble.textContent = tip;
+    btn.appendChild(bubble);
+    el.appendChild(btn);
+    el.dataset.helpAttached = '1';
+  });
+}
+document.addEventListener('DOMContentLoaded', () => attachHelpIcons());
+
 // ─── tabs ──────────────────────────────────────────────────────────────────
 $$('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
 function showTab(name) {
@@ -919,6 +943,7 @@ function bracketTable(fills) {
 // ─── what-if ───────────────────────────────────────────────────────────────
 const WHATIF_FIELDS = ['wages','interest_income','ordinary_dividends','qualified_dividends',
   'long_term_capital_gains','short_term_capital_gains','se_income','other_ordinary_income',
+  'traditional_401k_contributions','roth_401k_contributions',
   'hsa_deduction','federal_withholding','estimated_payments','qualifying_children'];
 
 $('#whatifYearPicker').addEventListener('change', renderWhatif);
