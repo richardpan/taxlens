@@ -1,8 +1,6 @@
 """Phase 2 federal coverage: retirement income (1099-R + SSA-1099)."""
 from decimal import Decimal
 
-import pytest
-
 from taxlens.engine import compute
 from taxlens.models import FilingStatus, Return
 from taxlens.rules import load_rules

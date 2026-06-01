@@ -127,7 +127,7 @@ class ImportLogger:
 
     def render(self) -> str:
         header = [
-            f"TaxLens import log",
+            "TaxLens import log",
             f"  started_at: {self.started_at.isoformat(timespec='seconds')}",
             f"  source:     {self.source_path}",
         ]

@@ -4,11 +4,14 @@ from __future__ import annotations
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from taxlens.models import Rules
+
+if TYPE_CHECKING:
+    from taxlens.models import StateRules
 
 # Locate the tax_rules directory INSIDE the package so it ships with the wheel
 # (and works when installed via pip, in an Electron app, or any other packaged

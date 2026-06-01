@@ -1,8 +1,6 @@
 """Tests for Schedule E MACRS depreciation + §1250 recapture on disposal."""
 from decimal import Decimal
 
-import pytest
-
 from taxlens.depreciation import compute_property_year
 from taxlens.engine import compute
 from taxlens.models import FilingStatus, RentalProperty, Return

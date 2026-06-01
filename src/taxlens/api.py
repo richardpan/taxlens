@@ -11,8 +11,8 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from taxlens.service import TaxLensService

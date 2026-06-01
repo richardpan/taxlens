@@ -2,8 +2,6 @@
 
 Uses an isolated temp DB to avoid touching the user's real ~/.taxlens.
 """
-import json
-import os
 from decimal import Decimal
 from pathlib import Path
 

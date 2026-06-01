@@ -1,6 +1,4 @@
 """Test the import-log API endpoints (listing + fetching)."""
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 

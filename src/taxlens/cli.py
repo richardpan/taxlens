@@ -1,7 +1,6 @@
 """Typer-based CLI. Entry point: `taxlens` after `pip install -e .`."""
 from __future__ import annotations
 
-import json
 import webbrowser
 from pathlib import Path
 from typing import Optional

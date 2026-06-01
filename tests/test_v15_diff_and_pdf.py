@@ -21,7 +21,6 @@ def svc(tmp_path: Path) -> TaxLensService:
 
 def _store(svc: TaxLensService, ret: Return) -> int:
     """Insert a Return directly through the service db plumbing."""
-    import json
     from taxlens.db import ComputationCache, StoredReturn, dumps
     result = compute(ret)
     with svc.sessionmaker_() as s:

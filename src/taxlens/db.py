@@ -18,7 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 

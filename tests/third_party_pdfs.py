@@ -187,7 +187,7 @@ def make_hrblock_packed_1040(path: Path, r: ThirdPartyReturn) -> None:
         "1st (ACME CORPORATION)",
         "2nd (NORTHWIND SCHOOL DISTRICT)",
         "3rd (FABRIKAM)",
-        f"Make your check or money order for $12500 payable to United States Treasury.",
+        "Make your check or money order for $12500 payable to United States Treasury.",
     ])
 
     # ── Page 2: vendor "Quick Summary" (must be skipped) ────────────────────
@@ -241,7 +241,7 @@ def make_hrblock_packed_1040(path: Path, r: ThirdPartyReturn) -> None:
         "Standard",
         "Deduction for-",
         f"7 Capital gain or (loss). Attach Schedule D if required. If not required, check here . . . . . . . . . . . . . . . . . . 7 {m(Decimal(0))}",
-        f"8 Other income from Schedule 1, line 9 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8 0",
+        "8 Other income from Schedule 1, line 9 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8 0",
         f"9 Add lines 1, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income . . . . . . . . . . . . . . . . 9 {m(r.wages + r.interest + r.ord_div)}",
         "10 Adjustments to income: . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .",
         "a From Schedule 1, line 22 . . . . . . . . . . . . . . . . . . . . . . . . . . 10a 0",

@@ -6,7 +6,6 @@ is sent. This test fails CI if someone adds back an external <script>,
 """
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 
