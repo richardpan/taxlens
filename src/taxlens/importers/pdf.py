@@ -41,11 +41,24 @@ def _money(s: str) -> Decimal:
     return Decimal(s)
 
 
+_FORM_ID_PREFIX_WORDS = frozenset({
+    "form", "forms", "schedule", "sch", "no", "no.", "ein", "ssn",
+    "tin", "ein:", "no:", "ref", "ref.", "rev", "rev.", "omb",
+    "line", "lines", "page", "pages", "part", "section",
+    # Form-suffix tokens that follow a form number ("1040-SR", "1040-NR",
+    # "1099-R") — handled below via the dash-glue check, but listed for
+    # documentation.
+})
+
+
 def _is_form_id_digit(tail: str, start: int) -> bool:
     """True if the money match at `start` is actually part of a form identifier
-    like 'W-2', '1099-R', '8949', 'Form 1116', 'Sch B'. Without this guard,
+    like 'W-2', '1099-R', '8949', 'Form 1116', 'Sch B', 'OMB No. 1545-0074',
+    or a line-label echo like '6a' / '25b' / '1z'. Without this guard,
     'Federal income tax withheld from Form(s) W-2' would match '-2' as the
-    withholding amount.
+    withholding amount, packed rows like '6a Social security benefits . . . 6a'
+    would extract a stray '6', and Schedule B's 'OMB No. 1545-0074' header
+    would inject '1545' as the ordinary-dividends value.
 
     Note: the _MONEY regex begins with ``\\s*`` so the match's `start` may
     point at a leading space rather than the first digit. We skip past any
@@ -61,9 +74,41 @@ def _is_form_id_digit(tail: str, start: int) -> bool:
     # Preceded by `[Letter]-` → part of a form code like W-2 / 1099-R.
     if start >= 2 and tail[start - 1] == "-" and tail[start - 2].isalpha():
         return True
+    # Preceded by `[Digit]-` → trailing segment of a hyphenated code like
+    # 'OMB No. 1545-0074' or '2020-12-31'. The leading segment is handled
+    # by the word-prefix check below ("No.", "OMB"), but the trailing
+    # segment needs its own guard.
+    if start >= 2 and tail[start - 1] == "-" and tail[start - 2].isdigit():
+        return True
     # Preceded by word char (digit or letter) with no separator → glued
     # identifier, not a money column.
     if start >= 1 and (tail[start - 1].isalnum() or tail[start - 1] == "-"):
+        return True
+    # Preceding whitespace-separated word is a form / reference word
+    # ("Form 1040", "Schedule D", "OMB No. 1545", "Line 7", "Section 199A").
+    prefix = tail[:start].rstrip()
+    if prefix:
+        idx = max(prefix.rfind(" "), prefix.rfind("\t"))
+        prev_word = (prefix[idx + 1:] if idx >= 0 else prefix).lower().strip(",;:()[]")
+        if prev_word in _FORM_ID_PREFIX_WORDS:
+            return True
+    # Followed by a single lowercase letter and a word boundary → line-label
+    # echo like '6a', '25b', '1z'. Real money values are never glued to a
+    # trailing letter on IRS / vendor exports. We also require the matched
+    # token itself to look like a bare line number (1-2 digits, no comma,
+    # no decimal) — otherwise '37,020' followed by 'and' would false-fire.
+    end = start
+    while end < len(tail) and (tail[end].isdigit() or tail[end] in ",.-$"):
+        end += 1
+    token = tail[start:end]
+    bare = re.fullmatch(r"-?\d{1,2}", token) is not None
+    if bare and end < len(tail) and tail[end].isalpha() and tail[end].islower():
+        # Confirm word boundary after the letter (avoid filtering '6abc').
+        if end + 1 >= len(tail) or not tail[end + 1].isalpha():
+            return True
+    # Followed by `-[A-Za-z]` → form-code suffix like '1040-SR', '1099-R',
+    # '5329-A'. The leading number is a form identifier, not money.
+    if end < len(tail) - 1 and tail[end] == "-" and tail[end + 1].isalpha():
         return True
     return False
 
@@ -75,6 +120,16 @@ def _money_matches_in(tail: str) -> list:
 
 
 _LINE_NO_ECHO = re.compile(r"(?:^|\s)(\d{1,2}[a-z]?)\s*$")
+# Words that, when they're the LAST whitespace-separated token preceding a
+# money match, mean the "money" is really a reference (line number, page
+# number, column letter) embedded in form-instruction prose. Without this
+# filter, "Combine lines 1a through 6 in column (h)" extracts a bare "6";
+# "go to Part III on page 2" extracts "2"; etc.
+_REF_PREFIX_WORDS = frozenset({
+    "through", "line", "lines", "column", "columns", "page", "pages",
+    "part", "parts", "form", "forms", "schedule", "sch", "box", "boxes",
+    "section", "item", "items", "code", "codes", "paragraph", "subsection",
+})
 
 
 def _pick_money(tail: str, matches: list) -> "re.Match | None":
@@ -94,9 +149,21 @@ def _pick_money(tail: str, matches: list) -> "re.Match | None":
 
     Heuristic: prefer the first money whose IMMEDIATELY PRECEDING
     whitespace-separated token looks like a line-number echo (``\\d{1,2}[a-z]?``).
-    If none qualify, fall back to the last match (preserves the legacy
-    behavior for label-only fixtures where the value just trails the label).
+    If none qualify, fall back to the last match — but skip "reference"
+    matches whose preceding word is in ``_REF_PREFIX_WORDS`` (the digit is
+    really part of "lines 1 through 6" / "page 2" / "column (h)" prose,
+    not a column value).
     """
+    def preceding_word(m: "re.Match") -> str:
+        s = m.start()
+        while s < len(tail) and tail[s].isspace():
+            s += 1
+        prefix = tail[:s].rstrip()
+        # Last whitespace-separated token.
+        idx = max(prefix.rfind(" "), prefix.rfind("\t"))
+        word = prefix[idx + 1:] if idx >= 0 else prefix
+        return word.lower().strip(".,;:()[]")
+
     for m in matches:
         # The text BEFORE this money match, with any leading-of-match
         # whitespace skipped first (since _MONEY starts with \s*).
@@ -106,7 +173,12 @@ def _pick_money(tail: str, matches: list) -> "re.Match | None":
         prefix = tail[:s]
         if _LINE_NO_ECHO.search(prefix):
             return m
-    return matches[-1] if matches else None
+    # Fall-back path: pick the last match that ISN'T a reference fragment
+    # from form-instruction prose.
+    for m in reversed(matches):
+        if preceding_word(m) not in _REF_PREFIX_WORDS:
+            return m
+    return None
 
 
 def _first_money_after(label_re: str, text: str) -> Decimal | None:
@@ -154,6 +226,16 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
                 continue
             if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]{3,}", nxt_raw):
                 break
+            # The loose-layout stream sometimes MERGES the next form row
+            # into what should be the continuation of the prior label.
+            # Detect that pattern: a 1-2 digit line-number followed by
+            # 3+ alphabetic label chars within the first ~80 chars of
+            # the line. This catches e.g. "Deduction for- 7 Capital gain"
+            # without rejecting legitimate label-wraps like "term capital
+            # gains or losses, go to Part II below..." (which has no
+            # digit-then-label sequence early in the line).
+            if re.search(r"(?:^|\s)\d{1,2}[a-z]?\s+[A-Za-z]{3,}", nxt_raw[:80]):
+                break
             if _NOISE_LINE.match(nxt):
                 continue
             pn = _PAREN_NEG.search(nxt)
@@ -169,6 +251,17 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
             if strict:
                 try:
                     return _money(strict[-1].group(0))
+                except InvalidOperation:
+                    pass
+            # Fallback: "<line-number-echo> <integer>" continuation lines
+            # like "8 0", "25c 0", "10c 220" — common when the value column
+            # is rendered on its own row by vendor exports. Strict_money_pat
+            # rejects bare 1-2 digit integers; allow them here because the
+            # line-number echo gives us confidence this IS the value column.
+            m_echo = re.match(r"^\s*\d{1,2}[a-z]?\s+(-?\d{1,6})\s*$", nxt_raw)
+            if m_echo:
+                try:
+                    return _money(m_echo.group(1))
                 except InvalidOperation:
                     pass
             break
@@ -198,30 +291,97 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"Wages\s+and\s+salaries"],
     "interest_income":         [r"Line\s*2b\b[^\n]{0,40}?Taxable interest",
                                 r"\b2\s*b\b[^\n]{0,40}?Taxable interest",
+                                # Loose fallback (FreeTaxUSA-summary phrasing).
+                                # Skipped on lines that look like a Schedule
+                                # B / form-instructions header (those embed
+                                # "Taxable interest" in prose rather than
+                                # the 1040 line 2b value column).
                                 r"\bTaxable\s+interest\b"],
     "qualified_dividends":     [r"Line\s*3a\b[^\n]{0,40}?Qualified dividends",
                                 r"\b3\s*a\b[^\n]{0,40}?Qualified dividends",
-                                r"\bQualified\s+dividends\b"],
+                                # Loose fallback for vendor summary pages.
+                                # Anchor to 'qualified dividends' followed
+                                # within 40 chars by the 1040 line marker
+                                # (column echo '3a' or word 'line 3a') so
+                                # we don't pick up Schedule D's "Qualified
+                                # Dividends and Capital Gain Tax Worksheet"
+                                # heading or 1040-NR instructions text.
+                                r"\bQualified\s+dividends\b[^\n]{0,40}?3\s*a\b",
+                                r"\b3\s*a\s+Qualified\s+dividends",
+                                # Bare tooltip variant — IRS AcroForm /TU
+                                # fields read "Qualified dividends" alone.
+                                # Negative lookahead rejects Schedule D's
+                                # "Qualified Dividends and Capital Gain Tax
+                                # Worksheet" heading.
+                                r"\bQualified\s+dividends\b(?!\s+and\b)(?!\s+and\s+Capital)",
+                                ],
     "ordinary_dividends":      [r"Line\s*3b\b[^\n]{0,40}?Ordinary dividends",
                                 r"\b3\s*b\b[^\n]{0,40}?Ordinary dividends",
-                                r"\bOrdinary\s+dividends\b"],
-    "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain",
-                                r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)",
-                                # IRS line 7 tooltip without line prefix
-                                r"Capital\s+gain\s+or\s+\(loss\)\.?\s+Attach\s+Schedule\s*D",
+                                # Loose fallback: require 3b context within
+                                # 40 chars or "b Ordinary dividends" packed
+                                # format. Plain "Ordinary dividends" alone
+                                # would false-match Schedule B's "Interest
+                                # and Ordinary Dividends" title.
+                                r"\bOrdinary\s+dividends\b[^\n]{0,40}?3\s*b\b",
+                                r"\bb\s+Ordinary\s+dividends",
+                                # Bare tooltip variant — negative lookbehind
+                                # rejects Sch B's "Interest and Ordinary
+                                # Dividends" heading.
+                                r"(?<!and\s)\bOrdinary\s+dividends\b",
+                                ],
+    "long_term_capital_gains": [
+                                # Prefer Schedule D line 15 ("Net long-term capital
+                                # gain or (loss). Combine lines 8a through 14")
+                                # when the PDF actually contains Schedule D —
+                                # 1040 line 7 is the COMBINED ST+LT total, not
+                                # the long-term portion, so using line 7 for
+                                # LTCG overstates long-term and understates tax
+                                # on the short-term piece.
+                                r"\bNet\s+long[-\s]term\s+capital\s+gain\s+or\s+\(loss\)\.?\s+Combine\s+lines?\s*8a\s+through\s+14",
                                 # FreeTaxUSA summary — distinguishes LT vs ST
+                                r"\bNet\s+long[-\s]term\s+capital\s+gain",
                                 r"\bLong[-\s]term\s+capital\s+gain",
-                                r"\bNet\s+long[-\s]term\s+capital\s+gain"],
-    "short_term_capital_gains":[r"\bShort[-\s]term\s+capital\s+gain",
-                                r"\bNet\s+short[-\s]term\s+capital\s+gain"],
+                                # Fallback: 1040 line 7 ("Capital gain or
+                                # (loss). Attach Schedule D"). This is the
+                                # combined total; treat as LTCG only when
+                                # Schedule D wasn't found. The engine taxes
+                                # LTCG at preferential rates so this fallback
+                                # UNDERSTATES tax when the gain is actually
+                                # short-term — flagged via warning downstream.
+                                r"Line\s*7\b[^\n]{0,80}?Capital gain",
+                                r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)",
+                                r"Capital\s+gain\s+or\s+\(loss\)\.?\s+Attach\s+Schedule\s*D",
+                                ],
+    "short_term_capital_gains":[
+                                # Prefer Schedule D line 7 ("Net short-term
+                                # capital gain or (loss). Combine lines 1a
+                                # through 6"). Anchor on the full phrasing
+                                # so we don't false-match the Part I header
+                                # ("Short-Term Capital Gains and Losses") or
+                                # line 6 ("Short-term capital LOSS carryover").
+                                r"\bNet\s+short[-\s]term\s+capital\s+gain\s+or\s+\(loss\)\.?\s+Combine\s+lines?\s*1a\s+through\s+6",
+                                # FreeTaxUSA summary phrasings
+                                r"\bNet\s+short[-\s]term\s+capital\s+gain",
+                                r"\bShort[-\s]term\s+capital\s+gain\b(?![^\n]{0,40}?loss\s+carryover)",
+                                ],
     "se_income":               [r"Line\s*3\b[^\n]{0,40}?Business income",
                                 r"Schedule\s*C[^\n]{0,40}?Net profit",
                                 r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)",
                                 r"\bSelf[-\s]employment\s+income"],
-    "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income",
-                                r"\b8\b[^\n]{0,40}?(?:Additional|Other) income",
-                                # IRS line 8 tooltip (Schedule 1, line 10)
-                                r"Other\s+income\s+from\s+Schedule\s*1"],
+    "other_ordinary_income":   [
+                                # Prefer Schedule 1 line 8 ("Other income.
+                                # List type and amount") — this is the TRUE
+                                # "other income" bucket. 1040 line 8 is the
+                                # PASSTHROUGH of Sch 1 line 9 (which also
+                                # contains unemployment from Sch 1 line 7);
+                                # extracting 1040 line 8 directly would
+                                # double-count unemployment_compensation.
+                                r"\b8\s+Other\s+income\.?\s+List\s+type",
+                                # FreeTaxUSA / vendor summary phrasings that
+                                # explicitly label "other ordinary income"
+                                # (distinct from unemployment).
+                                r"\bOther\s+ordinary\s+income\b",
+                                ],
     "pension_distributions_taxable": [
                                 r"\b5\s*b\b[^\n]{0,40}?(?:Pensions|Taxable amount)",
                                 r"\bPensions\s+and\s+annuities",
@@ -232,8 +392,23 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\bIRA\s+distributions\b[^\n]{0,40}?taxable",
                                 # IRS line 4b tooltip
                                 r"IRA\s+distributions[^\n]{0,40}?Taxable\s+amount"],
-    "social_security_benefits":[r"\b6\s*a\b[^\n]{0,40}?Social security benefits",
-                                r"\bSocial\s+security\s+benefits"],
+    "social_security_benefits":[
+                                # Prefer line 6b (TAXABLE amount), not line 6a
+                                # (gross benefits). Packed-row format puts both
+                                # on one line: "6a Social security benefits ...
+                                # 6a {gross} b Taxable amount ... 6b {taxable}".
+                                # Anchoring on "Taxable amount" gets _pick_money
+                                # to the right column. _is_form_id_digit now
+                                # filters the trailing "6b" line-label echo.
+                                r"\bSocial\s+security\s+benefits[^\n]{0,200}?Taxable\s+amount",
+                                r"\b6\s*b\b[^\n]{0,40}?Taxable\s+amount",
+                                # Multi-row layout fallback
+                                r"\bb\s+Taxable\s+amount[^\n]{0,40}?6\s*b\b",
+                                # Last resort — gross benefits 6a (may overstate
+                                # if entire amount isn't taxable; engine applies
+                                # the §86 worksheet on top).
+                                r"\b6\s*a\b[^\n]{0,40}?Social\s+security\s+benefits",
+                                ],
     "unemployment_compensation":[r"\bUnemployment\s+compensation"],
     "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income",
                                 # Schedule 1 line 26 in FreeTaxUSA
@@ -249,14 +424,35 @@ LINE_PATTERNS: dict[str, list[str]] = {
     "total_tax_reported":      [r"Line\s*24\b[^\n]{0,40}?Total tax",
                                 r"\b24\b[^\n]{0,80}?(?:total tax|Add lines\s*22\s+and\s+23)",
                                 r"\bTotal\s+tax\b"],
-    "federal_withholding":     [r"Line\s*25a?\b[^\n]{0,80}?Federal income tax withheld",
+    "federal_withholding":     [
+                                # Prefer line 25d ("Add lines 25a through 25c")
+                                # — the W-2 + 1099 + other-forms TOTAL. Older
+                                # 1040s (pre-2020) had one withholding line
+                                # (25 or 25a) and no breakout, so the 25a
+                                # fallbacks below still cover them.
+                                r"\b25\s*d\b[^\n]{0,80}?Add\s+lines?\s*25a",
+                                r"\bd\s+Add\s+lines?\s*25a\s+through\s+25c",
+                                r"\bAdd\s+lines?\s*25a\s+through\s+25c",
+                                # Fallback: line 25a or single-line withholding
+                                # (only W-2 — UNDERSTATES total when 1099
+                                # withholding is also present).
+                                r"Line\s*25a?\b[^\n]{0,80}?Federal income tax withheld",
                                 r"\b25\s*a?\b[^\n]{0,80}?Federal income tax withheld",
-                                r"\bFederal\s+(?:income\s+)?tax\s+withheld"],
+                                r"\bFederal\s+(?:income\s+)?tax\s+withheld",
+                                ],
     "estimated_payments":      [r"Line\s*26\b[^\n]{0,80}?estimated tax payments",
                                 r"\b26\b[^\n]{0,80}?estimated tax payments",
                                 r"\bEstimated\s+tax\s+payments\b"],
     "qualifying_children":     [r"Number of qualifying children",
                                 r"Qualifying children[^\n]{0,40}?for\s+child\s+tax\s+credit"],
+    # Internal-only: 1040 line 8 (the Sch-1-line-9 PASSTHROUGH total). Tracked
+    # separately so post-processing can subtract unemployment_compensation
+    # before assigning what's left to other_ordinary_income — the dollars on
+    # 1040 line 8 ALREADY include unemployment, so blindly using them as
+    # "other" double-counts. Stripped before constructing Return.
+    "_form1040_line8_total":   [r"\b8\b[^\n]{0,60}?Other\s+income\s+from\s+Schedule\s*1",
+                                r"\bLine\s*8\b[^\n]{0,60}?Other\s+income\s+from\s+Schedule\s*1",
+                                r"\bOther\s+income\s+from\s+Schedule\s*1"],
 }
 
 YEAR_PATTERNS = [
@@ -701,8 +897,32 @@ def import_pdf(path: Path) -> Imported:
         filing_status = FilingStatus.SINGLE
 
     reported_total_tax = fields.pop("total_tax_reported", None)
-    fields.pop("agi_reported", None)
-    fields.pop("taxable_income_reported", None)
+
+    # Reconcile 1040 line 8 (the Sch-1-line-9 passthrough total) with the
+    # individual income buckets to avoid double-counting unemployment.
+    # 1040 line 8 = sum of Sch 1 lines 1-8 (refunds + alimony + business +
+    # rentals + farm + UNEMPLOYMENT + other). If we already captured
+    # unemployment_compensation from Sch 1 line 7 AND we're about to use
+    # 1040 line 8 as "other ordinary income", we'd count the unemployment
+    # dollars twice. Strategy:
+    #   - If we extracted Sch 1 line 8 directly (other_ordinary_income is
+    #     already set), trust it and discard the 1040 line 8 total.
+    #   - Otherwise, derive other = max(0, line8 - unemployment).
+    line8_total = fields.pop("_form1040_line8_total", None)
+    if line8_total is not None:
+        unemp = fields.get("unemployment_compensation", Decimal(0)) or Decimal(0)
+        if "other_ordinary_income" not in fields:
+            derived = line8_total - unemp
+            if derived < 0:
+                derived = Decimal(0)
+            if derived > 0:
+                fields["other_ordinary_income"] = derived
+            if unemp > 0 and line8_total >= unemp:
+                warnings.append(
+                    "Reconciled 1040 line 8 against Sch 1 line 7 (unemployment) "
+                    "to avoid double-counting; assigned the residual to other "
+                    "ordinary income."
+                )
 
     if not fields and reported_total_tax is None and summary_excluded < len(default_pages):
         warnings.append(

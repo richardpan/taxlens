@@ -291,6 +291,12 @@ class Return(BaseModel):
     # Reconciliation reference: the value printed on the PDF's line 24 (total tax).
     # If provided, the engine surfaces the delta but never overrides its own computation.
     reported_total_tax: Decimal | None = None
+    # Optional reconciliation references for AGI (1040 line 11) and taxable
+    # income (1040 line 15). The engine recomputes both from income inputs;
+    # storing what the source PDF actually printed lets the UI show a delta
+    # without losing the importer's signal.
+    agi_reported: Decimal | None = None
+    taxable_income_reported: Decimal | None = None
 
 
 class ComputationStep(BaseModel):

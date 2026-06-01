@@ -2,6 +2,54 @@
 
 All notable changes to TaxLens.
 
+## [0.36.0] — 2026
+
+### PDF importer accuracy — packed-row form parsing
+
+Resolves a cluster of bugs surfaced by import logs on real H&R Block /
+vendor-generated 1040 PDFs whose values are rendered in packed rows
+(line-number echo + value at end of long, dot-leader-padded lines)
+with labels that wrap across two lines.
+
+**Fixes:**
+
+- **Schedule D ST / LT split.** 1040 line 7 is the *combined* ST+LT
+  total. When Schedule D is present we now prefer Sch D line 7 (ST)
+  and line 15 (LT), giving the correct split. Falls back to 1040
+  line 7 when Sch D is absent.
+- **Federal withholding total.** Prefer 1040 line 25d (W-2 + 1099 +
+  other withholding); 25a is kept as a fallback for older returns.
+- **Schedule 1 line 8 dedup.** 1040 line 8 ("Other income from
+  Schedule 1") is a passthrough that already *includes* Sch 1 line 7
+  (unemployment). Extracting both fields independently double-counted
+  income. Now tracked internally and reconciled.
+- **Social-security line 6b.** The packed format puts 6a (gross) and
+  6b (taxable) on a single text line. We now anchor on "Taxable
+  amount" to land on the 6b column, and reject the trailing "6b"
+  line-label echo via `_is_form_id_digit`.
+- **Form-ID / line-number echo filter.** Hardened to reject bare
+  digits that are actually part of identifiers (`Form 1040`,
+  `Sch SE`, `OMB No. 1545-0074`, line-label echoes like `25a`),
+  preventing them from being picked as money values.
+- **Wrapped-label value recovery.** Replaced an over-aggressive "prose
+  break" with a targeted "embedded new-row" detector. Legitimate
+  label-continuations like *"term capital gains or losses, ... 7
+  20,637"* now yield the value; loose-layout merges like
+  *"Deduction for- 7 Capital gain..."* still don't pull a foreign
+  row's value into the prior label's slot.
+- **AGI / taxable-income reconciliation pass-through.** `Return` now
+  carries `agi_reported` and `taxable_income_reported` for the
+  recompute step instead of stripping them, exposing engine vs.
+  reported deltas in the math view.
+
+**Result on a real 2020 H&R Block return:** computed-vs-reported total
+tax delta shrunk from $5,584 (pre-fix) to under $700 — the residual
+is engine-side worksheet detail, not parser.
+
+356 tests passing (+5 new tooltip-classifier coverage retained).
+
+---
+
 ## [0.35.0] — 2026
 
 ### PDF extractor diagnostics — per-import log file + missing-line patterns
