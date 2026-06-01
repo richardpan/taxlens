@@ -70,12 +70,21 @@ async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
         tmp_path = Path(tmp.name)
     try:
         row, result, warnings = service.import_file(tmp_path)
+        # Extract import-log basename (if any) from the warnings list so the
+        # UI can render a "View log" link without re-parsing the string.
+        import_log = None
+        for w in warnings:
+            if w.startswith("Import log written to: "):
+                p = Path(w[len("Import log written to: "):].strip())
+                import_log = p.name
+                break
         return {
             "id": row.id,
             "tax_year": row.tax_year,
             "filing_status": row.filing_status,
             "source": row.source,
             "warnings": warnings,
+            "import_log": import_log,
             "result": result.model_dump(mode="json"),
         }
     except ValueError as e:
@@ -243,6 +252,47 @@ def simulate_tlh(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
     if out is None:
         raise HTTPException(404)
     return out
+
+
+# Import-log access ───────────────────────────────────────────────────────────
+# Each PDF import writes a diagnostic log (every AcroForm field, every
+# pattern hit, the final extracted dict). Surface them via the dashboard
+# so users can inspect / share them when reporting missing fields.
+
+@app.get("/api/import-logs")
+def list_import_logs() -> list[dict[str, Any]]:
+    from taxlens.importers.import_log import logs_dir
+    d = logs_dir()
+    out: list[dict[str, Any]] = []
+    if not d.exists():
+        return out
+    for p in sorted(d.glob("import-*.log"), reverse=True)[:200]:
+        try:
+            st = p.stat()
+            out.append({
+                "name": p.name,
+                "size": st.st_size,
+                "modified": int(st.st_mtime),
+            })
+        except OSError:
+            continue
+    return out
+
+
+@app.get("/api/import-logs/{name}")
+def get_import_log(name: str) -> Response:
+    from taxlens.importers.import_log import logs_dir
+    # Hard-guard against path traversal — only allow basenames that match
+    # our own naming convention.
+    if "/" in name or "\\" in name or ".." in name or not name.startswith("import-"):
+        raise HTTPException(400, "invalid log name")
+    p = logs_dir() / name
+    if not p.is_file():
+        raise HTTPException(404)
+    return Response(
+        content=p.read_text(encoding="utf-8"),
+        media_type="text/plain; charset=utf-8",
+    )
 
 
 # Static UI ───────────────────────────────────────────────────────────────────

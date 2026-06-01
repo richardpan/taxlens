@@ -2,6 +2,60 @@
 
 All notable changes to TaxLens.
 
+## [0.35.0] — 2026
+
+### PDF extractor diagnostics — per-import log file + missing-line patterns
+
+Two improvements that close the gap reported by a user testing v0.34.0:
+"More fields parsed than before, but box 1a (W-2 wages) is completely
+missing."
+
+**1. Added IRS-tooltip-friendly patterns for line 1a (and others).**
+The actual IRS fillable 1040 tooltip for line 1a reads *"Total amount
+from Form(s) W-2, box 1 (see instructions)"* — no "1a" prefix, no
+"Wages" word. All prior patterns required one or the other, so the
+AcroForm classifier silently skipped this critical field. New patterns
+match the bare tooltip text directly, and the same fix is applied to:
+
+- Line 1a + 1z (W-2 totals)
+- Line 4b (IRA distributions, taxable amount)
+- Line 5b (pensions, taxable amount)
+- Line 7 (capital gain or loss)
+- Line 8 (other income from Schedule 1)
+
+14 new unit tests in `test_acroform_tooltip_patterns.py` drive the
+classifier with verbatim IRS tooltip strings — fast, reportlab-free
+loop for adding more patterns when users report unmapped fields.
+
+**2. Per-import diagnostic log file.** Every PDF import now writes
+a plain-text log to `~/.taxlens/logs/import-<timestamp>-<filename>.log`
+showing:
+
+- Source path + size
+- Every AcroForm field with `/T` (name), `/TU` (tooltip), raw value,
+  parsed value, target field, and classification status
+  (MAPPED / UNMAPPED / ZERO_SKIPPED)
+- Conflict resolution (when multiple fields map to the same target)
+- Text-extraction pass results per stream
+- Detected tax year / filing status
+- Final extracted dict
+- All warnings
+
+The log path is surfaced in the import response (`import_log` field)
+and the dashboard's import row now includes a **"view log"** link.
+Two new API endpoints serve them: `GET /api/import-logs` (list) and
+`GET /api/import-logs/{name}` (fetch, with path-traversal hardening).
+
+Disable with `TAXLENS_IMPORT_LOG=0`; override location with
+`TAXLENS_LOGS_DIR=/some/path`.
+
+**Total tests:** 351 passing (was 320). New test files:
+- `tests/test_acroform_tooltip_patterns.py` (14)
+- `tests/test_import_log.py` (10)
+- `tests/test_import_log_api.py` (4)
+- `tests/test_visualizations.py` (6, from v0.34.0)
+- `tests/test_release_version_sync.py` (2, from v0.34.1)
+
 ## [0.34.1] — 2026
 
 ### Fix — Release installer assets had stale `0.27.2` filenames

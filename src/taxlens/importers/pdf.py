@@ -182,8 +182,17 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2[^\n]{0,30}?box\s*1",
                                 # Looser: "Form(s) W-2" anywhere on the line.
                                 r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2",
+                                # IRS fillable-PDF tooltip for TY2022+ line 1a
+                                # often omits the "1a" prefix and reads just
+                                # "Total amount from Form(s) W-2, box 1
+                                # (see instructions)". Match the tooltip
+                                # text directly so AcroForm extraction picks
+                                # it up regardless of line label.
+                                r"Total\s+amount\s+from\s+Form\(s\)\s*W-?2",
+                                r"from\s+Form\(s\)\s*W-?2,?\s*box\s*1\b",
                                 # Line 1z is the W-2 totals line on post-2021 1040
                                 r"\b1\s*z\b[^\n]{0,80}?Add\s+lines?\s*1a\s+through\s+1h",
+                                r"Add\s+lines?\s*1a\s+through\s+1h",
                                 # FreeTaxUSA summary-page phrasings
                                 r"Wages,\s*salaries,?\s*tips",
                                 r"Wages\s+and\s+salaries"],
@@ -198,6 +207,8 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\bOrdinary\s+dividends\b"],
     "long_term_capital_gains": [r"Line\s*7\b[^\n]{0,80}?Capital gain",
                                 r"\b7\b[^\n]{0,80}?Capital gain\s+or\s+\(loss\)",
+                                # IRS line 7 tooltip without line prefix
+                                r"Capital\s+gain\s+or\s+\(loss\)\.?\s+Attach\s+Schedule\s*D",
                                 # FreeTaxUSA summary — distinguishes LT vs ST
                                 r"\bLong[-\s]term\s+capital\s+gain",
                                 r"\bNet\s+long[-\s]term\s+capital\s+gain"],
@@ -208,13 +219,19 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)",
                                 r"\bSelf[-\s]employment\s+income"],
     "other_ordinary_income":   [r"Line\s*8\b[^\n]{0,40}?Other income",
-                                r"\b8\b[^\n]{0,40}?(?:Additional|Other) income"],
+                                r"\b8\b[^\n]{0,40}?(?:Additional|Other) income",
+                                # IRS line 8 tooltip (Schedule 1, line 10)
+                                r"Other\s+income\s+from\s+Schedule\s*1"],
     "pension_distributions_taxable": [
                                 r"\b5\s*b\b[^\n]{0,40}?(?:Pensions|Taxable amount)",
-                                r"\bPensions\s+and\s+annuities"],
+                                r"\bPensions\s+and\s+annuities",
+                                # IRS line 5b tooltip
+                                r"Pensions\s+and\s+annuities[^\n]{0,40}?Taxable\s+amount"],
     "ira_distributions_taxable": [
                                 r"\b4\s*b\b[^\n]{0,40}?(?:IRA|Taxable amount)",
-                                r"\bIRA\s+distributions\b[^\n]{0,40}?taxable"],
+                                r"\bIRA\s+distributions\b[^\n]{0,40}?taxable",
+                                # IRS line 4b tooltip
+                                r"IRA\s+distributions[^\n]{0,40}?Taxable\s+amount"],
     "social_security_benefits":[r"\b6\s*a\b[^\n]{0,40}?Social security benefits",
                                 r"\bSocial\s+security\s+benefits"],
     "unemployment_compensation":[r"\bUnemployment\s+compensation"],
@@ -577,6 +594,12 @@ def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) ->
 
 
 def import_pdf(path: Path) -> Imported:
+    from taxlens.importers.import_log import ImportLogger, logging_enabled
+    logger: ImportLogger | None = ImportLogger(source_path=path) if logging_enabled() else None
+    if logger is not None:
+        logger.section("Source")
+        logger.kv("path", str(path))
+
     # PASS 0: AcroForm widgets. If the PDF embeds field values directly
     # (most IRS fillable forms and many vendor exports do), reading them
     # from the form dictionary is dramatically more reliable than scraping
@@ -584,7 +607,7 @@ def import_pdf(path: Path) -> Imported:
     # being inferred from layout. We still run the text-based extractor
     # to fill in any gaps and to detect year/status.
     from taxlens.importers.acroform import extract_acroform_fields, extract_acroform_meta
-    acroform_fields, acroform_warnings = extract_acroform_fields(path)
+    acroform_fields, acroform_warnings = extract_acroform_fields(path, logger=logger)
     acroform_meta = extract_acroform_meta(path) if acroform_fields else {}
 
     default_pages, layout_streams, ocr_used = _extract_text_per_page(path)
@@ -709,6 +732,36 @@ def import_pdf(path: Path) -> Imported:
             f"Skipped {summary_excluded} summary / non-IRS-form page(s) so vendor "
             f"cover totals don't override the actual 1040 values."
         )
+
+    # Capture text-extraction outcomes and final state in the per-import
+    # log, then flush to disk. The log path is appended to warnings so
+    # the dashboard can link to it and so issue-report copy-paste
+    # naturally includes the location.
+    if logger is not None:
+        logger.section("Text-extraction pass")
+        logger.kv("default_fields_extracted", sorted(default_result[0].keys()))
+        for i, lr in enumerate(layout_results):
+            logger.kv(f"layout_stream_{i}_fields", sorted(lr[0].keys()))
+        if layout_only:
+            logger.kv("recovered_by_layout_only", sorted(layout_only))
+        logger.section("Detection")
+        logger.kv("tax_year", tax_year)
+        logger.kv("filing_status", filing_status.value if filing_status else None)
+        logger.kv("qualifying_children", children)
+        logger.kv("ocr_used", ocr_used)
+        logger.kv("summary_pages_excluded", summary_excluded)
+        logger.final_fields(
+            {**fields,
+             "reported_total_tax": reported_total_tax} if reported_total_tax is not None
+            else fields
+        )
+        logger.warnings(warnings)
+        try:
+            log_path = logger.write()
+            warnings.append(f"Import log written to: {log_path}")
+        except OSError as e:
+            warnings.append(f"Could not write import log: {e}")
+
     return Imported(
         ret=ret,
         source="pdf-ocr" if ocr_used else "pdf",

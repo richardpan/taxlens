@@ -173,10 +173,13 @@ async function uploadFiles(files) {
           ? `<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Reconciled ✓</span>`
           : `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Δ $${recon}</span>`;
       const warn = out.warnings && out.warnings.length ? ` · ${out.warnings.length} warning(s)` : '';
+      const logLink = out.import_log
+        ? ` · <a href="/api/import-logs/${encodeURIComponent(out.import_log)}" target="_blank" class="text-sky-600 hover:underline">view log</a>`
+        : '';
       row.innerHTML = `<div class="flex items-center gap-3">
           <span class="text-emerald-600">✓</span>
           <div><div class="font-medium">${f.name}</div>
-            <div class="text-xs text-slate-500">TY ${out.tax_year} · ${out.filing_status.toUpperCase()} · ${out.source}${warn}</div>
+            <div class="text-xs text-slate-500">TY ${out.tax_year} · ${out.filing_status.toUpperCase()} · ${out.source}${warn}${logLink}</div>
           </div></div>
         <div class="flex items-center gap-2">${badge}
           <button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Remove this return"

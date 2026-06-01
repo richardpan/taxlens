@@ -28,7 +28,10 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from taxlens.importers.import_log import ImportLogger
 
 # Re-use the SAME label regexes the text extractor uses so a field whose
 # tooltip is ``"Taxable interest"`` maps to ``interest_income`` exactly
@@ -123,7 +126,11 @@ def _classify_name(name: str) -> str | None:
     return None
 
 
-def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
+def extract_acroform_fields(
+    path: Path,
+    *,
+    logger: "ImportLogger | None" = None,
+) -> tuple[dict[str, Decimal], list[str]]:
     """Read AcroForm widget values from ``path`` and map them to TaxLens
     ``Return`` field names.
 
@@ -144,6 +151,9 @@ def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
     LARGER value wins. This is a deliberate heuristic: IRS forms often
     have a per-W-2 sub-field plus a total field for the same line, and
     the total is what we want. A warning is emitted naming both.
+
+    When ``logger`` is provided, every field encountered is recorded
+    (including unmapped ones) for post-mortem diagnostics.
     """
     try:
         import pypdf  # type: ignore[import-not-found]
@@ -160,11 +170,24 @@ def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
     except Exception:
         return {}, []
     if not fields:
+        if logger is not None:
+            logger.section("AcroForm pass")
+            logger.info("  (no AcroForm dictionary present — skipping)")
         return {}, []
+
+    if logger is not None:
+        logger.section("AcroForm pass")
+        logger.kv("fields_total", len(fields))
 
     warnings: list[str] = []
     out: dict[str, Decimal] = {}
     sources: dict[str, list[tuple[str, Decimal]]] = {}
+    # Track unmapped fields that nonetheless carry non-zero money values.
+    # These are the high-signal candidates for "we should have mapped this
+    # but didn't" — surfacing them as warnings lets users (and us) spot
+    # missing patterns in real-world PDFs without needing to dump every
+    # one of the 100+ fields a typical 1040 PDF contains.
+    unmapped_money: list[tuple[str, str, Decimal]] = []  # (name, tooltip, value)
 
     for raw_name, fd in fields.items():
         try:
@@ -178,16 +201,38 @@ def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
         name_s = str(name) if name else ""
 
         target = _classify_tooltip(tooltip_s) or _classify_name(name_s)
+        money = _parse_money(value)
+
         if not target:
+            if money is not None and money != 0 and tooltip_s:
+                unmapped_money.append((name_s or raw_name, tooltip_s, money))
+            if logger is not None:
+                logger.acroform_field(
+                    name=name_s or raw_name, tooltip=tooltip_s,
+                    raw_value=value, parsed_value=money,
+                    target=None, status="UNMAPPED",
+                )
             continue
 
-        money = _parse_money(value)
         if money is None or money == 0:
             # Zero values are usually placeholder/empty fields; don't let
             # them overwrite a real value found on another field.
+            if logger is not None:
+                logger.acroform_field(
+                    name=name_s or raw_name, tooltip=tooltip_s,
+                    raw_value=value, parsed_value=money,
+                    target=target,
+                    status="ZERO_SKIPPED" if money == 0 else "NO_VALUE",
+                )
             continue
 
         sources.setdefault(target, []).append((name_s or raw_name, money))
+        if logger is not None:
+            logger.acroform_field(
+                name=name_s or raw_name, tooltip=tooltip_s,
+                raw_value=value, parsed_value=money,
+                target=target, status="MAPPED",
+            )
 
     for target, candidates in sources.items():
         if len(candidates) == 1:
@@ -197,6 +242,8 @@ def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
         # double-check on the dashboard if the heuristic guessed wrong.
         candidates.sort(key=lambda x: x[1], reverse=True)
         out[target] = candidates[0][1]
+        if logger is not None:
+            logger.conflict_resolution(target, candidates[0][1], candidates)
         warnings.append(
             f"AcroForm: {target} had {len(candidates)} candidate field(s) "
             f"({', '.join(f'{n}={v}' for n, v in candidates[:4])}); "
@@ -208,6 +255,25 @@ def extract_acroform_fields(path: Path) -> tuple[dict[str, Decimal], list[str]]:
             f"AcroForm contained {len(fields)} field(s) but none could be "
             f"mapped to known IRS lines (no recognizable tooltips or field "
             f"names). Falling back to text extraction."
+        )
+
+    # Diagnostic: if we DID map some fields but missed the critical "wages"
+    # line (line 1a / 1z), surface up to 8 unmapped non-zero tooltips so
+    # the user can tell us which one was the wage figure. This is how we
+    # iterate patterns to cover new vendor/year PDF layouts.
+    critical = {"wages", "agi_reported", "total_tax_reported"}
+    missing_critical = critical - set(out.keys())
+    if missing_critical and unmapped_money:
+        sample = sorted(unmapped_money, key=lambda x: -x[2])[:8]
+        details = "; ".join(
+            f"'{tip[:60]}'={val}" for _, tip, val in sample
+        )
+        warnings.append(
+            f"AcroForm did not map these critical line(s): "
+            f"{sorted(missing_critical)}. Top unmapped non-zero fields by "
+            f"value: {details}. If one of these is your wages/AGI/total "
+            f"tax, file an issue with the tooltip text so we can add a "
+            f"pattern."
         )
 
     return out, warnings
