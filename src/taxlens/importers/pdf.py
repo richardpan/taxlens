@@ -410,6 +410,19 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\b6\s*a\b[^\n]{0,40}?Social\s+security\s+benefits",
                                 ],
     "unemployment_compensation":[r"\bUnemployment\s+compensation"],
+    "hsa_deduction":           [
+                                # Schedule 1 line 13 (TY2019+) / line 25 (TY2018) /
+                                # 1040 line 25 (pre-2018). All share the phrase
+                                # "Health savings account deduction" verbatim and
+                                # all reference Form 8889.
+                                r"\bHealth\s+savings\s+account\s+deduction\b",
+                                r"Form\s*8889\b[^\n]{0,80}?deduction",
+                                r"\bHSA\s+deduction\b",
+                                # Form 8889 line 13 ("HSA deduction. Smaller of
+                                # line 2 or line 12") — when the user includes
+                                # the 8889 itself, this is the canonical value.
+                                r"\b13\b[^\n]{0,80}?HSA\s+deduction",
+                                ],
     "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income",
                                 # Schedule 1 line 26 in FreeTaxUSA
                                 r"\b10\b[^\n]{0,80}?Adjustments to income\s+from\s+Schedule\s*1"],
@@ -751,16 +764,23 @@ _BOX12_ROW = re.compile(
 )
 _TRAD_CODES = {"D", "E", "F", "G", "H", "S"}
 _ROTH_CODES = {"AA", "BB", "EE"}
+# Code W on box 12 is "Employer contributions to a Health Savings Account
+# (including employee pre-tax payroll contributions)". This is INFO-ONLY —
+# already excluded from Box 1 wages, no Schedule 1 adjustment — but
+# important for total HSA balance tracking and the Advisor's HSA-cap rule.
+_HSA_PAYROLL_CODES = {"W"}
 
 def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
     """Return totals across all W-2 forms in the joined PDF text for
-    pre-tax (traditional) and Roth elective deferrals reported in Box 12.
-    Returns {} if no W-2 fingerprint is found.
+    pre-tax (traditional) and Roth elective deferrals reported in Box 12,
+    plus HSA pre-tax payroll contributions (code W). Returns {} if no W-2
+    fingerprint is found.
     """
     if not _W2_FINGERPRINT.search(joined_text):
         return {}
     trad = Decimal(0)
     roth = Decimal(0)
+    hsa_payroll = Decimal(0)
     # Walk line by line, only consider lines that appear to be Box-12 data
     # (line starts with "12a"/"12b"/etc OR appears within ~10 lines after
     # a "Box 12" marker). This avoids picking up "Form 1099-R" code letters
@@ -771,7 +791,7 @@ def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
     def consume_row(raw_line: str) -> bool:
         """Try to pull a code+amount pair from this line. Returns True if
         we matched a known code (used to extend the in-region window)."""
-        nonlocal trad, roth
+        nonlocal trad, roth, hsa_payroll
         matched = False
         # Strict full-line form: "[Box ]?12a D 19,500.00" — possibly the
         # whole line. The regex permits leading "Box " and optional
@@ -808,6 +828,9 @@ def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
             elif code in _ROTH_CODES:
                 roth += v
                 matched = True
+            elif code in _HSA_PAYROLL_CODES:
+                hsa_payroll += v
+                matched = True
         return matched
 
     for raw in lines:
@@ -826,6 +849,11 @@ def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
         out["traditional_401k_contributions"] = trad
     if roth > 0:
         out["roth_401k_contributions"] = roth
+    if hsa_payroll > 0:
+        # Maps to Return.hsa_contributions (employee + employer pre-tax HSA
+        # routed through payroll). NOT the same as hsa_deduction, which is
+        # the post-tax direct contribution claimed on Sch 1.
+        out["hsa_contributions"] = hsa_payroll
     return out
 
 
@@ -1041,7 +1069,7 @@ def import_pdf(path: Path) -> Imported:
             box12_added.append(f"{k}=${int(v):,}")
     if box12_added:
         warnings.append(
-            "Recovered 401(k) elective deferrals from W-2 box 12: "
+            "Recovered pre-tax payroll contributions from W-2 box 12: "
             + ", ".join(box12_added)
         )
 

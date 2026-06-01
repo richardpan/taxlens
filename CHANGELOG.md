@@ -2,6 +2,32 @@
 
 All notable changes to TaxLens.
 
+## [0.37.1] — 2026
+
+### HSA contribution capture (companion to v0.37.0's 401(k) fix)
+
+Two HSA-related fields were silently zero on most imports:
+
+- **`hsa_deduction`** (post-tax direct contributions, Form 8889 line 13
+  → Schedule 1 line 13 adjustment). Added LINE_PATTERNS entries
+  matching the verbatim IRS phrase "Health savings account deduction"
+  plus Form 8889 anchors. Works across TY2015–2025 (the wording is
+  unchanged).
+- **`hsa_contributions`** (pre-tax HSA via payroll, W-2 Box 12 **code
+  W**). Extended the W-2 box-12 parser shipped in v0.37.0 to capture
+  this code. Like 401(k) deferrals, it's already excluded from Box 1
+  wages but is needed by the Advisor's HSA-cap rule and shown in the
+  take-home waterfall.
+
+What-if editor now exposes both fields for manual override.
+
+AcroForm tooltip classifier picks up the standard IRS Sch 1 line 13
+tooltip ("Health savings account deduction. Attach Form 8889").
+
+3 new tests (1 tooltip + 2 box-12 code-W). **369 tests passing.**
+
+---
+
 ## [0.37.0] — 2026
 
 ### 401(k) capture from W-2 box 12 + per-visualization help tooltips

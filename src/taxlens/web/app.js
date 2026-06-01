@@ -944,7 +944,7 @@ function bracketTable(fills) {
 const WHATIF_FIELDS = ['wages','interest_income','ordinary_dividends','qualified_dividends',
   'long_term_capital_gains','short_term_capital_gains','se_income','other_ordinary_income',
   'traditional_401k_contributions','roth_401k_contributions',
-  'hsa_deduction','federal_withholding','estimated_payments','qualifying_children'];
+  'hsa_deduction','hsa_contributions','federal_withholding','estimated_payments','qualifying_children'];
 
 $('#whatifYearPicker').addEventListener('change', renderWhatif);
 $('#whatifReset').addEventListener('click', renderWhatif);

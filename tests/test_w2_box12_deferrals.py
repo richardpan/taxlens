@@ -112,3 +112,24 @@ def test_address_collisions_not_picked_up():
     # as Box-12 codes when no W-2 / Box 12 marker is present.
     text = "John Doe, AA 123 Main St 1234.00"
     assert _extract_w2_box12_deferrals(text) == {}
+
+
+def test_hsa_payroll_code_w():
+    text = """
+    Form W-2 Wage and Tax Statement
+    12a W 4150.00
+    """
+    out = _extract_w2_box12_deferrals(text)
+    assert out["hsa_contributions"] == Decimal("4150.00")
+    assert "traditional_401k_contributions" not in out
+
+
+def test_hsa_payroll_plus_401k_on_same_w2():
+    text = """
+    Form W-2 Wage and Tax Statement
+    12a D 19500.00
+    12b W 7300.00
+    """
+    out = _extract_w2_box12_deferrals(text)
+    assert out["traditional_401k_contributions"] == Decimal("19500.00")
+    assert out["hsa_contributions"] == Decimal("7300.00")

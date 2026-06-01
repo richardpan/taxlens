@@ -84,6 +84,13 @@ def test_irs_line_25a_withholding_tooltip():
     assert _classify_tooltip(tip) == "federal_withholding"
 
 
+def test_sch1_line13_hsa_tooltip():
+    """Schedule 1 line 13 tooltip — 'Health savings account deduction.
+    Attach Form 8889' is the standard IRS phrasing across TY2019+."""
+    tip = "Health savings account deduction. Attach Form 8889"
+    assert _classify_tooltip(tip) == "hsa_deduction"
+
+
 def test_unrelated_tooltip_returns_none():
     """Negative case — a non-money label must not accidentally classify."""
     assert _classify_tooltip("Your first name and middle initial") is None
