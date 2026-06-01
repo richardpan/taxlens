@@ -6,7 +6,21 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - name: Ruff lint (pyflakes + pycodestyle)
+        run: ruff check src tests scripts
+      - name: Ruff format check
+        run: ruff format --check src tests scripts
+        continue-on-error: true
+
   pytest:
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
