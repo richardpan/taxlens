@@ -2,6 +2,23 @@
 
 All notable changes to TaxLens.
 
+## [0.42.2] — 2026
+
+### Federal bracket fill: surface the *next* bracket
+
+The marginal-rate pill on the bracket-fill chart already pointed at
+the bracket the user's last taxable dollar landed in. Added a second,
+forward-looking pill above the bracket immediately above it, showing:
+
+  * the next bracket's rate, and
+  * how many more dollars of taxable income would push the filer
+    into it (i.e. remaining headroom in the current marginal
+    bracket).
+
+Slate-colored with a dashed arrow so it reads as forward-looking
+rather than a present-tense annotation. Hidden gracefully when the
+filer is already in the top bracket or has zero taxable income.
+
 ## [0.42.1] — 2026
 
 ### Trends YoY: Taxable income delta is now green when up

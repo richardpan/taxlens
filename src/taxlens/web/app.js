@@ -615,6 +615,21 @@ async function renderYearDetail() {
     if (Number(fills[i].amount_in_bracket) > 0) { marginalIdx = i; break; }
   }
   const marginalRate = marginalIdx >= 0 ? Number(fills[marginalIdx].rate) : 0;
+  // Next bracket = the one immediately above the marginal one. If the
+  // user is already in the top bracket (or has no taxable income at all)
+  // there's nothing to surface.
+  const nextIdx = (marginalIdx >= 0 && marginalIdx + 1 < fills.length) ? marginalIdx + 1 : -1;
+  const nextRate = nextIdx >= 0 ? Number(fills[nextIdx].rate) : 0;
+  // Headroom = how many more taxable-income dollars before crossing into
+  // the next bracket. The marginal bracket is partially filled; the
+  // remaining capacity is (upper − lower) − amount_in_bracket.
+  let headroomToNext = 0;
+  if (nextIdx >= 0) {
+    const m = fills[marginalIdx];
+    if (m.upper != null) {
+      headroomToNext = Math.max(0, (Number(m.upper) - Number(m.lower || 0)) - Number(m.amount_in_bracket));
+    }
+  }
   const marginalPlugin = {
     id: 'marginalMarker',
     afterDatasetsDraw(chart) {
@@ -640,6 +655,60 @@ async function renderYearDetail() {
       ctx.fillStyle = '#0f172a';
       ctx.beginPath();
       const px = x - w/2, py = y - 32;
+      const rr = 8;
+      ctx.moveTo(px + rr, py);
+      ctx.arcTo(px + w, py, px + w, py + 18, rr);
+      ctx.arcTo(px + w, py + 18, px, py + 18, rr);
+      ctx.arcTo(px, py + 18, px, py, rr);
+      ctx.arcTo(px, py, px + w, py, rr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, x, py + 13);
+      ctx.restore();
+    }
+  };
+  // "Next" pill — highlights the bracket immediately above the marginal
+  // one so the filer can see what rate the next earned dollar would hit.
+  // Slate-colored (not solid black) to read as forward-looking rather
+  // than a present-tense annotation.
+  const nextBracketPlugin = {
+    id: 'nextBracketMarker',
+    afterDatasetsDraw(chart) {
+      if (nextIdx < 0) return;
+      const meta = chart.getDatasetMeta(1);  // headroom dataset (top of stack)
+      const bar = meta.data[nextIdx];
+      if (!bar) return;
+      const { x, y } = bar.getProps(['x','y'], true);
+      const ctx = chart.ctx;
+      ctx.save();
+      // Dashed downward arrow
+      ctx.strokeStyle = '#64748b';  // slate-500
+      ctx.fillStyle = '#64748b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(x, y - 28);
+      ctx.lineTo(x, y - 8);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 10);
+      ctx.lineTo(x + 4, y - 10);
+      ctx.lineTo(x, y - 2);
+      ctx.closePath();
+      ctx.fill();
+      // Pill: "next +Y% (in $Xk)" — slate background, white text.
+      const headroomLabel = headroomToNext > 0
+        ? ` in $${headroomToNext >= 1000 ? (headroomToNext/1000).toFixed(0)+'k' : headroomToNext.toFixed(0)}`
+        : '';
+      const txt = `next ${(nextRate*100).toFixed(0)}%${headroomLabel}`;
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+      const w = ctx.measureText(txt).width + 12;
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath();
+      const px = x - w/2, py = y - 46;
       const rr = 8;
       ctx.moveTo(px + rr, py);
       ctx.arcTo(px + w, py, px + w, py + 18, rr);
@@ -689,7 +758,7 @@ async function renderYearDetail() {
     },
     options: {
       maintainAspectRatio: false,
-      layout: { padding: { top: 36 } },
+      layout: { padding: { top: 56 } },
       plugins: {
         legend: { display: true, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
@@ -728,7 +797,7 @@ async function renderYearDetail() {
         y: { stacked: true, ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } }
       }
     },
-    plugins: [marginalPlugin],
+    plugins: [marginalPlugin, nextBracketPlugin],
   });
 
   // Tax breakdown cards
