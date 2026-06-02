@@ -268,3 +268,15 @@ salt_cap:
     mfs:    5000
     hoh:    10000
     qss:    10000
+
+# Non-itemizer charitable deduction (TCDTRA sec 212) - 1040 line 12b.
+# Below-the-line: reduces TAXABLE income, not AGI.
+# Cap doubled for MFJ in TY2021 only.
+non_itemizer_charity:
+  placement: below_line
+  cap:
+    single: 300
+    mfj:    600
+    mfs:    300
+    hoh:    300
+    qss:    600

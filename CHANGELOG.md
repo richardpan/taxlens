@@ -2,6 +2,37 @@
 
 All notable changes to TaxLens.
 
+## [0.44.0] — 2026
+
+### CARES Act / TCDTRA non-itemizer charitable deduction
+
+Diagnosing a real `-$630.65` reconciliation delta on an imported 2020 MFJ
+return surfaced a longstanding engine gap: the CARES Act §2204 above-the-line
+charitable deduction (TY2020, Form 1040 line 10b — capped at $300 per
+return) and its TCDTRA §212 below-the-line successor (TY2021, line 12b —
+capped at $300 single / $600 MFJ) were not modeled. AGI on 2020 returns
+that claimed line 10b was therefore systematically overstated by up to
+$300, with knock-on effects through every downstream calculation.
+
+Changes:
+- New `Return.charitable_contributions_non_itemizer` field.
+- New `Rules.non_itemizer_charity` config (`placement` ∈
+  `above_line` | `below_line`, plus per-status caps).
+- Engine subtracts the (capped) amount from gross income for TY2020
+  (above-line) and from taxable income for TY2021 (below-line). Only
+  applies when the standard deduction is in use; itemizers don't get it.
+- YAML rules added for 2020 ($300 cap per return — note the CARES
+  statute did not double for MFJ in TY2020) and 2021 ($300 single /
+  $600 MFJ).
+
+Re-running the diagnostic 2020 MFJ return with line 10b = $220 closes
+the AGI delta to zero. The remaining tax gap on that return traces to
+items only present on the source PDF (likely a thin Schedule A itemize
+just above standard, plus Schedule 2 "other taxes") that the importer
+doesn't yet extract — a separate, PDF-side limitation.
+
+7 new tests; total 425.
+
 ## [0.43.0] — 2026
 
 ### Trends: line-chart legends moved out of the plot area

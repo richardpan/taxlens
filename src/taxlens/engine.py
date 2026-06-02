@@ -748,6 +748,13 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
     rec.ctx.ira_deduction_allowed = ira_deduction_allowed
     rec.ctx.ira_deduction_disallowed = ira_deduction_disallowed
 
+    # CARES Act §2204 / TCDTRA §212 — non-itemizer charitable deduction.
+    # Only applied when the standard deduction is being used; the rule's
+    # `placement` decides whether it reduces AGI (2020) or taxable income
+    # (2021). For the above-the-line path we add it into `adjustments` so
+    # it shows up in the AGI step alongside other Sch 1 items.
+    cares_charity_atl = _compute_non_itemizer_charity_atl(ret, rules)
+
     adjustments = (
         ret.hsa_deduction
         + ira_deduction_allowed
@@ -755,10 +762,11 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
         + half_se_tax
         + educator_ded
         + sli_ded
+        + cares_charity_atl
     )
     rec.add(
         "Above-the-line adjustments",
-        "hsa + trad_ira_deductible + other + ½ se_tax + educator + student_loan_int",
+        "hsa + trad_ira_deductible + other + ½ se_tax + educator + student_loan_int + cares_charity",
         {
             "hsa": ret.hsa_deduction,
             "trad_ira_deductible": ira_deduction_allowed,
@@ -766,12 +774,39 @@ def _compute_agi(ret: Return, half_se_tax: Decimal, sch_e_net: Decimal, rules: R
             "half_se_tax": half_se_tax,
             "educator": educator_ded,
             "student_loan_interest": sli_ded,
+            "cares_charity_above_line": cares_charity_atl,
         },
         adjustments,
     )
     agi = gross - adjustments
     rec.add("AGI", "gross − adjustments", {"gross": gross, "adjustments": adjustments}, agi)
     return agi, carryforward_out
+
+
+def _compute_non_itemizer_charity_atl(ret: Return, rules: Rules) -> Decimal:
+    """CARES Act §2204 — TY2020 above-the-line charitable deduction for
+    taxpayers taking the standard deduction. Capped at $300 per return.
+
+    For TY2021 the same provision (extended by TCDTRA §212) was reclassified
+    as a below-the-line deduction; that path is handled in
+    `_compute_taxable_income`. Returns 0 outside the above-the-line years.
+    """
+    paid = ret.charitable_contributions_non_itemizer
+    if paid <= 0:
+        return ZERO
+    cfg = rules.non_itemizer_charity
+    if cfg is None or cfg.get("placement") != "above_line":
+        return ZERO
+    # Only applies when standard deduction is being used. We approximate
+    # by checking that no explicit itemized total was supplied; the engine
+    # will independently fall back to the standard deduction in
+    # `_compute_taxable_income` when the auto-composed itemized doesn't
+    # beat std, but that's the same condition the IRS rule enforces.
+    if ret.itemized_deductions is not None and ret.itemized_deductions > 0:
+        return ZERO
+    cap_by_status = cfg.get("cap", {})
+    cap = Decimal(str(cap_by_status.get(_status(ret), 0)))
+    return _money(min(paid, cap))
 
 
 def _compute_educator_deduction(
@@ -1064,6 +1099,30 @@ def _compute_taxable_income(
             pe_used,
         )
     taxable = max(ZERO, agi - deduction - pe_used)
+
+    # CARES Act §2204 / TCDTRA §212 — TY2021 below-the-line non-itemizer
+    # charity deduction (1040 line 12b). Only when standard deduction is
+    # used; capped per filing status by rules.non_itemizer_charity.
+    if (
+        kind == "standard"
+        and rules.non_itemizer_charity is not None
+        and rules.non_itemizer_charity.get("placement") == "below_line"
+        and ret.charitable_contributions_non_itemizer > 0
+    ):
+        cap_by_status = rules.non_itemizer_charity.get("cap", {})
+        cap = Decimal(str(cap_by_status.get(_status(ret), 0)))
+        cares_below = min(ret.charitable_contributions_non_itemizer, cap)
+        taxable = max(ZERO, taxable - cares_below)
+        rec.add(
+            "Non-itemizer charitable deduction (CARES/TCDTRA, line 12b)",
+            "min(charity_paid, status_cap)",
+            {
+                "paid": ret.charitable_contributions_non_itemizer,
+                "cap": cap,
+                "applied": cares_below,
+            },
+            cares_below,
+        )
 
     taxable, nol_used, nol_out, nol_lots_out, nol_expired = _apply_nol(
         ret, taxable, rules, rec

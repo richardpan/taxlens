@@ -286,6 +286,16 @@ class Return(BaseModel):
     student_loan_interest_paid: Decimal = Decimal(0)  # Sch 1 line 21; engine caps at $2500 and phases out by MAGI
     educator_expenses: Decimal = Decimal(0)           # Sch 1 line 11; capped per year ($250→$300 in 2022+)
 
+    # CARES Act §2204 / TCDTRA §212 — charitable contribution deduction for
+    # non-itemizers, valid only for TY2020 and TY2021.
+    #   - 2020: 1040 line 10b — ABOVE-the-line, capped at $300 per return.
+    #   - 2021: 1040 line 12b — BELOW-the-line, capped at $300 single /
+    #     $600 MFJ.
+    # Engine consults Rules.non_itemizer_charity to decide placement and cap;
+    # only applies when the standard deduction is used. Outside 2020-2021 the
+    # field is silently ignored (no rule → no effect).
+    charitable_contributions_non_itemizer: Decimal = Decimal(0)
+
     # Deduction choice
     itemized_deductions: Decimal | None = None   # None → use standard deduction
 
@@ -513,6 +523,12 @@ class Rules(BaseModel):
     # Educator expense deduction (§62(a)(2)(D)). When None, no cap enforced.
     #   {per_educator_cap: 300}  # doubled on MFJ when both spouses are educators
     educator_expense: dict[str, Any] | None = None
+    # CARES Act §2204 / TCDTRA §212 — non-itemizer charity deduction.
+    # Only TY2020 (above-the-line, cap $300) and TY2021 (below-the-line,
+    # cap $300 single / $600 MFJ) carry a rule. Schema:
+    #   {placement: 'above_line' | 'below_line',
+    #    cap: {single, mfj, mfs, hoh, qss}}  # per-status caps
+    non_itemizer_charity: dict[str, Any] | None = None
     # Form 2441 — Child & Dependent Care Credit. When None, no credit.
     #   {expense_cap_one: 3000, expense_cap_two_plus: 6000,
     #    rate_tiers: [[agi_limit, rate], ...],  # walked low-to-high

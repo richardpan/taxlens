@@ -243,3 +243,15 @@ salt_cap:
     mfs:    5000
     hoh:    10000
     qss:    10000
+
+# Non-itemizer charitable deduction (CARES Act sec 2204) - 1040 line 10b.
+# Above-the-line: reduces AGI. $300 cap per RETURN regardless of status
+# (the CARES Act statute did not double for MFJ in TY2020; that came in 2021).
+non_itemizer_charity:
+  placement: above_line
+  cap:
+    single: 300
+    mfj:    300
+    mfs:    150
+    hoh:    300
+    qss:    300
