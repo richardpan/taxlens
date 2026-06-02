@@ -2,6 +2,29 @@
 
 All notable changes to TaxLens.
 
+## [0.40.1] — 2026
+
+### Trends-page visualization fixes
+
+- **Year-over-year table** now renders deltas inline next to each
+  year's value (e.g. `$98,420 (+$3,210)`) instead of as a separate
+  trailing column per delta. Color semantics are now metric-aware:
+  green = "this change is good for you," red = "this change is bad."
+  For income / credits / refund, an increase is green; for taxes /
+  taxable income / effective rate, a decrease is green.
+- **Effective vs. Marginal Rate** chart on the Trends tab was always
+  showing 0% for the marginal line because the result object doesn't
+  carry a top-level `marginal_rate` field. Now derived from
+  `ordinary_bracket_fills` (the rate of the highest bracket that
+  actually had dollars in it — same source the Year-detail
+  bracket-fill chart uses).
+- **Acronym-aware tooltips.** Every help tooltip that mentions a tax
+  acronym (NIIT, AMT, SE, Additional Medicare, APTC, LTCG, STCG,
+  FTC, NOL) now expands the acronym and gives a one-sentence
+  explanation of what that tax is and roughly when it applies. So
+  hovering "Tax composition" on either the Year-detail or Trends
+  tab now teaches what each slice means.
+
 ## [0.40.0] — 2026
 
 ### TY 2010 - 2014 federal rules (pre-TCJA, pre-ATRA)

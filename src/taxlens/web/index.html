@@ -121,19 +121,19 @@
         <canvas id="rateLine" height="180"></canvas>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="font-semibold mb-3" data-help="Donut breakdown of every dollar of tax owed in the most recent year: ordinary income tax, capital-gains tax, SE tax, NIIT, Additional Medicare, and state. Hover slices for exact amounts.">Tax composition (latest year)</div>
+        <div class="font-semibold mb-3" data-help="Donut breakdown of every dollar of tax owed in the most recent year. Categories: ordinary income tax (regular bracket-walk on wages, interest, non-qualified dividends, STCG); capital-gains tax (preferential 0/15/20% rates on LTCG and qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net self-employment earnings, paid in lieu of payroll tax); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k single / $250k MFJ MAGI); Additional Medicare (0.9% on Medicare wages above $200k single / $250k MFJ); and state. Hover slices for exact amounts.">Tax composition (latest year)</div>
         <canvas id="taxDonut" height="180"></canvas>
       </div>
       <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="font-semibold" data-help="Stacked bars showing every dollar of federal + state liability split by tax type (ordinary income, capital gains, SE, NIIT, Add'l Medicare, state) year over year. Use to see which tax category drives the most of your bill.">Tax composition by year</div>
+          <div class="font-semibold" data-help="Stacked bars showing every dollar of federal + state liability split by tax type, year over year. Categories: ordinary (regular bracket tax on wages/interest/STCG); capital gains (preferential 0/15/20% rates on LTCG and qualified dividends); SE (Self-Employment tax — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Add'l Medicare (0.9% on Medicare wages above $200k/$250k); state. Use to see which tax category drives the most of your bill.">Tax composition by year</div>
           <div class="text-xs text-slate-500">Stacked: every dollar of federal + state liability, year over year</div>
         </div>
         <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
       <div id="carryCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="font-semibold" data-help="End-of-year balances for every carryforward bucket: capital losses, NOLs, AMT credit, foreign tax credit, charitable contribution carryovers, and IRA basis. Hover bars to see expiration windows (FTC > 10 years, pre-TCJA NOL > 20 years).">Carryforward balances by year</div>
+          <div class="font-semibold" data-help="End-of-year balances for every carryforward bucket. Capital losses ($3k/year max offset against ordinary income, rest carries forward indefinitely); NOLs (Net Operating Losses — business losses carried to future years); AMT credit (refunds AMT paid on timing differences in earlier years); FTC (Foreign Tax Credit — foreign income tax paid that you couldn't use this year, expires after 10 years); charitable contribution carryovers (5-year limit); IRA basis (after-tax contributions tracked on Form 8606). Hover bars to see expiration windows.">Carryforward balances by year</div>
           <div class="text-xs text-slate-500">Capital loss · NOL · AMT credit · Foreign tax credit · Charitable · IRA basis — end-of-year balances. Hover for expirations (FTC >10y, pre-TCJA NOL >20y).</div>
         </div>
         <div class="relative h-64"><canvas id="carryChart"></canvas></div>
@@ -170,7 +170,7 @@
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
       <div class="flex items-baseline justify-between mb-3">
-        <div class="font-semibold" data-help="Sankey diagram: each income source on the left flows into one of the tax pools on the right (ordinary income tax, qualified-dividend/LTCG tax, SE tax, NIIT). Flow widths are proportional to dollars — wider ribbons = more dollars.">Income sources → tax buckets</div>
+        <div class="font-semibold" data-help="Sankey diagram: each income source on the left flows into one of the tax pools on the right. Tax pools: ordinary income tax (regular bracket-walk on wages/interest/STCG); qualified-dividend / LTCG tax (preferential 0/15/20% rates on long-term gains and qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net self-employment earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI). Flow widths are proportional to dollars — wider ribbons = more dollars.">Income sources → tax buckets</div>
         <div class="text-xs text-slate-500">Flow widths are proportional to dollars</div>
       </div>
       <div id="sankey" class="w-full"></div>
@@ -180,7 +180,7 @@
       <svg id="deductionWaterfall" viewBox="0 0 800 280" class="w-full" style="max-height:340px"></svg>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax: ordinary income tax, capital-gains tax, SE tax, NIIT, Additional Medicare, state, and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
+      <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax. Categories: ordinary income tax (bracket-walk on wages/interest/STCG); capital-gains tax (preferential 0/15/20% rates on LTCG + qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Additional Medicare (0.9% on Medicare wages above $200k/$250k); state; and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
       <div id="taxBreakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"></div>
     </div>
   </div>
@@ -195,7 +195,7 @@
   <p class="text-slate-500 mb-6">Every step of the computation, in order.</p>
   <div id="mathSteps" class="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100"></div>
   <div id="mathBrackets" class="mt-6 bg-white rounded-2xl border border-slate-200 p-5">
-    <div class="font-semibold mb-3" data-help="Walks every federal bracket in order, showing how much of your taxable income filled each bracket and the tax owed on that slice. Qualified dividends + LTCG are shown separately because they're taxed at preferential rates stacked above ordinary income.">Bracket walk</div>
+    <div class="font-semibold mb-3" data-help="Walks every federal bracket in order, showing how much of your taxable income filled each bracket and the tax owed on that slice. Qualified dividends + LTCG (long-term capital gains, held > 1 year) are shown separately because they're taxed at preferential 0/15/20% rates — they stack on top of ordinary income but use their own bracket schedule.">Bracket walk</div>
     <div id="ordinaryBrackets"></div>
     <div id="qualifiedBracketsSection" class="mt-6 hidden">
       <div class="font-medium mb-2">Qualified dividends + LTCG (stacked above ordinary)</div>
@@ -342,7 +342,7 @@
       <svg id="trendsStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-      <div class="font-semibold mb-2" data-help="Stacked area of every dollar of federal + state liability by tax category (ordinary, capital gains, SE, NIIT, Add'l Medicare, state) over the years imported.">Tax composition by year</div>
+      <div class="font-semibold mb-2" data-help="Stacked area of every dollar of federal + state liability by tax category, over the years imported. Categories: ordinary (regular bracket tax on wages/interest/STCG); capital gains (preferential rates on LTCG and qualified dividends); SE (Self-Employment tax — 15.3% Social Security + Medicare on net SE earnings); AMT add-on (Alternative Minimum Tax — a parallel calculation that ensures high earners with lots of preference items pay at least 26%/28%); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Add'l Medicare (0.9% on Medicare wages above $200k/$250k); Excess APTC (Advance Premium Tax Credit repayment if you under-estimated income on the marketplace); state.">Tax composition by year</div>
       <svg id="trendsTaxStack" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
@@ -360,7 +360,7 @@
       <svg id="trendsCarryVintages" viewBox="0 0 800 360" class="w-full"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-      <div class="font-semibold mb-2" data-help="Side-by-side table showing the percentage change in every major line (AGI, taxable income, total tax, effective rate, etc.) from one year to the next.">Year-over-year changes</div>
+      <div class="font-semibold mb-2" data-help="Side-by-side table showing each major line (AGI, taxable income, total tax, effective rate, etc.) with the year-over-year delta in parentheses next to each year. Color coding: green = the change is good for you, red = the change is bad. Direction depends on the metric — for income / credits / refund, an increase is good (green); for taxes / taxable income / effective rate, a decrease is good (green).">Year-over-year changes</div>
       <div id="trendsYoyTable" class="overflow-x-auto text-sm"></div>
     </div>
   </div>
@@ -369,7 +369,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.40.0
+  TaxLens · local-first · v0.40.1
 </footer>
 
 <script src="/static/app.js"></script>

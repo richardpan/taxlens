@@ -1609,7 +1609,17 @@ async function renderTrends() {
     const a = Number(f.result.agi) || 1;
     return Number(f.result.total_tax) / a * 100;
   });
-  const marg = fulls.map(f => Number(f.result.marginal_rate || 0) * 100);
+  // Marginal rate = rate of the last ordinary bracket that actually had
+  // dollars in it. The result object doesn't carry a top-level
+  // `marginal_rate` field, so derive it from `ordinary_bracket_fills`
+  // (same source the Year-detail bracket-fill chart uses).
+  const marg = fulls.map(f => {
+    const fills = f.result.ordinary_bracket_fills || [];
+    for (let i = fills.length - 1; i >= 0; i--) {
+      if (Number(fills[i].amount_in_bracket) > 0) return Number(fills[i].rate) * 100;
+    }
+    return 0;
+  });
   drawLineChart('trendsRates', years, [
     { label: 'Effective %', data: eff,  color: '#0ea5e9' },
     { label: 'Marginal %',  data: marg, color: '#f59e0b' },
@@ -1649,32 +1659,41 @@ async function renderTrends() {
   }));
   drawStackedBars('trendsTaxStack', years, taxSeries);
 
-  // YoY delta table
+  // YoY table — deltas inline alongside each year's value.
+  // `goodWhen: 'up'` means an increase is good (income, credits, refund) →
+  // green for ↑, red for ↓. `goodWhen: 'down'` is the inverse (taxes,
+  // taxable income, effective rate) → red for ↑, green for ↓.
   const yoyRows = [
-    { label: 'AGI',           pick: f => Number(f.result.agi) },
-    { label: 'Taxable income',pick: f => Number(f.result.taxable_income) },
-    { label: 'Total tax',     pick: f => Number(f.result.total_tax) },
-    { label: 'Effective rate',pick: f => { const a = Number(f.result.agi) || 1; return Number(f.result.total_tax) / a * 100; }, isPct: true },
-    { label: 'Refund / owed', pick: f => Number(f.result.refund_or_owed) },
-    { label: 'Wages',         pick: f => Number(f.return.wages || 0) },
-    { label: 'Cap gains (LT)',pick: f => Number(f.return.long_term_capital_gains || 0) },
-    { label: 'Credits',       pick: f => Number(f.result.credits || 0) },
+    { label: 'AGI',           pick: f => Number(f.result.agi),                                                                          goodWhen: 'up'   },
+    { label: 'Taxable income',pick: f => Number(f.result.taxable_income),                                                               goodWhen: 'down' },
+    { label: 'Total tax',     pick: f => Number(f.result.total_tax),                                                                    goodWhen: 'down' },
+    { label: 'Effective rate',pick: f => { const a = Number(f.result.agi) || 1; return Number(f.result.total_tax) / a * 100; }, isPct: true, goodWhen: 'down' },
+    { label: 'Refund / owed', pick: f => Number(f.result.refund_or_owed),                                                               goodWhen: 'up'   },
+    { label: 'Wages',         pick: f => Number(f.return.wages || 0),                                                                   goodWhen: 'up'   },
+    { label: 'Cap gains (LT)',pick: f => Number(f.return.long_term_capital_gains || 0),                                                 goodWhen: 'up'   },
+    { label: 'Credits',       pick: f => Number(f.result.credits || 0),                                                                 goodWhen: 'up'   },
   ];
   const head = '<tr class="text-slate-500"><th class="text-left py-1 pr-3">Metric</th>' +
     years.map(y => `<th class="text-right pr-3">${y}</th>`).join('') +
-    years.slice(1).map((y, i) => `<th class="text-right pr-3">Δ ${years[i]}→${y}</th>`).join('') +
     '</tr>';
   const body = yoyRows.map(row => {
     const vals = fulls.map(row.pick);
-    const cells = vals.map(v => `<td class="text-right pr-3">${row.isPct ? v.toFixed(2)+'%' : fmt(v)}</td>`);
-    const deltas = vals.slice(1).map((v, i) => {
-      const d = v - vals[i];
-      const cls = d > 0 ? 'text-rose-600' : d < 0 ? 'text-emerald-600' : 'text-slate-400';
+    const cells = vals.map((v, i) => {
+      const valTxt = row.isPct ? v.toFixed(2) + '%' : fmt(v);
+      if (i === 0) {
+        return `<td class="text-right pr-3 whitespace-nowrap">${valTxt}</td>`;
+      }
+      const d = v - vals[i - 1];
+      let cls = 'text-slate-400';
+      if (d !== 0) {
+        const isGood = (d > 0) === (row.goodWhen === 'up');
+        cls = isGood ? 'text-emerald-600' : 'text-rose-600';
+      }
       const sign = d > 0 ? '+' : '';
-      const txt = row.isPct ? `${sign}${d.toFixed(2)} pp` : `${sign}${fmt(d)}`;
-      return `<td class="text-right pr-3 ${cls}">${txt}</td>`;
+      const dTxt = row.isPct ? `${sign}${d.toFixed(2)} pp` : `${sign}${fmt(d)}`;
+      return `<td class="text-right pr-3 whitespace-nowrap">${valTxt} <span class="${cls} text-xs">(${dTxt})</span></td>`;
     });
-    return `<tr class="border-t border-slate-100"><td class="py-1 pr-3 font-medium">${row.label}</td>${cells.join('')}${deltas.join('')}</tr>`;
+    return `<tr class="border-t border-slate-100"><td class="py-1 pr-3 font-medium">${row.label}</td>${cells.join('')}</tr>`;
   }).join('');
   document.getElementById('trendsYoyTable').innerHTML =
     `<table class="w-full"><thead>${head}</thead><tbody>${body}</tbody></table>`;
