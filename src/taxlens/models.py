@@ -111,6 +111,10 @@ class Return(BaseModel):
     k1_short_term_gains: Decimal = Decimal(0)
     k1_section_199a_qbi: Decimal = Decimal(0)      # for QBI deduction (Form 8995)
     k1_is_sstb: bool = False                       # specified service trade/business flag
+    qualified_reit_ptp_dividends: Decimal = Decimal(0)  # Form 8995 line 6 — Section 199A
+                                                        # REIT/PTP dividends (taxed as
+                                                        # ordinary divs but eligible for
+                                                        # the 20% QBI deduction)
 
     # Retirement / health contributions — used both for AGI math and the advisor
     traditional_401k_contributions: Decimal = Decimal(0)   # already excluded from W-2 box 1

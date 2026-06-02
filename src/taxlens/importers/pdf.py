@@ -213,10 +213,27 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
         if money_matches:
             picked = _pick_money(tail, money_matches)
             if picked is not None:
-                try:
-                    return _money(picked.group(0))
-                except InvalidOperation:
-                    pass
+                # Guard against trailing line-number echo with NO value
+                # column. E.g. Form 8889 line 13 when the user has no
+                # personal HSA contribution renders as
+                #     "13 HSA deduction (see instructions). . . . . . . 13"
+                # — the trailing "13" is the line-number echo column,
+                # not a $13 deduction. If the picked match is a bare
+                # 1-2 digit integer at end-of-line AND equals the
+                # leading line-number on this same line, treat as no
+                # value and fall through to the next-line scan.
+                picked_str = picked.group(0).strip()
+                is_echo = False
+                if re.fullmatch(r"\d{1,2}", picked_str):
+                    if tail[picked.end():].strip() == "":
+                        m_lead = re.match(r"\s*(\d{1,2})[a-z]?\s", line)
+                        if m_lead and m_lead.group(1) == picked_str:
+                            is_echo = True
+                if not is_echo:
+                    try:
+                        return _money(picked.group(0))
+                    except InvalidOperation:
+                        pass
         # Same-line fallback failed — scan up to 5 next non-empty lines,
         # skipping pure noise.
         for j in range(i + 1, min(i + 6, len(lines))):
@@ -269,9 +286,9 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
 
 
 LINE_PATTERNS: dict[str, list[str]] = {
-    "wages":                   [r"Line\s*1[az]?\s+Wages",
-                                r"\b1\s*[az]?\b[^\n]{0,40}?Wages",
-                                # Actual IRS 1040 line 1a phrasing — no "Wages" word
+    "wages":                   [# Actual IRS 1040 line 1a phrasing (strongest, try first
+                                # so Form 8959 "1 Medicare wages and tips from Form W-2,
+                                # box 5" can't preempt it).
                                 r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2[^\n]{0,30}?box\s*1",
                                 # Looser: "Form(s) W-2" anywhere on the line.
                                 r"\b1\s*a\b[^\n]{0,80}?Form\(s\)\s*W-?2",
@@ -286,9 +303,15 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # Line 1z is the W-2 totals line on post-2021 1040
                                 r"\b1\s*z\b[^\n]{0,80}?Add\s+lines?\s*1a\s+through\s+1h",
                                 r"Add\s+lines?\s*1a\s+through\s+1h",
+                                r"Line\s*1[az]?\s+Wages",
                                 # FreeTaxUSA summary-page phrasings
                                 r"Wages,\s*salaries,?\s*tips",
-                                r"Wages\s+and\s+salaries"],
+                                r"Wages\s+and\s+salaries",
+                                # Last-resort loose pattern. Negative lookahead
+                                # excludes Form 8959 ("Medicare wages...box 5")
+                                # and Form 8919 contexts so we don't grab
+                                # Box-5 Medicare wages instead of Box-1 wages.
+                                r"\b1\s*[az]?\b(?![^\n]*Medicare\s+wages)(?![^\n]*box\s*5)[^\n]{0,40}?Wages"],
     "interest_income":         [r"Line\s*2b\b[^\n]{0,40}?Taxable interest",
                                 r"\b2\s*b\b[^\n]{0,40}?Taxable interest",
                                 # Loose fallback (FreeTaxUSA-summary phrasing).
@@ -428,6 +451,14 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\b10\b[^\n]{0,80}?Adjustments to income\s+from\s+Schedule\s*1"],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
+    "qualified_reit_ptp_dividends": [
+                                # Form 8995 line 6 — Qualified REIT dividends
+                                # and publicly traded partnership (PTP) income.
+                                # These are taxed as ordinary dividends but
+                                # eligible for the 20% Section 199A deduction.
+                                r"Qualified\s+REIT\s+dividends\s+and\s+(?:publicly\s+traded\s+partnership|PTP)",
+                                r"\b6\b[^\n]{0,80}?REIT\s+dividends",
+                                ],
     "agi_reported":            [r"Line\s*11\b[^\n]{0,40}?Adjusted gross income",
                                 r"\b11\b[^\n]{0,80}?Adjusted gross income",
                                 r"\bAdjusted\s+gross\s+income\b"],

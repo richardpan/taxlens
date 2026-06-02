@@ -317,7 +317,11 @@ def _compute_qbi(ret: Return, taxable_before_qbi: Decimal, rules: Rules, rec: _S
         + (ret.se_income if ret.se_income > 0 else ZERO)
         + (ret.rental_net_income if ret.rental_net_income > 0 else ZERO)
     )
-    if qbi_eligible <= 0:
+    # Section 199A REIT/PTP dividends (Form 8995 line 6) qualify for the
+    # 20% deduction without SSTB phaseout, so they're added AFTER the
+    # SSTB scaling below.
+    qbi_reit_ptp = ret.qualified_reit_ptp_dividends if ret.qualified_reit_ptp_dividends > 0 else ZERO
+    if qbi_eligible <= 0 and qbi_reit_ptp <= 0:
         return ZERO
 
     cfg = rules.qbi or {}
@@ -339,13 +343,14 @@ def _compute_qbi(ret: Return, taxable_before_qbi: Decimal, rules: Rules, rec: _S
         ret.long_term_capital_gains + ret.qualified_dividends + ret.k1_long_term_gains
         + ret.k1_qualified_dividends
     )
-    cap1 = qbi_eligible * rate
+    cap1 = (qbi_eligible + qbi_reit_ptp) * rate
     cap2 = max(ZERO, (taxable_before_qbi - net_cap_gain)) * rate
     qbi_ded = min(cap1, cap2)
     rec.add(
         "QBI deduction (Section 199A)",
-        "min(0.20 × QBI, 0.20 × (taxable − net cap gain))",
-        {"qbi_eligible": qbi_eligible, "taxable": taxable_before_qbi, "net_cap_gain": net_cap_gain},
+        "min(0.20 × (QBI + REIT/PTP divs), 0.20 × (taxable − net cap gain))",
+        {"qbi_eligible": qbi_eligible, "qbi_reit_ptp": qbi_reit_ptp,
+         "taxable": taxable_before_qbi, "net_cap_gain": net_cap_gain},
         qbi_ded,
     )
     return _money(qbi_ded)

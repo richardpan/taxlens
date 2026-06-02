@@ -2,17 +2,74 @@
 
 All notable changes to TaxLens.
 
+## [0.45.0] — 2026
+
+### PDF importer + engine: closing residual reconciliation delta sources
+
+Investigation of a reconciliation delta on a recently-imported return
+surfaced **three** distinct bugs that compounded into a single
+user-visible discrepancy. After all three fixes, the same return
+reconciles to within rounding of the reported total tax.
+
+**Bug 1 — Form 8959 Medicare wages clobbering 1040 line 1a wages.** A
+too-loose `wages` regex (`\b1\s*[az]?\b[^\n]{0,40}?Wages`) was matching
+Form 8959 Part I line 1 ("Medicare wages and tips from Form W-2,
+box 5"), so Box-5 Medicare wages were sometimes extracted as 1040
+line 1a wages instead of the actual Box-1 amount. On returns where the
+two differ (pre-tax 401(k), HSA cafeteria-plan contributions, etc.) the
+inflated wages cascaded through AGI → taxable income → ordinary tax
+brackets, and could incidentally push MAGI over the NIIT threshold and
+fabricate a NIIT the filer never owed.
+
+- `LINE_PATTERNS["wages"]`: reordered so the strict 1040 line-1a/1z
+  patterns (`Form(s) W-2, box 1`, `Total amount from Form(s) W-2`,
+  `Add lines 1a through 1h`) try first.
+- The remaining loose `\b1\b...Wages` fallback now carries negative
+  lookaheads excluding `Medicare wages` and `box 5` contexts.
+- New regression tests in `test_form_8959_wages_isolation.py`.
+
+**Bug 2 — Trailing line-number echo extracted as a value.** When a
+form's value column is empty, vendor PDFs often render the row as
+`<n> <label> . . . . . . <n>` — the trailing `<n>` is the line-number
+echo column, not a dollar amount. The importer was extracting these
+echoes as small dollar values whenever a label-matching regex happened
+to anchor on such a row.
+
+- `_first_money_after`: when the picked match is a bare 1-2 digit
+  integer at end-of-line that equals the leading line number on the
+  same line, treat as a line-number echo and fall through to the
+  next-line scan.
+- New regression tests in `test_line_number_echo_guard.py`.
+
+**Bug 3 — Section 199A REIT/PTP dividend QBI deduction not modeled.**
+The engine's `_compute_qbi` only considered K-1 Section 199A QBI, SE
+income, and rental income. Qualified REIT dividends + PTP income
+(Form 8995 line 6) — taxed as ordinary dividends but eligible for the
+20% QBI deduction — were missing entirely, so any return whose only
+QBI source was REIT dividends saw a computed deduction of zero.
+
+- New `Return.qualified_reit_ptp_dividends` field.
+- `_compute_qbi` now adds REIT/PTP divs into the eligible QBI base
+  (after SSTB scaling, since REIT/PTP divs aren't subject to SSTB
+  phaseout). Step formula and inputs updated to surface the new term.
+- New `LINE_PATTERNS["qualified_reit_ptp_dividends"]` pulling Form
+  8995 line 6.
+- New regression tests in `test_qbi_reit_dividends.py`.
+
+Total: 9 new tests, 434 passing.
+
 ## [0.44.0] — 2026
 
 ### CARES Act / TCDTRA non-itemizer charitable deduction
 
-Diagnosing a real `-$630.65` reconciliation delta on an imported 2020 MFJ
-return surfaced a longstanding engine gap: the CARES Act §2204 above-the-line
-charitable deduction (TY2020, Form 1040 line 10b — capped at $300 per
-return) and its TCDTRA §212 below-the-line successor (TY2021, line 12b —
-capped at $300 single / $600 MFJ) were not modeled. AGI on 2020 returns
-that claimed line 10b was therefore systematically overstated by up to
-$300, with knock-on effects through every downstream calculation.
+Investigation of a reconciliation delta on an imported pre-pandemic
+return surfaced a longstanding engine gap: the CARES Act §2204
+above-the-line charitable deduction (TY2020, Form 1040 line 10b —
+capped at $300 per return) and its TCDTRA §212 below-the-line successor
+(TY2021, line 12b — capped at $300 single / $600 MFJ) were not modeled.
+AGI on TY2020 returns that claimed line 10b was therefore systematically
+overstated by up to the cap, with knock-on effects through every
+downstream calculation.
 
 Changes:
 - New `Return.charitable_contributions_non_itemizer` field.
@@ -25,10 +82,9 @@ Changes:
   statute did not double for MFJ in TY2020) and 2021 ($300 single /
   $600 MFJ).
 
-Re-running the diagnostic 2020 MFJ return with line 10b = $220 closes
-the AGI delta to zero. The remaining tax gap on that return traces to
-items only present on the source PDF (likely a thin Schedule A itemize
-just above standard, plus Schedule 2 "other taxes") that the importer
+Any residual tax gaps on returns from these years typically trace to
+items only present on the source PDF (e.g. a thin Schedule A itemize
+just above standard, or Schedule 2 "other taxes") that the importer
 doesn't yet extract — a separate, PDF-side limitation.
 
 7 new tests; total 425.
