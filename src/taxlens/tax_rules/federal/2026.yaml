@@ -1,0 +1,381 @@
+# Federal tax rules for TY 2026.
+# Sources:
+#   * IRS Rev. Proc. 2025-32 (IR-2025-103, Oct 9 2025) — inflation-adjusted
+#     items: standard deduction, ordinary brackets, AMT, EITC, etc.
+#   * IRS Notice 2025-67 (Nov 2025) — retirement plan limits.
+#   * One Big Beautiful Bill Act (OBBB, July 2025) — permanent extension of
+#     TCJA brackets/rates; CTC raised to $2,200; QBI threshold reset; AMT
+#     phaseout fixed at $500k/$1M (no longer inflation-indexed).
+# All money values are USD. Rates are decimals (0.10 = 10%).
+
+year: 2026
+
+standard_deduction:
+  single: 16100
+  mfj: 32200
+  mfs: 16100
+  hoh: 24150
+  qss: 32200
+
+# Ordinary income brackets. Each bracket: [lower_inclusive, rate].
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [12400,    0.12]
+    - [50400,    0.22]
+    - [105700,   0.24]
+    - [201775,   0.32]
+    - [256225,   0.35]
+    - [640600,   0.37]
+  mfj:
+    - [0,        0.10]
+    - [24800,    0.12]
+    - [100800,   0.22]
+    - [211400,   0.24]
+    - [403550,   0.32]
+    - [512450,   0.35]
+    - [768700,   0.37]
+  mfs:
+    - [0,        0.10]
+    - [12400,    0.12]
+    - [50400,    0.22]
+    - [105700,   0.24]
+    - [201775,   0.32]
+    - [256225,   0.35]
+    - [384350,   0.37]      # = MFJ top / 2
+  hoh:
+    - [0,        0.10]
+    - [17700,    0.12]
+    - [67450,    0.22]
+    - [105700,   0.24]
+    - [201775,   0.32]
+    - [256200,   0.35]      # historical $25 quirk — slightly < single
+    - [640600,   0.37]
+
+# Qualified dividends + LTCG (2026 thresholds per Rev. Proc. 2025-32).
+qualified_brackets:
+  single: [[0, 0.00], [49450, 0.15], [545500, 0.20]]
+  mfj:    [[0, 0.00], [98900, 0.15], [613700, 0.20]]
+  mfs:    [[0, 0.00], [49450, 0.15], [306850, 0.20]]   # = MFJ/2
+  hoh:    [[0, 0.00], [66800, 0.15], [551350, 0.20]]
+
+# Self-employment tax (Schedule SE).
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 184500      # SSA 2026 wage base
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+# Additional Medicare Tax (Form 8959). Thresholds statutory, not inflation-adjusted.
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Net Investment Income Tax (Form 8960). Thresholds statutory, not inflation-adjusted.
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+# Child Tax Credit. OBBB raised the per-child amount to $2,200 starting
+# in tax year 2026 (was $2,000 under TCJA); refundable portion is $1,700.
+ctc:
+  per_qualifying_child: 2200
+  refundable_per_child: 1700
+  phaseout_start:
+    single: 200000
+    mfj:    400000
+    mfs:    200000
+    hoh:    200000
+    qss:    400000
+  phaseout_per_1000_agi: 50
+
+# AMT (Form 6251). OBBB fixed the exemption phaseout at $500k single /
+# $1M MFJ — these are NO LONGER inflation-indexed (a notable change from
+# TY 2025's $626,350 / $1,252,700). Exemption itself is still indexed.
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 244500
+    mfj:    244500
+    mfs:    122250
+    hoh:    244500
+    qss:    244500
+  exemption:
+    single: 90100
+    mfj:    140200
+    mfs:    70100
+    hoh:    90100
+    qss:    140200
+  exemption_phaseout_start:
+    single: 500000
+    mfj:    1000000
+    mfs:    500000
+    hoh:    500000
+    qss:    1000000
+  phaseout_rate: 0.25
+
+# Schedule D worksheet cap rates.
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+# QBI deduction (§199A). OBBB made the deduction PERMANENT and reset the
+# threshold/phaseout schedule:
+#   * Threshold: $201,750 single/HOH/MFS, $403,500 MFJ.
+#   * Phase-in range expanded: $75,000 (single) / $150,000 (MFJ) — up
+#     from $50k/$100k pre-OBBB.
+# We keep the rate at 20%; some commentary suggests OBBB drafted a 23%
+# rate but final IRS guidance retained 20%. Adjust here if that changes.
+qbi:
+  rate: 0.20
+  threshold:
+    single: 201750
+    mfj:    403500
+    mfs:    201775
+    hoh:    201750
+    qss:    403500
+  phaseout:     75000
+  phaseout_mfj: 150000
+
+# Annual contribution / deferral limits (IRS Notice 2025-67).
+contribution_limits:
+  k401_elective_deferral:      24500
+  k401_catchup_50plus:          8000      # ages 60-63 special "super catch-up" $11,250
+  ira_contribution:             7500
+  ira_catchup_50plus:           1100
+  hsa_self:                     4400
+  hsa_family:                   8750
+  hsa_catchup_55plus:           1000
+  roth_ira_phaseout_start:
+    single: 153000
+    mfj:    242000
+    mfs:    0
+    hoh:    153000
+    qss:    242000
+  roth_ira_phaseout_end:
+    single: 168000
+    mfj:    252000
+    mfs:    10000
+    hoh:    168000
+    qss:    252000
+
+# Earned Income Tax Credit (Schedule EIC). Refundable. Source: Rev. Proc.
+# 2025-32 §3.06. earned_income_amount = max_credit / statutory credit_rate
+# (§32(b)(1)): 7.65% / 34% / 40% / 45% for 0/1/2/3+ kids.
+eitc:
+  investment_income_limit: 12200
+  parameters:
+    "0":
+      earned_income_amount: 8680
+      max_credit: 664
+      phaseout_rate: 0.0765
+      phaseout_start: 10640
+      phaseout_start_joint: 17280
+      completed_phaseout: 19540
+      completed_phaseout_joint: 26180
+    "1":
+      earned_income_amount: 13020
+      max_credit: 4427
+      phaseout_rate: 0.1598
+      phaseout_start: 23590
+      phaseout_start_joint: 30230
+      completed_phaseout: 46560
+      completed_phaseout_joint: 53120
+    "2":
+      earned_income_amount: 18290
+      max_credit: 7316
+      phaseout_rate: 0.2106
+      phaseout_start: 23590
+      phaseout_start_joint: 30230
+      completed_phaseout: 52920
+      completed_phaseout_joint: 59480
+    "3":
+      earned_income_amount: 18290
+      max_credit: 8231
+      phaseout_rate: 0.2106
+      phaseout_start: 23590
+      phaseout_start_joint: 30230
+      completed_phaseout: 56840
+      completed_phaseout_joint: 63400
+
+# Education credits (Form 8863). Phaseout windows are statutory (not
+# inflation-adjusted; LLC phaseouts haven't moved since 2020).
+education_credits:
+  aotc:
+    max_expenses_per_student: 4000
+    first_tier_rate: 1.00
+    first_tier_cap: 2000
+    second_tier_rate: 0.25
+    refundable_fraction: 0.40
+  llc:
+    rate: 0.20
+    expense_cap: 10000
+  phaseout:
+    single: [80000, 90000]
+    mfj:    [160000, 180000]
+    mfs:    [0, 0]
+    hoh:    [80000, 90000]
+    qss:    [160000, 180000]
+
+# Saver's Credit (Form 8880). 2026 AGI tier values per Rev. Proc. 2025-32.
+savers_credit:
+  max_contribution_per_person: 2000
+  rates:
+    single:
+      - [24500, 0.50]
+      - [27000, 0.20]
+      - [40500, 0.10]
+    mfj:
+      - [49000, 0.50]
+      - [53000, 0.20]
+      - [81000, 0.10]
+    mfs:
+      - [24500, 0.50]
+      - [27000, 0.20]
+      - [40500, 0.10]
+    hoh:
+      - [36750, 0.50]
+      - [40500, 0.20]
+      - [60750, 0.10]
+    qss:
+      - [49000, 0.50]
+      - [53000, 0.20]
+      - [81000, 0.10]
+
+# Premium Tax Credit (Form 8962). FPL values are 2025 (used by TY 2026
+# returns). The post-IRA "no 400% cliff" applicable-figure curve was
+# extended through 2025 by the Inflation Reduction Act; if Congress
+# allows it to lapse, the pre-2021 schedule (cliff at 400% FPL) returns.
+# Until OBBB or successor legislation says otherwise, we keep the
+# extended curve here — adjust if Congress lets it sunset.
+ptc:
+  fpl_base: 15650
+  fpl_increment_per_person: 5500
+  applicable_figure:
+    - [0,   150,  0.000, 0.000]
+    - [150, 200,  0.000, 0.020]
+    - [200, 250,  0.020, 0.040]
+    - [250, 300,  0.040, 0.060]
+    - [300, 400,  0.060, 0.085]
+    - [400, 99999, 0.085, 0.085]
+  repayment_limits:
+    - {below_pct_fpl: 200, single: 400,  family: 800}
+    - {below_pct_fpl: 300, single: 1050, family: 2100}
+    - {below_pct_fpl: 400, single: 1750, family: 3500}
+
+
+# Social Security taxability (§86) — thresholds unchanged since 1993.
+social_security:
+  base_threshold:
+    single: 25000
+    mfj:    32000
+    mfs:    0
+    hoh:    25000
+    qss:    25000
+  second_threshold:
+    single: 34000
+    mfj:    44000
+    mfs:    0
+    hoh:    34000
+    qss:    34000
+  first_tier_rate:  0.50
+  second_tier_rate: 0.85
+
+
+# Traditional IRA deduction (§219) — active-participant phaseout (IRS
+# Notice 2025-67).
+ira_deduction:
+  contribution_limit:
+    under_50:   7500
+    fifty_plus: 8600
+  phaseout_covered:
+    single: { start: 81000, end: 91000 }
+    hoh:    { start: 81000, end: 91000 }
+    mfj:    { start: 129000, end: 149000 }
+    qss:    { start: 129000, end: 149000 }
+    mfs:    { start: 0,     end: 10000 }
+  phaseout_spouse_covered_only:
+    mfj:    { start: 242000, end: 252000 }
+    mfs:    { start: 0,     end: 10000 }
+
+# Student loan interest deduction (§221). 2026 phaseout windows from
+# Rev. Proc. 2025-32 (modest inflation bump from 2025).
+student_loan_interest:
+  max_deduction: 2500
+  phaseout:
+    single: { start: 85000, end: 100000 }
+    hoh:    { start: 85000, end: 100000 }
+    qss:    { start: 170000, end: 200000 }
+    mfj:    { start: 170000, end: 200000 }
+    mfs:    { disabled: true }
+
+# Educator expense deduction (§62(a)(2)(D)). Cap remained at $300 for 2026.
+educator_expense:
+  per_educator_cap: 300
+
+# Child & Dependent Care Credit (Form 2441). Tier breakpoints unchanged
+# since 2003; OBBB did NOT modify these (it expanded the EMPLOYER credit
+# instead — $500k cap — which doesn't apply to individual returns).
+dependent_care_credit:
+  expense_cap_one:      3000
+  expense_cap_two_plus: 6000
+  refundable: false
+  rate_tiers:
+    - [15000, 0.35]
+    - [17000, 0.34]
+    - [19000, 0.33]
+    - [21000, 0.32]
+    - [23000, 0.31]
+    - [25000, 0.30]
+    - [27000, 0.29]
+    - [29000, 0.28]
+    - [31000, 0.27]
+    - [33000, 0.26]
+    - [35000, 0.25]
+    - [37000, 0.24]
+    - [39000, 0.23]
+    - [41000, 0.22]
+    - [43000, 0.21]
+    - [45000, 0.20]
+    - [99999999, 0.20]
+
+# Residential Clean Energy Credit (Form 5695 Part I).
+# OBBB did NOT eliminate this credit; it remains at 30% for property
+# placed in service through 2032 (per IRA 2022 schedule).
+residential_clean_energy:
+  rate: 0.30
+
+# Clean Vehicle Credit (Form 8936) — MAGI cap. OBBB accelerated the
+# elimination of NEW clean-vehicle credit after Sept 30 2025, so for
+# TY 2026 most placed-in-service dates won't qualify. We keep the cap
+# table here so partial-year claims continue to compute correctly; the
+# user should verify their vehicle's eligibility separately.
+clean_vehicle:
+  enforce: true
+  new_magi_cap:
+    single: 150000
+    hoh:    225000
+    mfj:    300000
+    qss:    300000
+    mfs:    150000
+  used_magi_cap:
+    single: 75000
+    hoh:    112500
+    mfj:    150000
+    qss:    150000
+    mfs:    75000
+
+# Form 5329 §4974 RMD-shortfall excise rate: reduced from 50% to 25% by
+# SECURE Act 2.0 (2023+).
+rmd_shortfall_excise_rate: 0.25

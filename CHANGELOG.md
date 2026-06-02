@@ -2,6 +2,34 @@
 
 All notable changes to TaxLens.
 
+## [0.39.0] — 2026
+
+### TY 2026 federal rules
+
+Added `tax_rules/federal/2026.yaml`, extending federal coverage to
+TY 2026 returns. Values sourced from:
+
+- IRS Rev. Proc. 2025-32 (released Oct 9 2025) — inflation-adjusted
+  brackets, standard deduction, AMT, EITC, FPL, etc.
+- IRS Notice 2025-67 (Nov 2025) — retirement plan limits (401(k)
+  $24,500; IRA $7,500; HSA $4,400 / $8,750).
+- One Big Beautiful Bill (OBBB, July 2025) — permanent TCJA bracket
+  schedule, CTC raised to $2,200 ($1,700 refundable), QBI threshold
+  reset to $201,750 / $403,500 with $75k / $150k phaseout, AMT
+  exemption phaseout fixed at $500k / $1M (no longer indexed).
+
+Notable bracket changes vs. TY 2025:
+
+- Standard deduction: single $15,000 → $16,100, MFJ $30,000 → $32,200
+- Top MFJ bracket: $751,600 → $768,700
+- SS wage base: $176,100 → $184,500
+- Roth IRA single phaseout: $150k–$165k → $153k–$168k
+- IRA active-participant single phaseout: $79k–$89k → $81k–$91k
+
+Three smoke tests confirm the YAML loads, key inflation values
+match expectations, and end-to-end compute for a $100k single
+return walks the brackets to the expected $13,170 ordinary tax.
+
 ## [0.38.1] — 2026
 
 ### W-2 fingerprint over-match (advisor regression fix)
