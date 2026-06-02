@@ -116,12 +116,13 @@ def test_advise_bunching_when_close_to_std_deduction():
         tax_year=2024, filing_status=FilingStatus.MFJ,
         wages=Decimal(180_000),
         charitable_contributions=Decimal(8_000),
-        mortgage_interest=Decimal(15_000),
+        mortgage_interest=Decimal(5_000),
         salt_paid=Decimal(12_000),
     )
     ids = _all_ids(advise(ret, compute(ret)))
-    # Std ded (MFJ 2024) = 29200. Itemizable = 8000 + 15000 + min(12000, 10000) = 33000.
-    # That's > 60% of std → bunching rule fires.
+    # Std ded (MFJ 2024) = 29200. Itemizable = 8000 + 5000 + min(12000, 10000) = 23000.
+    # That's between 60% × std ($17,520) and std → engine takes std,
+    # bunching rule fires (filer is close enough to itemize via doubling).
     assert "bunching-donations" in ids
 
 

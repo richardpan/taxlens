@@ -525,6 +525,15 @@ class Rules(BaseModel):
     #   {new_magi_cap: {single, mfj, mfs, hoh, qss}, used_magi_cap: {...},
     #    enforce: true|false}
     clean_vehicle: dict[str, Any] | None = None
+    # SALT cap (§164(b)(6)). When set, applied to ret.salt_paid before
+    # composing itemized deductions from components. None for pre-TCJA
+    # years (no cap). Schema:
+    #   {cap: {single, mfj, mfs, hoh, qss},      # base cap by filing status
+    #    phaseout: {                              # optional OBBB phaseout
+    #      start: {single, mfj, ...},             # MAGI threshold
+    #      rate: 0.30,                            # cap reduces by rate × excess
+    #      floor: {single, mfj, ...}}}            # post-phaseout minimum
+    salt_cap: dict[str, Any] | None = None
 
 
 class StateResult(BaseModel):

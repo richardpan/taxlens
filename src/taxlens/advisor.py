@@ -233,9 +233,15 @@ def rule_bunching_donations(ret: Return, result: TaxResult, rules: Rules) -> Opt
     """If filer takes the std deduction but has notable itemizable items, suggest bunching."""
     if result.deduction_kind != "standard":
         return None
+    # Use the year's actual SALT cap (TCJA $10k or OBBB $40k+ phaseout)
+    # rather than a hardcoded $10k — the latter understates capacity for
+    # high-SALT filers in TY2025+.
+    from taxlens.engine import apply_salt_cap
+    capped_salt, _eff_cap, _reduction = apply_salt_cap(
+        ret.salt_paid, result.agi, ret.filing_status.value, rules,
+    )
     itemizable = (
-        ret.charitable_contributions + ret.mortgage_interest
-        + min(ret.salt_paid, Decimal(10_000))
+        ret.charitable_contributions + ret.mortgage_interest + capped_salt
     )
     std = result.deduction_used
     if itemizable < std * Decimal("0.6"):
@@ -255,7 +261,7 @@ def rule_bunching_donations(ret: Return, result: TaxResult, rules: Rules) -> Opt
         rationale=(
             f"You took the ${int(std):,} standard deduction, but your itemizable items "
             f"(charity ${int(ret.charitable_contributions):,}, mortgage interest "
-            f"${int(ret.mortgage_interest):,}, SALT ${int(min(ret.salt_paid, Decimal(10_000))):,}) "
+            f"${int(ret.mortgage_interest):,}, SALT ${int(capped_salt):,}) "
             "total close to the standard. Doubling up donations every other year (or via "
             "a donor-advised fund) lets you itemize that year and take the standard the next."
         ),

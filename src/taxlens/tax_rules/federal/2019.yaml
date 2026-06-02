@@ -231,3 +231,12 @@ clean_vehicle:
     mfj:    150000
     qss:    150000
     mfs:    75000
+
+# §164(b)(6) SALT cap (TCJA):  single/MFJ/HOH/QSS,  MFS, no phaseout.
+salt_cap:
+  cap:
+    single: 10000
+    mfj:    10000
+    mfs:    5000
+    hoh:    10000
+    qss:    10000

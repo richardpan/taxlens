@@ -39,6 +39,39 @@ def _status(ret: Return) -> str:
     return ret.filing_status.value
 
 
+def apply_salt_cap(
+    salt_paid: Decimal, agi: Decimal, status: str, rules: Rules
+) -> tuple[Decimal, Decimal | None, Decimal]:
+    """Apply the §164(b)(6) SALT cap (TCJA $10k cap; OBBB $40k+ for
+    TY2025-2029 with phaseout above $500k MAGI).
+
+    Returns ``(capped_salt, effective_cap, reduction)``:
+      * ``capped_salt`` — the amount of SALT actually deductible.
+      * ``effective_cap`` — the post-phaseout cap that bound this taxpayer
+        (None when ``rules.salt_cap`` is unset, e.g. pre-2018).
+      * ``reduction`` — ``salt_paid - capped_salt`` (zero when no cap).
+
+    When ``rules.salt_cap`` is ``None`` the function is a no-op pass-through,
+    so callers can apply it unconditionally for any tax year.
+    """
+    if rules.salt_cap is None or salt_paid <= 0:
+        return salt_paid, None, ZERO
+    cfg = rules.salt_cap
+    base_cap = Decimal(str(cfg["cap"][status]))
+    effective_cap = base_cap
+    phaseout = cfg.get("phaseout")
+    if phaseout:
+        start = Decimal(str(phaseout["start"][status]))
+        rate = Decimal(str(phaseout.get("rate", "0.30")))
+        floor_tab = phaseout.get("floor", {})
+        floor = Decimal(str(floor_tab.get(status, "0"))) if floor_tab else ZERO
+        if agi > start:
+            reduction = (agi - start) * rate
+            effective_cap = max(floor, base_cap - reduction)
+    capped = min(salt_paid, effective_cap)
+    return capped, effective_cap, salt_paid - capped
+
+
 @dataclass
 class _ComputeContext:
     """Typed side-channel for values that downstream stages need but don't
@@ -902,13 +935,45 @@ def _compute_taxable_income(
     std = rules.standard_deduction[_status(ret)]
     charitable_carry_out = ZERO
     pease_reduction = ZERO
-    if ret.itemized_deductions is not None and ret.itemized_deductions > std:
+
+    # Resolve the effective itemized total. If the caller supplied
+    # ``itemized_deductions`` directly (PDF importer / Schedule A line 17,
+    # demo YAMLs), trust it as already SALT-capped. Otherwise auto-compose
+    # from components and apply the §164(b)(6) cap to ``salt_paid`` —
+    # this is what powers the what-if editor's SALT-cap awareness.
+    salt_paid_uncapped = ret.salt_paid or ZERO
+    capped_salt, salt_eff_cap, salt_reduction = apply_salt_cap(
+        salt_paid_uncapped, agi, _status(ret), rules,
+    )
+    if ret.itemized_deductions is not None:
+        effective_itemized = ret.itemized_deductions
+    else:
+        composed = (
+            (ret.mortgage_interest or ZERO)
+            + (ret.charitable_contributions or ZERO)
+            + capped_salt
+        )
+        effective_itemized = composed if composed > 0 else None
+        if effective_itemized is not None and rules.salt_cap is not None and salt_paid_uncapped > 0:
+            rec.add(
+                "SALT cap applied (§164(b)(6))",
+                f"min(salt_paid={salt_paid_uncapped:.0f}, effective_cap={salt_eff_cap})",
+                {
+                    "salt_paid": salt_paid_uncapped,
+                    "effective_cap": salt_eff_cap,
+                    "reduction": salt_reduction,
+                    "agi": agi,
+                },
+                capped_salt,
+            )
+
+    if effective_itemized is not None and effective_itemized > std:
         # Layer in prior-year charitable carryover, capped at 60% of AGI for cash gifts.
         carry_in = ret.charitable_carryover_in or ZERO
         cash_cap = agi * Decimal("0.60")
-        # Approximate: assume ret.itemized_deductions already includes current-year
+        # Approximate: assume effective_itemized already includes current-year
         # charitable. The carryover stacks on top; excess (over cap) re-carries.
-        itemized_with_carry = ret.itemized_deductions + carry_in
+        itemized_with_carry = effective_itemized + carry_in
         # The carryover only adds value up to the cap; anything beyond cap carries again.
         # Simplified: if current charitable + carry_in exceeds 60% AGI cash cap, the
         # excess (over the cap, ignoring non-cash mix) becomes new carryover.
@@ -918,7 +983,7 @@ def _compute_taxable_income(
             used_charitable = cash_cap
             charitable_carry_out = total_charitable - cash_cap
             # Replace excess charitable contribution in itemized with the cap.
-            itemized_used = ret.itemized_deductions - current_charitable + used_charitable
+            itemized_used = effective_itemized - current_charitable + used_charitable
         else:
             itemized_used = itemized_with_carry
         if carry_in > 0:
@@ -964,7 +1029,7 @@ def _compute_taxable_income(
     rec.add(
         f"{kind.capitalize()} deduction",
         f"{kind} ({_status(ret).upper()}, {ret.tax_year})",
-        {"kind": kind, "amount": deduction, "standard": std, "itemized": ret.itemized_deductions},
+        {"kind": kind, "amount": deduction, "standard": std, "itemized": effective_itemized},
         deduction,
     )
     # Personal exemption (TY2017 and earlier). Subtract amount × (1 + spouse + dependents).

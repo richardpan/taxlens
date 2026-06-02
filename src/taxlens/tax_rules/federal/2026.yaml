@@ -379,3 +379,27 @@ clean_vehicle:
 # Form 5329 §4974 RMD-shortfall excise rate: reduced from 50% to 25% by
 # SECURE Act 2.0 (2023+).
 rmd_shortfall_excise_rate: 0.25
+
+# §164(b)(6) SALT cap (OBBB): 40400 cap with 30% phaseout above 505000 MAGI,
+# floor at the pre-OBBB ,000 / ,000 (MFS).
+salt_cap:
+  cap:
+    single: 40400
+    mfj:    40400
+    mfs:    20200
+    hoh:    40400
+    qss:    40400
+  phaseout:
+    start:
+      single: 505000
+      mfj:    505000
+      mfs:    252500
+      hoh:    505000
+      qss:    505000
+    rate:  0.30
+    floor:
+      single: 10000
+      mfj:    10000
+      mfs:    5000
+      hoh:    10000
+      qss:    10000

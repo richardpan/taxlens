@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.41.0] — 2026
+
+### SALT cap engine (§164(b)(6))
+
+Until now `Return.salt_paid` was informational — the engine never
+applied the §164(b)(6) cap, so a what-if editor that bumped SALT
+from $12k to $50k would deduct the full $50k. Fixed:
+
+- New `engine.apply_salt_cap(salt_paid, agi, status, rules)` helper
+  returns `(capped_salt, effective_cap, reduction)`. Pre-2018 years
+  have no `salt_cap` block in their YAML and the helper is a
+  pass-through.
+- `_compute_taxable_income` now auto-composes itemized deductions
+  from components (mortgage + charity + capped SALT) when
+  `itemized_deductions` is None and at least one component is
+  positive. PDF importer remains the source of truth when it
+  populates `itemized_deductions` directly (Schedule A line 17).
+- `tax_rules/federal/{2018..2026}.yaml` updated:
+  - **2018–2024 (TCJA)**: $10k single/MFJ/HOH/QSS, $5k MFS.
+  - **2025 (OBBB §70120)**: $40k cap with 30% phaseout above
+    $500k MAGI, $10k floor ($5k MFS).
+  - **2026**: $40,400 cap, $505k phaseout start (1% indexed).
+- `advisor.rule_bunching_donations` no longer hardcodes `min(salt,
+  $10k)` — calls `apply_salt_cap` so a high-SALT TY2025+ filer with
+  $40k cap gets the right itemizable estimate.
+- 11 new tests in `tests/test_salt_cap.py` covering helper math
+  (cap / phaseout / floor / pre-TCJA pass-through) and engine
+  integration (auto-compose, OBBB high-earner phaseout, user-
+  supplied itemized takes precedence).
+
 ## [0.40.3] — 2026
 
 ### Interactive chart legends
