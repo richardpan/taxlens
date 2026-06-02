@@ -303,7 +303,7 @@ function renderDashboard() {
   Promise.all(RETURNS.map(r => loadFull(r.id))).then(fulls => {
     drawIncomeStack(fulls);
     drawRateLine(fulls);
-    drawTaxDonut(fulls[fulls.length - 1]);
+    drawTaxCompositionTable(fulls);
     drawTaxStack(fulls);
     drawCarryforwards(fulls);
   });
@@ -425,28 +425,103 @@ function drawRateLine(fulls) {
   });
 }
 
-function drawTaxDonut(full) {
-  const r = full.result;
-  const data = [
-    ['Ordinary income', Number(r.ordinary_tax)],
-    ['Qualified inc.',  Number(r.qualified_tax)],
-    ['Collectibles',    Number(r.collectibles_tax || 0)],
-    ['Unrecap. §1250',  Number(r.unrecaptured_1250_tax || 0)],
-    ['AMT',             Number(r.amt || 0)],
-    ['SE tax',          Number(r.se_tax)],
-    ['Add\'l Medicare', Number(r.additional_medicare_tax)],
-    ['NIIT',            Number(r.niit)],
-    ['Early-wd penalty', Number(r.early_withdrawal_penalty || 0)],
-    ['State',           Number(r.state_result ? r.state_result.state_tax : 0)],
-  ].filter(([_, v]) => v > 0);
-  recreate('taxDonut', {
-    type: 'doughnut',
-    data: { labels: data.map(d => d[0]), datasets: [{
-      data: data.map(d => d[1]),
-      backgroundColor: ['#0f172a','#60a5fa','#f97316','#10b981','#ef4444','#f472b6','#fbbf24','#a78bfa','#14b8a6']
-    }]},
-    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }
+// Tax-composition share table: % of each year's total tax that came
+// from each category. Replaces a single-year donut that duplicated
+// the "tax composition by year" stacked-bar chart on the Trends tab.
+// Rows sorted by the most-recent year's share so the dominant category
+// floats to the top. Empty rows (zero across every year) are dropped.
+function drawTaxCompositionTable(fulls) {
+  const target = document.getElementById('taxCompositionTable');
+  if (!target) return;
+  if (!fulls || !fulls.length) {
+    target.innerHTML = '<div class="text-slate-500 italic p-2">Import a return to see composition.</div>';
+    return;
+  }
+  const years = fulls.map(f => f.tax_year);
+  const pull = (f, k) => Number(f.result[k] || 0);
+  const stateOf = (f) => Number(f.result.state_result ? f.result.state_result.state_tax : 0);
+  // Categories mirror the donut's old layout. Keep order stable so the
+  // first column = "Category" with consistent labels across years.
+  const CATS = [
+    ['Ordinary income',     f => pull(f, 'ordinary_tax')],
+    ['Qualified income',    f => pull(f, 'qualified_tax')],
+    ['Collectibles',        f => pull(f, 'collectibles_tax')],
+    ['Unrecaptured §1250',  f => pull(f, 'unrecaptured_1250_tax')],
+    ['AMT',                 f => pull(f, 'amt')],
+    ['SE tax',              f => pull(f, 'se_tax')],
+    ["Add'l Medicare",      f => pull(f, 'additional_medicare_tax')],
+    ['NIIT',                f => pull(f, 'niit')],
+    ['Early-wd penalty',    f => pull(f, 'early_withdrawal_penalty')],
+    ['State tax',           stateOf],
+  ];
+  // Build raw $ matrix + per-year totals so percentages are computed
+  // against the actual sum of categories shown (so each column sums
+  // to ~100%). We deliberately don't include credits here — credits
+  // shrink total tax, they aren't a *category* of tax.
+  const rows = CATS.map(([label, fn]) => ({
+    label,
+    dollars: fulls.map(fn),
+  }));
+  const colTotals = years.map((_, i) =>
+    rows.reduce((s, r) => s + r.dollars[i], 0)
+  );
+  // Drop categories that are zero in every year.
+  const live = rows.filter(r => r.dollars.some(v => v > 0));
+  // Sort by latest year's share (descending) so the biggest contributor
+  // is on top — most useful default ordering.
+  const lastIdx = years.length - 1;
+  live.sort((a, b) => {
+    const at = colTotals[lastIdx] || 1;
+    return (b.dollars[lastIdx] / at) - (a.dollars[lastIdx] / at);
   });
+
+  const fmtPct = (d, total) =>
+    total > 0 ? (d / total * 100).toFixed(1) + '%' : '–';
+  const fmtDol = (d) =>
+    '$' + Math.round(d).toLocaleString();
+
+  // Color helper: deeper background for higher %, so the eye picks up
+  // dominant cells without needing a heatmap legend.
+  const cellBg = (pct) => {
+    if (pct >= 50) return 'background:#fee2e2';     // rose-100
+    if (pct >= 25) return 'background:#fef3c7';     // amber-100
+    if (pct >= 10) return 'background:#fef9c3';     // yellow-100
+    if (pct > 0)   return 'background:#f1f5f9';     // slate-100
+    return 'color:#cbd5e1';                          // muted dash
+  };
+
+  const headerCells = years.map(y =>
+    `<th class="text-right font-medium text-slate-500 px-2 py-1">${y}</th>`
+  ).join('');
+  const bodyRows = live.map(r => {
+    const cells = r.dollars.map((d, i) => {
+      const total = colTotals[i] || 0;
+      const pct = total > 0 ? (d / total * 100) : 0;
+      const style = cellBg(pct);
+      const title = total > 0
+        ? `${r.label} — ${fmtDol(d)} of ${fmtDol(total)} (${fmtPct(d, total)})`
+        : `${r.label} — no tax in this category`;
+      return `<td class="text-right font-mono px-2 py-1" style="${style}" title="${title}">${fmtPct(d, total)}</td>`;
+    }).join('');
+    return `<tr><td class="px-2 py-1 text-slate-700">${r.label}</td>${cells}</tr>`;
+  }).join('');
+  // Footer = total tax in dollars per year (sanity check that columns
+  // really do sum to ~100%).
+  const footerCells = colTotals.map(t =>
+    `<td class="text-right font-mono px-2 py-1 text-slate-500">${fmtDol(t)}</td>`
+  ).join('');
+  target.innerHTML = `
+    <table class="w-full border-collapse">
+      <thead><tr class="border-b border-slate-200">
+        <th class="text-left font-medium text-slate-500 px-2 py-1">Category</th>
+        ${headerCells}
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">${bodyRows}</tbody>
+      <tfoot><tr class="border-t border-slate-200">
+        <td class="px-2 py-1 text-slate-500 italic">Total</td>
+        ${footerCells}
+      </tr></tfoot>
+    </table>`;
 }
 
 function drawTaxStack(fulls) {

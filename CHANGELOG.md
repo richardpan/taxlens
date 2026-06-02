@@ -2,6 +2,29 @@
 
 All notable changes to TaxLens.
 
+## [0.42.6] — 2026
+
+### Dashboard: replace single-year donut with multi-year share table
+
+The "Tax composition (latest year)" donut on the Dashboard duplicated
+information already shown in the "Tax composition by year" stacked
+bar chart on the Trends tab. Replaced it with a per-year share table:
+
+  * Rows = tax categories (Ordinary, Qualified, AMT, SE, Add'l
+    Medicare, NIIT, etc., plus state).
+  * Columns = each imported tax year.
+  * Cells = that category's percentage of the year's total tax,
+    shaded warmer for higher shares so the dominant category pops.
+  * Footer = each year's total tax in dollars (sanity check that
+    columns sum to ~100%).
+  * Rows sorted by the most recent year's share, so the biggest
+    contributor floats to the top.
+  * Hover any cell to see the underlying dollar amount.
+
+Surfaces new information (the *share* of tax going to each
+category, year over year) instead of restating the dollar shape
+of one year that the Trends tab already covers.
+
 ## [0.42.5] — 2026
 
 ### Fix Planner 422 errors + user-friendly validation messages
