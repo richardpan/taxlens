@@ -456,6 +456,15 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # if you take the standard deduction" phrase.
                                 r"Charitable\s+contributions\s+if\s+you\s+take\s+the\s+standard\s+deduction",
                                 ],
+    "schedule_2_other_taxes_reported": [
+                                # 1040 line 23 — Schedule 2 Part II "Other Taxes"
+                                # total. Verbatim phrasing varies slightly by
+                                # year (line numbers in the cross-reference
+                                # change: Sch 2 line 10 in TY2020, line 21
+                                # TY2022+) but always begins with "Other taxes".
+                                r"Other\s+taxes,?\s+including\s+self-employment\s+tax,?\s+from\s+Schedule\s*2",
+                                r"Line\s*23\b[^\n]{0,80}?Other\s+taxes",
+                                ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
     "qualified_reit_ptp_dividends": [

@@ -325,6 +325,18 @@ class Return(BaseModel):
     # without losing the importer's signal.
     agi_reported: Decimal | None = None
     taxable_income_reported: Decimal | None = None
+    # 1040 line 23 — Schedule 2 Part II "Other Taxes" (SE tax, additional
+    # Medicare, NIIT, Form 5329 excise, household employment, retirement
+    # credit recapture, §965 transition, etc.). The engine models the
+    # most common Part II components (SE, additional Medicare, NIIT,
+    # AMT-which-is-Part-I, early withdrawal penalty, excess IRA excise,
+    # RMD shortfall excise). When the source PDF reports a Part II total
+    # higher than what the engine recomputes from extracted inputs (e.g.
+    # an excess-IRA-contribution excise whose underlying Form 5329 inputs
+    # weren't auto-extracted), the residual is added to total_tax as
+    # ``unmodeled_other_taxes`` so reconciliation closes without forcing
+    # the engine to over-compute.
+    schedule_2_other_taxes_reported: Decimal | None = None
 
 
 class ComputationStep(BaseModel):
@@ -438,6 +450,12 @@ class TaxResult(BaseModel):
     # just the resulting penalty.
     roth_contribution_allowed: Decimal = Decimal(0)
     roth_contribution_disallowed: Decimal = Decimal(0)
+    # Pass-through residual from 1040 line 23 (Schedule 2 Part II "Other
+    # Taxes") that the engine couldn't account for from extracted inputs.
+    # Equals max(0, schedule_2_other_taxes_reported − engine-modeled
+    # Part II components). Always 0 unless ``schedule_2_other_taxes_reported``
+    # is set on the Return.
+    unmodeled_other_taxes: Decimal = Decimal(0)
     credits: Decimal
     total_tax: Decimal
 

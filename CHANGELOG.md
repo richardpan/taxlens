@@ -2,6 +2,39 @@
 
 All notable changes to TaxLens.
 
+## [0.47.0] — 2026
+
+### Engine + importer: Schedule 2 Part II "other taxes" passthrough
+
+Returns that report Schedule 2 Part II "other taxes" (1040 line 23)
+beyond what the engine can recompute from extracted inputs were leaving
+a structural reconciliation gap. The most common cases: excess Roth IRA
+contribution excise (the engine fully models §4973 but its inputs —
+per-spouse Form 5329 detail — aren't auto-extracted), household
+employment taxes (Schedule H not modeled), and various credit-recapture
+add-backs.
+
+Rather than chase exhaustive form-by-form extraction for every Part II
+component, this release adds a generic passthrough escape hatch: when
+the importer recovers the line 23 total from the source PDF, the engine
+adds the residual between the reported total and what it modeled
+(SE tax + additional Medicare + NIIT + early-withdrawal penalty + §4973
+excess-IRA excise + §4974 RMD-shortfall excise) to total_tax as
+``unmodeled_other_taxes``. The residual is clamped at zero — over-modeled
+components never reduce total_tax. AMT and APTC repayment flow through
+1040 line 17 (Schedule 2 Part I) and are excluded from the calculation.
+
+- New `Return.schedule_2_other_taxes_reported` field.
+- New `TaxResult.unmodeled_other_taxes` field — surfaces the passthrough
+  amount so the UI / step trail can attribute it.
+- Engine: residual added to total_tax with a dedicated step entry
+  (`"Unmodeled Schedule 2 Part II other taxes (passthrough)"`).
+- New `LINE_PATTERNS["schedule_2_other_taxes_reported"]` matching the
+  TY2020 ("Schedule 2, line 10") and post-TY2021 ("Schedule 2, line 21")
+  cross-reference phrasings on 1040 line 23.
+
+6 new regression tests; full suite: 446 passing.
+
 ## [0.46.0] — 2026
 
 ### Importer + viz: non-itemizer charity extraction and bracket-fill empty-next-bracket marker

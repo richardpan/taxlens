@@ -2257,10 +2257,41 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
                  + aptc_repayment + early_withdrawal_penalty
                  + excess_ira_excise + rmd_excise) - credits
     total_tax = max(ZERO, total_tax)
+
+    # 1040 line 23 reconciliation: if the source PDF reports a Schedule 2
+    # Part II "Other Taxes" total that exceeds what the engine modeled
+    # from extracted inputs (SE, addl Medicare, NIIT, early-withdrawal
+    # penalty, excess IRA excise, RMD shortfall excise — note: AMT and
+    # APTC repayment are Sch 2 Part I / line 17, NOT Part II / line 23),
+    # add the residual to total_tax as ``unmodeled_other_taxes``. This
+    # closes reconciliation gaps for items the engine recognizes
+    # structurally but whose underlying inputs aren't auto-extracted
+    # (e.g. excess Roth contributions when the importer can't recover
+    # the per-spouse Form 5329 detail).
+    unmodeled_other_taxes = ZERO
+    if ret.schedule_2_other_taxes_reported is not None:
+        engine_other_part_ii = (se_tax + addl_medicare + niit
+                                + early_withdrawal_penalty
+                                + excess_ira_excise + rmd_excise)
+        residual = ret.schedule_2_other_taxes_reported - engine_other_part_ii
+        if residual > 0:
+            unmodeled_other_taxes = _money(residual)
+            total_tax = total_tax + unmodeled_other_taxes
+            rec.add(
+                "Unmodeled Schedule 2 Part II other taxes (passthrough)",
+                "max(0, schedule_2_other_taxes_reported − engine-modeled Part II)",
+                {
+                    "reported_line_23": ret.schedule_2_other_taxes_reported,
+                    "engine_modeled": engine_other_part_ii,
+                    "residual": unmodeled_other_taxes,
+                },
+                unmodeled_other_taxes,
+            )
     rec.add(
         "Total tax",
         "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit"
-        " + APTC_repay + early_wd_penalty + 5329_excise − credits",
+        " + APTC_repay + early_wd_penalty + 5329_excise − credits"
+        " + unmodeled_other_taxes",
         {
             "ordinary": ord_tax, "qualified": qual_tax,
             "collectibles": coll_tax, "unrecaptured_1250": unrec_tax,
@@ -2269,6 +2300,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
             "early_wd_penalty": early_withdrawal_penalty,
             "excess_ira_excise": excess_ira_excise,
             "rmd_excise": rmd_excise,
+            "unmodeled_other_taxes": unmodeled_other_taxes,
             "credits": credits,
         },
         total_tax,
@@ -2376,6 +2408,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         rmd_shortfall_excise=rmd_excise,
         roth_contribution_allowed=roth_allowed,
         roth_contribution_disallowed=roth_disallowed,
+        unmodeled_other_taxes=unmodeled_other_taxes,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )
