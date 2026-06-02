@@ -2,6 +2,19 @@
 
 All notable changes to TaxLens.
 
+## [0.42.4] — 2026
+
+### Advisor: per-year filter on Top opportunities chart
+
+The "Top opportunities by estimated savings" chart was unioning
+recommendations across every imported tax year, so an evergreen
+suggestion like "contribute to an HSA" appeared once per year as
+a near-duplicate bar. Added a year dropdown next to the chart's
+title; defaults to the most recent year. An "All years" option
+preserves the previous behavior for anyone who wants the full
+union (including cross-year multi-year patterns). Single-year mode
+hides cross-year patterns since they don't belong to one year.
+
 ## [0.42.3] — 2026
 
 ### Compare page: drop redundant tax-movement waterfall

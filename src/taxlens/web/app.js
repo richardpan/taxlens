@@ -1344,7 +1344,36 @@ async function renderAdvisor() {
       }).join('')
     : '<div class="text-sm text-slate-500 italic">Import a return to see year-specific advice.</div>';
 
-  drawAdvisorSavingsChart(allRecs);
+  // Populate the year picker for the savings chart. Default to the most
+  // recent year so the user sees one year's recs by default — matching
+  // how the rest of the page is organized. Cross-year patterns stay
+  // available via an "All years" option for users who want the union.
+  const picker = document.getElementById('advisorYearPicker');
+  if (picker) {
+    const years = data.per_year.map(p => p.tax_year).sort((a, b) => b - a);
+    const opts = ['<option value="all">All years</option>']
+      .concat(years.map(y => `<option value="${y}">${y}</option>`));
+    picker.innerHTML = opts.join('');
+    if (years.length) picker.value = String(years[0]);
+    picker.onchange = () => _redrawAdvisorSavings(data);
+  }
+  _redrawAdvisorSavings(data);
+}
+
+function _redrawAdvisorSavings(data) {
+  const sel = document.getElementById('advisorYearPicker');
+  const choice = sel ? sel.value : 'all';
+  let recs;
+  if (choice === 'all') {
+    recs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
+  } else {
+    const yr = Number(choice);
+    const yearBucket = data.per_year.find(p => p.tax_year === yr);
+    // Cross-year recs are inherently multi-year and don't belong in a
+    // single-year view — keep them out when filtering to one year.
+    recs = yearBucket ? [...yearBucket.recommendations] : [];
+  }
+  drawAdvisorSavingsChart(recs);
 }
 
 // Horizontal bar chart of recommendations sorted by est. annual savings.
