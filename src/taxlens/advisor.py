@@ -142,10 +142,12 @@ def rule_max_hsa(ret: Return, result: TaxResult, rules: Rules) -> Optional[Recom
         cap = Decimal(limits.get("hsa_self", 4_150))
         ctype = "self-only"
     contrib = ret.hsa_deduction + ret.hsa_contributions
-    # Provenance check: if we saw neither a Sch 1 line 13 amount nor a
-    # W-2 (which carries Box 12 code W for payroll HSA), then a zero
-    # value is "unknown", not a confirmed zero. Soften to info-level.
-    if contrib == ZERO and not ret.w2_data_present and ret.hsa_deduction == ZERO:
+    # Provenance check: a zero value is "unknown" only if we didn't see
+    # any authoritative source. Authoritative sources, in priority order:
+    #   (1) Sch 1 line 13 / Form 8889 line 13 → hsa_deduction > 0
+    #   (2) Form 8889 detected anywhere in the PDF → hsa_data_known
+    #   (3) W-2 parsed → hsa_data_known (set by importer when w2_present)
+    if contrib == ZERO and not ret.hsa_data_known and ret.hsa_deduction == ZERO:
         return Recommendation(
             id="verify-hsa",
             title="Confirm your HSA contributions for this year",
@@ -153,11 +155,12 @@ def rule_max_hsa(ret: Return, result: TaxResult, rules: Rules) -> Optional[Recom
             category="retirement",
             rationale=(
                 "Payroll HSA contributions live on the W-2 (Box 12, code W) "
-                "and don't appear on Form 1040. Direct HSA contributions "
-                "appear on Schedule 1 line 13. We didn't find either in the "
-                "PDF you uploaded, so we're treating contributions as $0. "
-                "If you contributed via payroll or direct deposit, the "
-                "advisor's HSA recommendation may not apply."
+                "and on Form 8889 line 9. Direct contributions appear on "
+                "Form 8889 line 2 / Schedule 1 line 13. We didn't find any "
+                "of these in the PDF you uploaded, so we're treating "
+                "contributions as $0. If you contributed via payroll or "
+                "direct deposit, the advisor's HSA recommendation may "
+                "not apply."
             ),
             action=(
                 "On the What-if tab, set 'hsa_contributions' (payroll) "

@@ -857,6 +857,77 @@ def _extract_w2_box12_deferrals(joined_text: str) -> dict[str, Decimal]:
     return out
 
 
+# ──────────────────── Form 8889 (HSA) ────────────────────
+#
+# Form 8889 is filed alongside the 1040 whenever the taxpayer has any
+# HSA activity. It carries authoritative HSA contribution data even when
+# the W-2 isn't bundled in the PDF:
+#
+#   Line 1  Coverage under an HDHP — Self-only / Family
+#   Line 2  HSA contributions YOU made (or on your behalf), excluding
+#           employer/cafeteria-plan contributions and rollovers.
+#   Line 9  Employer contributions made to your HSAs (THIS INCLUDES
+#           amounts you elected to contribute through a cafeteria plan,
+#           i.e. exactly what W-2 Box 12 code W reports).
+#   Line 13 HSA deduction = min(line 2, line 12) → flows to Sch 1 line 13
+#
+# We map line 9 → Return.hsa_contributions (same semantic as Box 12 W).
+# Line 13 / Sch 1 line 13 already feeds Return.hsa_deduction via
+# LINE_PATTERNS, so direct contributions are also covered.
+
+_FORM_8889_FINGERPRINT = re.compile(
+    r"Form\s*8889\b|Health\s+Savings\s+Accounts?\s*\(HSAs?\)",
+    re.IGNORECASE,
+)
+
+def _extract_form_8889(joined_text: str) -> dict[str, object]:
+    """Pull HSA contribution data from any Form 8889 in the PDF text.
+
+    Returns a dict that may contain:
+        hsa_contributions: Decimal — from line 9 (employer + cafeteria-plan)
+        _form_8889_present: bool   — sentinel; tells caller we saw the form
+        _hsa_coverage: str         — "self" or "family" if line 1 detected
+    Returns {} if no Form 8889 fingerprint is present.
+    """
+    if not _FORM_8889_FINGERPRINT.search(joined_text):
+        return {}
+    out: dict[str, object] = {"_form_8889_present": True}
+
+    # Line 9: "Employer contributions made to your HSAs for <YYYY>".
+    # Consume the year in the anchor so _first_money_after's tail starts
+    # AFTER the year — otherwise the 4-digit year gets picked as money.
+    line9 = _first_money_after(
+        r"Employer\s+contributions\s+made\s+to\s+your\s+HSAs?(?:\s+for\s+\d{4})?",
+        joined_text,
+    )
+    if line9 is None:
+        line9 = _first_money_after(
+            r"\b9\b[^\n]{0,40}?Employer\s+contributions(?:[^\n]{0,40}?\d{4})?",
+            joined_text,
+        )
+    if line9 is not None and line9 > 0:
+        out["hsa_contributions"] = line9
+
+    # Line 1: HDHP coverage type. The form has two adjacent checkboxes —
+    # Self-only and Family. Vendors render the marked one as ☒, [X],
+    # ✓, or other glyphs. Detect by finding a "marked-bracket" pattern
+    # (e.g. "[X]", "[✓]", "☒") followed within ~20 chars by either word.
+    marked = (
+        r"(?:\[\s*[XV✓\u2713]\s*\]|[☒\u2611])"  # [X] / [✓] / ☒ / ☑
+    )
+    for raw in joined_text.splitlines():
+        if not re.search(r"\bHDHP\b", raw, re.IGNORECASE):
+            continue
+        m_self = re.search(marked + r"\s*Self[-\s]?only", raw, re.IGNORECASE)
+        m_fam = re.search(marked + r"\s*Family", raw, re.IGNORECASE)
+        if m_fam and not m_self:
+            out["_hsa_coverage"] = "family"
+        elif m_self and not m_fam:
+            out["_hsa_coverage"] = "self"
+        break
+    return out
+
+
 def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str]]:
     out: dict[str, Decimal] = {}
     warnings: list[str] = []
@@ -1067,6 +1138,9 @@ def import_pdf(path: Path) -> Imported:
     w2_present = bool(_W2_FINGERPRINT.search(w2_text))
     if w2_present:
         fields["w2_data_present"] = True
+        # W-2 Box 12 code W is the canonical payroll-HSA source, so
+        # seeing a W-2 also gives authoritative HSA data.
+        fields["hsa_data_known"] = True
     box12_added: list[str] = []
     for k, v in box12.items():
         # Only add — never override a value that text or AcroForm already
@@ -1079,12 +1153,39 @@ def import_pdf(path: Path) -> Imported:
             "Recovered pre-tax payroll contributions from W-2 box 12: "
             + ", ".join(box12_added)
         )
-    elif not w2_present and fields.get("wages", Decimal(0)) >= Decimal(10_000):
+
+    # Form 8889 (HSA) — independent of W-2. Even on 1040-only PDFs the
+    # 8889 itself is usually included whenever the filer touched an HSA,
+    # so this is a strong second source for hsa_contributions.
+    f8889 = _extract_form_8889(w2_text)
+    form_8889_present = bool(f8889.pop("_form_8889_present", False))
+    f8889.pop("_hsa_coverage", None)  # not yet wired into the Return model
+    f8889_added: list[str] = []
+    for k, v in f8889.items():
+        if fields.get(k) in (None, Decimal(0)):
+            fields[k] = v
+            f8889_added.append(f"{k}=${int(v):,}")  # type: ignore[arg-type]
+    if f8889_added:
         warnings.append(
-            "No W-2 detected in this PDF — 401(k) and HSA payroll "
-            "contributions can't be verified. Edit them on the year's "
-            "What-if tab if you want advisor recommendations to reflect "
-            "your actual contributions."
+            "Recovered HSA contributions from Form 8889: "
+            + ", ".join(f8889_added)
+        )
+    if form_8889_present:
+        # Authoritative HSA data is in the PDF — advisor's verify-hsa
+        # rule should NOT fire even if no W-2 was bundled.
+        fields["hsa_data_known"] = True  # type: ignore[assignment]
+
+    if (
+        not box12_added
+        and not form_8889_present
+        and not w2_present
+        and fields.get("wages", Decimal(0)) >= Decimal(10_000)
+    ):
+        warnings.append(
+            "No W-2 or Form 8889 detected in this PDF — 401(k) and HSA "
+            "payroll contributions can't be verified. Edit them on the "
+            "year's What-if tab if you want advisor recommendations to "
+            "reflect your actual contributions."
         )
 
     if not fields and reported_total_tax is None and summary_excluded < len(default_pages):

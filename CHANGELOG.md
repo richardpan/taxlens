@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.37.3] — 2026
+
+### Form 8889 as a second authoritative HSA source
+
+The Sch 1 line 13 / W-2 Box 12 W signals shipped in v0.37.1 + v0.37.2
+miss a common case: a filer who contributed via payroll but uploaded
+only the 1040 + supplementary forms, no W-2. Form 8889, however, is
+*always* filed alongside the 1040 whenever the filer touched an HSA,
+and it carries the canonical numbers:
+
+- Line 2 — direct HSA contributions
+- Line 9 — employer + cafeteria-plan contributions (semantically the
+  same as W-2 Box 12 code W)
+- Line 13 — HSA deduction (already captured)
+
+New `_extract_form_8889` helper anchors on the form's fingerprint and
+pulls Line 9 → `Return.hsa_contributions`. Coverage type (Self-only
+vs Family, Line 1) is detected for future use by the advisor's HSA-cap
+heuristic.
+
+New `Return.hsa_data_known` flag is set whenever Form 8889 OR a W-2
+is present. The advisor's `verify-hsa` info prompt now suppresses on
+that flag (so a filer who attached Form 8889 with $0 contributions
+gets the confident `max-hsa` recommendation instead of a soft prompt).
+
+The "no W-2 detected" import warning was widened to "no W-2 or Form
+8889 detected".
+
+Tests: 378 passing (added 6 extractor tests + 2 advisor tests).
+
 ## [0.37.2] — 2026
 
 ### Honest advisor when contribution data isn't in the PDF

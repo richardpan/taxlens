@@ -126,6 +126,12 @@ class Return(BaseModel):
     # so they don't confidently say "contribute another $23,500" when the
     # user might have already maxed out — we simply don't know.
     w2_data_present: bool = False
+    # Authoritative HSA data found in the PDF. Set when a Form 8889 was
+    # detected (line 9 = employer/cafeteria-plan contributions, which
+    # subsumes W-2 Box 12 code W) OR when the W-2 itself was parsed.
+    # Used by the advisor's HSA rule to decide between confident
+    # `max-hsa` and the soft `verify-hsa` prompt.
+    hsa_data_known: bool = False
     charitable_contributions: Decimal = Decimal(0)         # for itemize/bunch advisor
     mortgage_interest: Decimal = Decimal(0)                # for itemize advisor
     salt_paid: Decimal = Decimal(0)                        # state+local taxes, $10k SALT cap

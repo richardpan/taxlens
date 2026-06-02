@@ -45,6 +45,34 @@ def test_advise_verifies_401k_when_no_w2_in_pdf():
     assert rec.est_annual_savings == Decimal(0)
 
 
+def test_advise_hsa_when_form_8889_present_with_zero_contributions():
+    # Filer attached Form 8889 (we know that for sure) but contributed
+    # nothing. The verify-hsa prompt should NOT fire — we have
+    # authoritative data, just zero-valued. The confident max-hsa
+    # recommendation should fire instead.
+    ret = Return(
+        tax_year=2024, filing_status=FilingStatus.SINGLE,
+        wages=Decimal(150_000),
+        w2_data_present=True,
+        hsa_data_known=True,  # Form 8889 detected by importer
+    )
+    recs = advise(ret, compute(ret))
+    ids = _all_ids(recs)
+    assert "verify-hsa" not in ids
+    assert "max-hsa" in ids
+
+
+def test_advise_verify_hsa_when_no_form_8889_and_no_w2():
+    # No HSA signal at all — soft prompt expected.
+    ret = Return(
+        tax_year=2024, filing_status=FilingStatus.SINGLE,
+        wages=Decimal(150_000),
+    )
+    ids = _all_ids(advise(ret, compute(ret)))
+    assert "verify-hsa" in ids
+    assert "max-hsa" not in ids
+
+
 def test_advise_backdoor_roth_warning_when_direct_contributed_over_limit():
     ret = Return(
         tax_year=2024, filing_status=FilingStatus.SINGLE,
