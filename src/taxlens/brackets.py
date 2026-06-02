@@ -18,6 +18,7 @@ def walk_brackets(
     brackets: Sequence[tuple[Decimal, Decimal]],
     *,
     stack_above: Decimal = ZERO,
+    include_next_empty: bool = False,
 ) -> tuple[Decimal, list[BracketFill]]:
     """Compute tax on `amount`, optionally treating it as stacked on top of `stack_above`.
 
@@ -67,5 +68,25 @@ def walk_brackets(
                 tax_in_bracket=tax_in_bracket,
             )
         )
+
+    # Optionally append the next bracket above the marginal one as an
+    # empty fill — the viz uses this to render a "next bracket" headroom
+    # marker so users can see what rate the next earned dollar would hit.
+    if include_next_empty and fills:
+        marginal_upper = fills[-1].upper
+        if marginal_upper is not None:
+            for j, (lo, rt) in enumerate(brackets):
+                if lo == marginal_upper:
+                    up = brackets[j + 1][0] if j + 1 < len(brackets) else None
+                    fills.append(
+                        BracketFill(
+                            lower=lo,
+                            upper=up,
+                            rate=rt,
+                            amount_in_bracket=ZERO,
+                            tax_in_bracket=ZERO,
+                        )
+                    )
+                    break
 
     return total_tax, fills

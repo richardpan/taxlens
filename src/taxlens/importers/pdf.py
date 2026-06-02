@@ -449,6 +449,13 @@ LINE_PATTERNS: dict[str, list[str]] = {
     "other_adjustments":       [r"Line\s*26\b[^\n]{0,80}?Total adjustments to income",
                                 # Schedule 1 line 26 in FreeTaxUSA
                                 r"\b10\b[^\n]{0,80}?Adjustments to income\s+from\s+Schedule\s*1"],
+    "charitable_contributions_non_itemizer": [
+                                # 1040 line 10b (TY2020 — above-the-line) and
+                                # 1040 line 12b (TY2021 — below-the-line). Both
+                                # share the verbatim "Charitable contributions
+                                # if you take the standard deduction" phrase.
+                                r"Charitable\s+contributions\s+if\s+you\s+take\s+the\s+standard\s+deduction",
+                                ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
     "qualified_reit_ptp_dividends": [

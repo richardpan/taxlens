@@ -1408,7 +1408,9 @@ def _compute_income_tax(
     ordinary_taxable = taxable - all_special
 
     # 1. Ordinary
-    ord_tax, ord_fills = walk_brackets(ordinary_taxable, ordinary_brackets)
+    ord_tax, ord_fills = walk_brackets(
+        ordinary_taxable, ordinary_brackets, include_next_empty=True,
+    )
     rec.add(
         "Ordinary income tax (bracket walk)",
         "sum of bracket fills on (taxable − qd_ltcg − unrec_1250 − collectibles)",

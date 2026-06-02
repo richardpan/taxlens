@@ -2,6 +2,40 @@
 
 All notable changes to TaxLens.
 
+## [0.46.0] — 2026
+
+### Importer + viz: non-itemizer charity extraction and bracket-fill empty-next-bracket marker
+
+**PDF importer — non-itemizer charitable contributions extraction.** v0.44.0
+modeled the CARES Act §2204 / TCDTRA §212 non-itemizer charitable
+deduction in the engine but never added an importer pattern for 1040
+line 10b (TY2020) / line 12b (TY2021). Returns from those years that
+claimed the deduction were therefore extracted with the field as zero,
+leaving an artificial gap on AGI (TY2020) or taxable income (TY2021).
+
+- New `LINE_PATTERNS["charitable_contributions_non_itemizer"]` matching
+  the verbatim "Charitable contributions if you take the standard
+  deduction" phrase shared by both line 10b and 12b.
+
+**Bracket-fill viz — show the next empty bracket.** The
+`Federal bracket fill` chart was rendering only the brackets the filer
+actually filled, so the "next bracket" headroom marker had nothing to
+anchor to when the marginal bar was the last one in the dataset. The
+empty next bracket is now included as a zero-amount fill, so the viz
+can render the full headroom range and the rate label for the next
+bracket the filer hasn't reached.
+
+- `walk_brackets`: new `include_next_empty: bool = False` parameter.
+  When set, the function appends the bracket immediately above the
+  marginal one as a zero-amount fill (omitted entirely when the filer
+  is already in the top open-ended bracket so we don't fabricate a
+  bracket that doesn't exist).
+- `_compute_income_tax`: passes `include_next_empty=True` for the
+  ordinary-income bracket walk that feeds the year-detail viz. Total
+  tax is unchanged (the empty fill contributes $0).
+
+6 new regression tests; full suite: 440 passing.
+
 ## [0.45.0] — 2026
 
 ### PDF importer + engine: closing residual reconciliation delta sources
