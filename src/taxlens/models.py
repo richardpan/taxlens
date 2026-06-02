@@ -337,6 +337,31 @@ class Return(BaseModel):
     # ``unmodeled_other_taxes`` so reconciliation closes without forcing
     # the engine to over-compute.
     schedule_2_other_taxes_reported: Decimal | None = None
+    # 1040 line 19 — Schedule 8812 nonrefundable CTC + Credit for Other
+    # Dependents as actually claimed on the source return. The engine
+    # models CTC/ODC from ``qualifying_children``/``other_dependents``
+    # and AGI phaseouts, but several real-world cases drive the claimed
+    # amount below the modeled amount (dependents checked as ODC vs CTC,
+    # ARPA two-stage phaseout we don't fully model, deliberate election
+    # to forgo the credit, advance-CTC repayments, etc.). When provided,
+    # the engine caps the modeled nonrefundable CTC at this value so
+    # reconciliation closes without overstating credits.
+    child_tax_credit_reported: Decimal | None = None
+    # 1040 line 28 — Refundable additional child tax credit (ACTC) /
+    # ARPA-refundable CTC actually claimed. Used as a cap on the engine's
+    # modeled ACTC for the same reasons as ``child_tax_credit_reported``.
+    additional_ctc_reported: Decimal | None = None
+    # 1040 line 12 — Standard or itemized deduction as actually printed on
+    # the source return. The engine recomputes this from rules + extracted
+    # itemized inputs, but several adjustments aren't yet modeled (the
+    # additional standard deduction for age 65+ / blind under §63(f);
+    # itemized components the importer can't recover from a 1040-only
+    # PDF). When provided AND larger than what the engine resolves, the
+    # engine uses the reported value so reconciliation closes without
+    # under-deducting. Smaller reported values are ignored — the engine's
+    # SALT-capped + Pease-reduced math is preferred when it's already
+    # producing a more conservative number.
+    deduction_reported: Decimal | None = None
 
 
 class ComputationStep(BaseModel):

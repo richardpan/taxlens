@@ -81,9 +81,12 @@ niit:
     hoh:    200000
     qss:    250000
 
-# Child Tax Credit.
+# Child Tax Credit. OBBB (P.L. 119-21, July 2025) made the per-child
+# amount $2,200 effective TY2025 (and $1,700 refundable), so this is
+# higher than the $2,000 default that was in place under the
+# pre-OBBB extension of TCJA.
 ctc:
-  per_qualifying_child: 2000
+  per_qualifying_child: 2200
   refundable_per_child: 1700
   phaseout_start:
     single: 200000

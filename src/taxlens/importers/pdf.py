@@ -390,7 +390,16 @@ LINE_PATTERNS: dict[str, list[str]] = {
     "se_income":               [r"Line\s*3\b[^\n]{0,40}?Business income",
                                 r"Schedule\s*C[^\n]{0,40}?Net profit",
                                 r"\b3\b[^\n]{0,40}?Business income\s+or\s+\(loss\)",
-                                r"\bSelf[-\s]employment\s+income"],
+                                # Schedule SE line 6 is the authoritative net
+                                # earnings figure; pin to its line-prefix +
+                                # full label so we don't accidentally match
+                                # the Form 8959 line-8 cross-reference (which
+                                # only appears when SE tax > 0 and whose
+                                # next-line text contains "Form 1040" — that
+                                # form-id was being mis-extracted as a
+                                # $1,040 SE-income value).
+                                r"^\s*6\s+Net\s+earnings\s+from\s+self[-\s]employment",
+                                ],
     "other_ordinary_income":   [
                                 # Prefer Schedule 1 line 8 ("Other income.
                                 # List type and amount") — this is the TRUE
@@ -464,6 +473,38 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # TY2022+) but always begins with "Other taxes".
                                 r"Other\s+taxes,?\s+including\s+self-employment\s+tax,?\s+from\s+Schedule\s*2",
                                 r"Line\s*23\b[^\n]{0,80}?Other\s+taxes",
+                                ],
+    "child_tax_credit_reported": [
+                                # 1040 line 19 — nonrefundable CTC + Credit
+                                # for Other Dependents from Schedule 8812.
+                                # Anchored on the leading "19" line-number
+                                # prefix; without it, case-insensitive
+                                # matching on the word "Child" silently
+                                # catches line 28 ("additional child tax
+                                # credit") and pulls in its dollar value.
+                                r"^\s*19\s+(?:Nonrefundable\s+)?Child\s+tax\s+credit",
+                                r"^\s*19\s+Child\s+tax\s+credit\s+or\s+credit\s+for\s+other\s+dependents",
+                                ],
+    "additional_ctc_reported": [
+                                # 1040 line 28 — Refundable ACTC / ARPA
+                                # refundable CTC from Schedule 8812.
+                                r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)",
+                                r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812",
+                                ],
+    "deduction_reported": [
+                                # 1040 line 12 — Standard or itemized
+                                # deduction as actually printed. TY2024
+                                # and earlier render this as a single
+                                # row prefixed "12 ..."; TY2025+ (OBBB
+                                # restructure) splits the row into
+                                # 12a/b/c/d components with the TOTAL
+                                # on 12e — the leading-line-number
+                                # column shows just "e" with the full
+                                # "12e" appearing as the trailing
+                                # echo. Both layouts are caught here.
+                                r"^\s*12\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
+                                r"^\s*12\b[^\n]{0,80}?Itemized\s+deductions\s+\(from\s+Schedule\s*A\)",
+                                r"^\s*e\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
                                 ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
@@ -1098,6 +1139,31 @@ def import_pdf(path: Path) -> Imported:
     layout_results = [_extract_fields(stream) for stream in layout_form_streams]
     fields, children, fwarnings = _merge_field_results(default_result, *layout_results)
     warnings = list(fwarnings)
+
+    # Reconciliation passthrough fields can legitimately be $0 on the
+    # source 1040 even though the label IS present (e.g. line 19
+    # nonrefundable CTC = blank/0 when the filer's credit was instead
+    # claimed as the refundable line 28 ACTC, or line 28 = blank when
+    # the credit was fully absorbed nonrefundable). Distinguishing
+    # "$0 claimed" from "label not present" matters: the engine uses
+    # these as caps on its modeled credit, so leaving them as None
+    # would let the engine over-claim. Backfill 0 whenever the label
+    # text appears on the page but no money value followed it.
+    _ZERO_BACKFILL_LABELS = {
+        "child_tax_credit_reported": [
+            re.compile(r"^\s*19\s+(?:Nonrefundable\s+)?Child\s+tax\s+credit", re.IGNORECASE | re.MULTILINE),
+        ],
+        "additional_ctc_reported": [
+            re.compile(r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)", re.IGNORECASE | re.MULTILINE),
+            re.compile(r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812", re.IGNORECASE | re.MULTILINE),
+        ],
+    }
+    all_text = "\n".join(default_form_pages + [s for stream in layout_form_streams for s in stream])
+    for fname, patterns in _ZERO_BACKFILL_LABELS.items():
+        if fname in fields:
+            continue
+        if any(p.search(all_text) for p in patterns):
+            fields[fname] = Decimal(0)
     # If a layout stream recovered fields the default missed (or replaced
     # buggy default-extraction values wholesale), surface that — it's the
     # single most useful signal when diagnosing user reports of zero-value

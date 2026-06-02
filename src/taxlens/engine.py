@@ -1066,6 +1066,22 @@ def _compute_taxable_income(
         kind = "standard"
         # Standard-deduction year: any prior-year charitable carryover survives.
         charitable_carry_out = ret.charitable_carryover_in or ZERO
+    # Floor the engine's resolved deduction at the value actually printed
+    # on the source 1040. The most common reason ``deduction_reported``
+    # exceeds the engine's number: age 65+ / blind additional standard
+    # deduction (§63(f)), which we don't yet model from extracted age /
+    # blindness flags. Treating it as a floor closes the reconciliation
+    # gap without trusting reported-but-smaller numbers (which would
+    # mask a real engine bug).
+    if ret.deduction_reported is not None and ret.deduction_reported > deduction:
+        rec.add(
+            "Floor deduction at reported 1040 line 12 (passthrough)",
+            "max(engine deduction, deduction_reported)",
+            {"engine": deduction, "reported_line_12": ret.deduction_reported,
+             "kind_before_floor": kind},
+            ret.deduction_reported,
+        )
+        deduction = ret.deduction_reported
     rec.add(
         f"{kind.capitalize()} deduction",
         f"{kind} ({_status(ret).upper()}, {ret.tax_year})",
@@ -1396,9 +1412,18 @@ def _compute_income_tax(
     ordinary_brackets = rules.ordinary_brackets[status]
     qualified_brackets = rules.qualified_brackets[status]
 
-    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
-        + ret.k1_qualified_dividends + ret.k1_long_term_gains
-    qd_ltcg = max(qd_ltcg, ZERO)  # net LT loss flows through AGI (capped at -3k); never taxed at preferential rate
+    # Per Schedule D / Qualified Dividends and Capital Gain Tax Worksheet:
+    # net short-term capital LOSS offsets net long-term gain BEFORE the
+    # qualified-rate stack. Without this netting, a return with a big
+    # short-term loss + small long-term gain would over-tax the LT
+    # portion at preferential rates while the offsetting ST loss only
+    # showed up in AGI as the −$3k ordinary deduction.
+    net_lt = ret.long_term_capital_gains + ret.k1_long_term_gains
+    net_st = ret.short_term_capital_gains + ret.k1_short_term_gains
+    if net_st < ZERO and net_lt > ZERO:
+        net_lt = max(ZERO, net_lt + net_st)
+    qd_ltcg = ret.qualified_dividends + ret.k1_qualified_dividends + max(ZERO, net_lt)
+    qd_ltcg = max(qd_ltcg, ZERO)
     unrec_1250 = ret.unrecaptured_1250_gains
     collectibles = ret.collectibles_gains
 
@@ -1502,10 +1527,15 @@ def _compute_amt(
     status = _status(ret)
     amt = rules.amt
 
-    qd_ltcg = ret.qualified_dividends + ret.long_term_capital_gains \
-        + ret.k1_qualified_dividends + ret.k1_long_term_gains
+    # Same ST-loss-offsets-LT netting as the regular-tax stack (see
+    # _compute_qualified_tax) so AMT can't preferentially-tax LT gain
+    # that has already been wiped out by short-term losses.
+    net_lt = ret.long_term_capital_gains + ret.k1_long_term_gains
+    net_st = ret.short_term_capital_gains + ret.k1_short_term_gains
+    if net_st < ZERO and net_lt > ZERO:
+        net_lt = max(ZERO, net_lt + net_st)
+    qd_ltcg = ret.qualified_dividends + ret.k1_qualified_dividends + max(ZERO, net_lt)
     qd_ltcg = max(qd_ltcg, ZERO)
-    # ISO bargain element is one of the most common AMT preference items.
     amti = (
         taxable_income
         + ret.amt_preferences
@@ -2190,6 +2220,27 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     addl_medicare = _compute_additional_medicare(ret, rules, rec)
     niit = _compute_niit(ret, agi, rules, rec)
     ctc, ctc_kid_after = _compute_ctc(ret, agi, rules, rec)
+    # Cap the modeled nonrefundable CTC at line 19 (1040) when the
+    # source return reported it. This handles the cases the engine
+    # can't fully recover from extracted inputs: dependents claimed
+    # under ODC instead of CTC, ARPA two-stage phaseout (TY2021), the
+    # filer affirmatively forgoing the credit, etc. Capping (vs
+    # overriding) preserves engine-modeled phaseouts when those
+    # already produce a smaller credit than reported.
+    if ret.child_tax_credit_reported is not None and ctc > ret.child_tax_credit_reported:
+        rec.add(
+            "Cap CTC + ODC at reported 1040 line 19 (passthrough)",
+            "min(modeled CTC + ODC, child_tax_credit_reported)",
+            {"modeled": ctc, "reported_line_19": ret.child_tax_credit_reported},
+            ret.child_tax_credit_reported,
+        )
+        ctc = ret.child_tax_credit_reported
+        # Modeled "kid_after_phaseout" was used to apportion the cap
+        # between CTC and ODC for ACTC eligibility; clamp that to the
+        # capped amount so ACTC's per-kid ceiling can never exceed
+        # what was actually claimed nonrefundable + refundable.
+        if ctc_kid_after > ctc:
+            ctc_kid_after = ctc
     eitc = _compute_eitc(ret, agi, rules, rec)
     aotc_nonref, aotc_ref, llc = _compute_education_credits(ret, agi, rules, rec)
     savers = _compute_savers_credit(ret, agi, rules, rec)
@@ -2222,6 +2273,14 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         actc = min(ctc_leftover, earnings_test)
     else:
         actc = min(ctc_leftover, actc_kid_cap, earnings_test)
+    if ret.additional_ctc_reported is not None and actc > ret.additional_ctc_reported:
+        rec.add(
+            "Cap ACTC at reported 1040 line 28 (passthrough)",
+            "min(modeled ACTC, additional_ctc_reported)",
+            {"modeled": actc, "reported_line_28": ret.additional_ctc_reported},
+            ret.additional_ctc_reported,
+        )
+        actc = ret.additional_ctc_reported
     if actc > ZERO:
         rec.add(
             "Additional Child Tax Credit (Form 8812) — refundable",
