@@ -2,6 +2,31 @@
 
 All notable changes to TaxLens.
 
+## [0.37.2] — 2026
+
+### Honest advisor when contribution data isn't in the PDF
+
+401(k) elective deferrals and payroll HSA contributions live on the
+W-2, not the 1040. When users uploaded only their 1040, both fields
+defaulted to `$0` and the advisor confidently proposed "Contribute
+another $23,500 to your traditional 401(k)" — even when the filer
+had already maxed out.
+
+- New `Return.w2_data_present` provenance flag. The PDF importer
+  flips it to `True` only when a W-2 is actually present in the
+  uploaded PDF (existing `_W2_FINGERPRINT` check), so we can
+  distinguish "confirmed zero" from "we have no idea".
+- `rule_max_401k`: when contributions read $0 *and* no W-2 was
+  detected, emits an info-level **`verify-401k`** prompt instead of
+  the `max-401k` recommendation. Shows zero claimed savings and
+  points the user at the What-if tab.
+- `rule_max_hsa`: same pattern — emits **`verify-hsa`** when neither
+  Sch 1 line 13 nor a W-2 is present and contributions are $0.
+- Importer now logs a warning on no-W-2 imports with wages ≥ $10k:
+  "401(k) and HSA payroll contributions can't be verified."
+
+Tests: 370 passing (added one negative case).
+
 ## [0.37.1] — 2026
 
 ### HSA contribution capture (companion to v0.37.0's 401(k) fix)

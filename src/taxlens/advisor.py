@@ -80,6 +80,32 @@ def rule_max_401k(ret: Return, result: TaxResult, rules: Rules) -> Optional[Reco
     deferred = ret.traditional_401k_contributions + ret.roth_401k_contributions
     if ret.wages < 10_000:
         return None  # no wages → no 401k to contribute through
+    # If we have no W-2 data AND the value is the default zero, we don't
+    # actually know the user's contribution level — 401(k) deferrals
+    # never appear on the 1040. Surface an info-level prompt instead of
+    # a confident "contribute another $X" claim with bogus savings.
+    if not ret.w2_data_present and deferred == ZERO:
+        return Recommendation(
+            id="verify-401k",
+            title="Confirm your 401(k) contributions for this year",
+            severity="info",
+            category="retirement",
+            rationale=(
+                "401(k) elective deferrals don't appear on Form 1040 — they're "
+                "only on the W-2 (Box 12, code D for traditional or AA for Roth). "
+                "We couldn't find a W-2 in the PDF you uploaded, so we're "
+                "treating your contributions as $0. If you've already "
+                "contributed, the advisor's retirement recommendations may "
+                "not apply."
+            ),
+            action=(
+                "On the What-if tab for this year, set "
+                "'traditional_401k_contributions' and 'roth_401k_contributions' "
+                "to your actual amounts. Then re-check the advisor."
+            ),
+            est_annual_savings=ZERO,
+            references=["W-2 Box 12 codes D, E, F, G, H, S, AA, BB, EE"],
+        )
     gap = max(ZERO, cap - deferred)
     if gap < 1_000:
         return None
@@ -92,9 +118,10 @@ def rule_max_401k(ret: Return, result: TaxResult, rules: Rules) -> Optional[Reco
         severity="high" if savings >= 1_500 else "suggested",
         category="retirement",
         rationale=(
-            f"You contributed ${int(deferred):,} to a 401(k) this year vs the "
-            f"${int(cap):,} IRS limit. At your {marg*100:.0f}% marginal rate, each "
-            f"additional dollar saves about {marg*100:.0f}¢ in federal tax."
+            f"Per W-2 Box 12, you contributed ${int(deferred):,} to a 401(k) "
+            f"this year vs the ${int(cap):,} IRS limit. At your "
+            f"{marg*100:.0f}% marginal rate, each additional dollar saves "
+            f"about {marg*100:.0f}¢ in federal tax."
         ),
         action=(
             f"Increase payroll deferral so you hit the ${int(cap):,} cap before "
@@ -115,6 +142,30 @@ def rule_max_hsa(ret: Return, result: TaxResult, rules: Rules) -> Optional[Recom
         cap = Decimal(limits.get("hsa_self", 4_150))
         ctype = "self-only"
     contrib = ret.hsa_deduction + ret.hsa_contributions
+    # Provenance check: if we saw neither a Sch 1 line 13 amount nor a
+    # W-2 (which carries Box 12 code W for payroll HSA), then a zero
+    # value is "unknown", not a confirmed zero. Soften to info-level.
+    if contrib == ZERO and not ret.w2_data_present and ret.hsa_deduction == ZERO:
+        return Recommendation(
+            id="verify-hsa",
+            title="Confirm your HSA contributions for this year",
+            severity="info",
+            category="retirement",
+            rationale=(
+                "Payroll HSA contributions live on the W-2 (Box 12, code W) "
+                "and don't appear on Form 1040. Direct HSA contributions "
+                "appear on Schedule 1 line 13. We didn't find either in the "
+                "PDF you uploaded, so we're treating contributions as $0. "
+                "If you contributed via payroll or direct deposit, the "
+                "advisor's HSA recommendation may not apply."
+            ),
+            action=(
+                "On the What-if tab, set 'hsa_contributions' (payroll) "
+                "and/or 'hsa_deduction' (direct) to your actual amounts."
+            ),
+            est_annual_savings=ZERO,
+            references=["IRS Pub. 969", "Form 8889", "W-2 Box 12 code W"],
+        )
     gap = max(ZERO, cap - contrib)
     if gap < 500:
         return None

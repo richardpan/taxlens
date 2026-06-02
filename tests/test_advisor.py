@@ -15,6 +15,8 @@ def test_advise_max_401k_for_w2_filer_with_zero_contribution():
     ret = Return(
         tax_year=2024, filing_status=FilingStatus.SINGLE,
         wages=Decimal(150_000),
+        # Authoritative W-2 data: $0 in box 12 = confirmed zero contributions.
+        w2_data_present=True,
     )
     recs = advise(ret, compute(ret))
     ids = _all_ids(recs)
@@ -22,6 +24,25 @@ def test_advise_max_401k_for_w2_filer_with_zero_contribution():
     rec = next(r for r in recs if r.id == "max-401k")
     # Marginal is 24% → savings ≈ 23000 × 0.24 = 5520.
     assert Decimal("5_000") <= rec.est_annual_savings <= Decimal("6_000")
+
+
+def test_advise_verifies_401k_when_no_w2_in_pdf():
+    # 1040-only PDFs have no W-2, so we don't actually know what the
+    # filer contributed — defaulting to $0 would let us claim "save
+    # $5,520!" even when the user already maxed out. The advisor should
+    # instead surface a low-confidence info prompt.
+    ret = Return(
+        tax_year=2024, filing_status=FilingStatus.SINGLE,
+        wages=Decimal(150_000),
+        # w2_data_present defaults to False
+    )
+    recs = advise(ret, compute(ret))
+    ids = _all_ids(recs)
+    assert "max-401k" not in ids
+    assert "verify-401k" in ids
+    rec = next(r for r in recs if r.id == "verify-401k")
+    assert rec.severity == "info"
+    assert rec.est_annual_savings == Decimal(0)
 
 
 def test_advise_backdoor_roth_warning_when_direct_contributed_over_limit():

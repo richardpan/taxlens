@@ -1060,6 +1060,13 @@ def import_pdf(path: Path) -> Imported:
     for stream in layout_form_streams:
         w2_text += "\n" + "\n".join(stream)
     box12 = _extract_w2_box12_deferrals(w2_text)
+    # Provenance: if a W-2 is anywhere in this PDF we have authoritative
+    # data on the box-12 buckets (401(k) deferrals, HSA payroll). If no
+    # W-2 is present, default-zero contributions are NOT a confirmed zero
+    # — they're "unknown". Advisor rules use this flag.
+    w2_present = bool(_W2_FINGERPRINT.search(w2_text))
+    if w2_present:
+        fields["w2_data_present"] = True
     box12_added: list[str] = []
     for k, v in box12.items():
         # Only add — never override a value that text or AcroForm already
@@ -1071,6 +1078,13 @@ def import_pdf(path: Path) -> Imported:
         warnings.append(
             "Recovered pre-tax payroll contributions from W-2 box 12: "
             + ", ".join(box12_added)
+        )
+    elif not w2_present and fields.get("wages", Decimal(0)) >= Decimal(10_000):
+        warnings.append(
+            "No W-2 detected in this PDF — 401(k) and HSA payroll "
+            "contributions can't be verified. Edit them on the year's "
+            "What-if tab if you want advisor recommendations to reflect "
+            "your actual contributions."
         )
 
     if not fields and reported_total_tax is None and summary_excluded < len(default_pages):

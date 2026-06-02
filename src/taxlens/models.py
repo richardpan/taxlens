@@ -118,6 +118,14 @@ class Return(BaseModel):
     traditional_ira_contributions: Decimal = Decimal(0)    # above-the-line if deductible
     roth_ira_contributions: Decimal = Decimal(0)
     hsa_contributions: Decimal = Decimal(0)                # employee + employer (info)
+    # Provenance flags — record whether we have AUTHORITATIVE data for the
+    # contribution buckets above. Defaults to False because the 1040 itself
+    # doesn't carry these values (W-2 box 12 is the canonical source). The
+    # PDF importer flips these to True when the W-2 was actually parsed
+    # (or the user edited via what-if). Advisor rules consult these flags
+    # so they don't confidently say "contribute another $23,500" when the
+    # user might have already maxed out — we simply don't know.
+    w2_data_present: bool = False
     charitable_contributions: Decimal = Decimal(0)         # for itemize/bunch advisor
     mortgage_interest: Decimal = Decimal(0)                # for itemize advisor
     salt_paid: Decimal = Decimal(0)                        # state+local taxes, $10k SALT cap
