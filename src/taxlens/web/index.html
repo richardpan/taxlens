@@ -282,14 +282,14 @@
     <svg id="advisorSavingsChart" viewBox="0 0 800 360" class="w-full"></svg>
   </div>
 
-  <div class="mb-8">
-    <h3 class="text-lg font-semibold mb-3 text-slate-700">Multi-year patterns</h3>
-    <div id="advisorCross" class="grid md:grid-cols-2 gap-4"></div>
+  <div>
+    <h3 id="advisorPerYearHeading" class="text-lg font-semibold mb-3 text-slate-700">By year</h3>
+    <div id="advisorPerYear" class="space-y-6"></div>
   </div>
 
-  <div>
-    <h3 class="text-lg font-semibold mb-3 text-slate-700">By year</h3>
-    <div id="advisorPerYear" class="space-y-6"></div>
+  <div class="mb-8 mt-8">
+    <h3 class="text-lg font-semibold mb-3 text-slate-700">Multi-year patterns</h3>
+    <div id="advisorCross" class="grid md:grid-cols-2 gap-4"></div>
   </div>
 </section>
 
@@ -340,11 +340,17 @@
   </div>
   <div class="grid md:grid-cols-2 gap-6">
     <div class="bg-white border border-slate-200 rounded-2xl p-5">
-      <div class="font-semibold mb-2" data-help="Two lines per year: Adjusted Gross Income (top, money you earned) and total federal + state tax (bottom). Use to spot when tax rose faster than income.">AGI &amp; Total Tax</div>
+      <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+        <div class="font-semibold" data-help="Two lines per year: Adjusted Gross Income (top, money you earned) and total federal + state tax (bottom). Use to spot when tax rose faster than income.">AGI &amp; Total Tax</div>
+        <div id="trendsAgiTaxLegend" class="flex flex-wrap gap-3 text-xs"></div>
+      </div>
       <svg id="trendsAgiTax" viewBox="0 0 600 280" class="w-full h-64"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5">
-      <div class="font-semibold mb-2" data-help="Effective rate (total tax ÷ AGI) vs. marginal rate (the bracket your last dollar fell in) over time. A widening gap usually means lots of income at low brackets (e.g. LTCG) — narrowing means you're moving up the schedule.">Effective vs Marginal Rate</div>
+      <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+        <div class="font-semibold" data-help="Effective rate (total tax ÷ AGI) vs. marginal rate (the bracket your last dollar fell in) over time. A widening gap usually means lots of income at low brackets (e.g. LTCG) — narrowing means you're moving up the schedule.">Effective vs Marginal Rate</div>
+        <div id="trendsRatesLegend" class="flex flex-wrap gap-3 text-xs"></div>
+      </div>
       <svg id="trendsRates" viewBox="0 0 600 280" class="w-full h-64"></svg>
     </div>
     <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">

@@ -2,6 +2,34 @@
 
 All notable changes to TaxLens.
 
+## [0.43.0] — 2026
+
+### Trends: line-chart legends moved out of the plot area
+
+The "AGI & Total tax" and "Effective vs Marginal Rate" line charts
+on the Trends tab rendered their legends inside the SVG, where they
+overlapped the top gridline and the highest-value data point.
+`drawLineChart` now accepts a `legendTarget` option that renders the
+legend as HTML into a flex row alongside the section title; hover
+highlight + click-to-toggle behavior is preserved. Other callers
+that don't pass `legendTarget` keep the in-SVG legend.
+
+### Advisor: year picker filters "By year" too; multi-year section moves to bottom
+
+Two follow-ups to v0.42.4's per-year filter on the "Top opportunities"
+chart:
+
+- The year picker now also filters the "By year" section: picking
+  a single year hides every other year's card, so the page focuses
+  on one year's situation. "All years" preserves the previous full
+  list.
+- The "Multi-year patterns" section moved to the bottom of the page,
+  below "By year". This puts the most-actionable single-year advice
+  up top and reserves multi-year patterns for context at the end.
+
+The section heading toggles between "By year" (all years) and
+"Tax year YYYY" (single year) so the scope is unambiguous.
+
 ## [0.42.7] — 2026
 
 ### Dashboard: widen tax-composition share table to full grid width

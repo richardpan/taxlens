@@ -1425,8 +1425,56 @@ async function renderAdvisor() {
     ? data.cross_year.map(recCard).join('')
     : '<div class="text-sm text-slate-500 italic md:col-span-2">No cross-year patterns yet — import at least 2 years.</div>';
 
-  $('#advisorPerYear').innerHTML = data.per_year.length
-    ? data.per_year.map(p => {
+  // Per-year advice is rendered by _redrawAdvisor, which respects the
+  // year-picker selection (single year vs. all). When no returns are
+  // imported yet, the picker stays empty and _redrawAdvisor falls
+  // through to the "No advice for this year." empty state.
+
+  // Populate the year picker for the savings chart. Default to the most
+  // recent year so the user sees one year's recs by default — matching
+  // how the rest of the page is organized. Cross-year patterns stay
+  // available via an "All years" option for users who want the union.
+  const picker = document.getElementById('advisorYearPicker');
+  if (picker) {
+    const years = data.per_year.map(p => p.tax_year).sort((a, b) => b - a);
+    const opts = ['<option value="all">All years</option>']
+      .concat(years.map(y => `<option value="${y}">${y}</option>`));
+    picker.innerHTML = opts.join('');
+    if (years.length) picker.value = String(years[0]);
+    picker.onchange = () => _redrawAdvisor(data);
+  }
+  _redrawAdvisor(data);
+}
+
+function _redrawAdvisor(data) {
+  const sel = document.getElementById('advisorYearPicker');
+  const choice = sel ? sel.value : 'all';
+
+  // Top-opportunities chart: all years vs single year. Cross-year
+  // recommendations are inherently multi-year and excluded from a
+  // single-year view (they show up in the "Multi-year patterns"
+  // section at the bottom of the page).
+  let chartRecs;
+  if (choice === 'all') {
+    chartRecs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
+  } else {
+    const yr = Number(choice);
+    const bucket = data.per_year.find(p => p.tax_year === yr);
+    chartRecs = bucket ? [...bucket.recommendations] : [];
+  }
+  drawAdvisorSavingsChart(chartRecs);
+
+  // "By year" section: when a specific year is picked, render only that
+  // year's card. "All years" preserves the original full list.
+  const heading = document.getElementById('advisorPerYearHeading');
+  if (heading) {
+    heading.textContent = (choice === 'all') ? 'By year' : `Tax year ${choice}`;
+  }
+  const yearsToShow = (choice === 'all')
+    ? data.per_year
+    : data.per_year.filter(p => String(p.tax_year) === String(choice));
+  $('#advisorPerYear').innerHTML = yearsToShow.length
+    ? yearsToShow.map(p => {
         const count = p.recommendations.length;
         const body = count
           ? '<div class="grid md:grid-cols-2 gap-4">' + p.recommendations.map(recCard).join('') + '</div>'
@@ -1441,38 +1489,7 @@ async function renderAdvisor() {
           '</div>',
         ].join('');
       }).join('')
-    : '<div class="text-sm text-slate-500 italic">Import a return to see year-specific advice.</div>';
-
-  // Populate the year picker for the savings chart. Default to the most
-  // recent year so the user sees one year's recs by default — matching
-  // how the rest of the page is organized. Cross-year patterns stay
-  // available via an "All years" option for users who want the union.
-  const picker = document.getElementById('advisorYearPicker');
-  if (picker) {
-    const years = data.per_year.map(p => p.tax_year).sort((a, b) => b - a);
-    const opts = ['<option value="all">All years</option>']
-      .concat(years.map(y => `<option value="${y}">${y}</option>`));
-    picker.innerHTML = opts.join('');
-    if (years.length) picker.value = String(years[0]);
-    picker.onchange = () => _redrawAdvisorSavings(data);
-  }
-  _redrawAdvisorSavings(data);
-}
-
-function _redrawAdvisorSavings(data) {
-  const sel = document.getElementById('advisorYearPicker');
-  const choice = sel ? sel.value : 'all';
-  let recs;
-  if (choice === 'all') {
-    recs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
-  } else {
-    const yr = Number(choice);
-    const yearBucket = data.per_year.find(p => p.tax_year === yr);
-    // Cross-year recs are inherently multi-year and don't belong in a
-    // single-year view — keep them out when filtering to one year.
-    recs = yearBucket ? [...yearBucket.recommendations] : [];
-  }
-  drawAdvisorSavingsChart(recs);
+    : '<div class="text-sm text-slate-500 italic">No advice for this year.</div>';
 }
 
 // Horizontal bar chart of recommendations sorted by est. annual savings.
@@ -1762,7 +1779,7 @@ async function renderTrends() {
   drawLineChart('trendsAgiTax', years, [
     { label: 'AGI',       data: agi, color: '#0ea5e9' },
     { label: 'Total tax', data: tax, color: '#ef4444' },
-  ], { yfmt: fmt });
+  ], { yfmt: fmt, legendTarget: 'trendsAgiTaxLegend' });
 
   const eff = fulls.map(f => {
     const a = Number(f.result.agi) || 1;
@@ -1782,7 +1799,7 @@ async function renderTrends() {
   drawLineChart('trendsRates', years, [
     { label: 'Effective %', data: eff,  color: '#0ea5e9' },
     { label: 'Marginal %',  data: marg, color: '#f59e0b' },
-  ], { yfmt: v => v.toFixed(1) + '%' });
+  ], { yfmt: v => v.toFixed(1) + '%', legendTarget: 'trendsRatesLegend' });
 
   // Stacked income composition
   const buckets = [
@@ -2144,18 +2161,59 @@ function drawLineChart(svgId, xs, series, opts = {}) {
       html += `<circle data-sidx="${sidx}" cx="${xpos(i)}" cy="${ypos(v)}" r="3" fill="${s.color}"/>`;
     });
   });
-  series.forEach((s, i) => {
-    const x = P.l + i * 140, y = P.t - 4;
-    const off = hidden.has(i);
-    const swatchOpacity = off ? '0.35' : '1';
-    const textDeco = off ? 'line-through' : 'none';
-    html += `<g class="legend-item" data-sidx="${i}">`;
-    html +=   `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}" opacity="${swatchOpacity}"/>`;
-    html +=   `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155" text-decoration="${textDeco}">${s.label}</text>`;
-    html += `</g>`;
-  });
+  // Legend rendering. When ``opts.legendTarget`` resolves to an
+  // element on the page, render the legend there as HTML — used by
+  // the Trends-tab line charts where the legend lives in a flex row
+  // next to the section title (avoids overlapping the plot area).
+  // Fall back to in-SVG legend (top-left of plot region) for callers
+  // that don't supply a target.
+  const legendEl = opts.legendTarget && document.getElementById(opts.legendTarget);
+  if (legendEl) {
+    legendEl.innerHTML = series.map((s, i) => {
+      const off = hidden.has(i);
+      const swatchOp = off ? '0.35' : '1';
+      const textDeco = off ? 'line-through' : 'none';
+      return `<span class="legend-item inline-flex items-center gap-1.5 cursor-pointer select-none" data-sidx="${i}" style="text-decoration:${textDeco}">`
+        + `<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:${s.color};opacity:${swatchOp}"></span>`
+        + `<span class="text-slate-700">${s.label}</span>`
+        + `</span>`;
+    }).join('');
+    // Forward hover/click interactions on the external legend to the
+    // same redraw path used by the in-SVG legend.
+    legendEl.querySelectorAll('.legend-item').forEach(el => {
+      const sidx = Number(el.getAttribute('data-sidx'));
+      el.addEventListener('mouseenter', () => {
+        svg.querySelectorAll('[data-sidx]').forEach(node => {
+          const nidx = Number(node.getAttribute('data-sidx'));
+          node.setAttribute('opacity', nidx === sidx ? '1' : '0.18');
+        });
+      });
+      el.addEventListener('mouseleave', () => {
+        svg.querySelectorAll('[data-sidx]').forEach(node => node.removeAttribute('opacity'));
+      });
+      el.addEventListener('click', () => {
+        if (hidden.has(sidx)) hidden.delete(sidx);
+        else hidden.add(sidx);
+        drawLineChart(svgId, xs, series, opts);
+      });
+    });
+  } else {
+    series.forEach((s, i) => {
+      const x = P.l + i * 140, y = P.t - 4;
+      const off = hidden.has(i);
+      const swatchOpacity = off ? '0.35' : '1';
+      const textDeco = off ? 'line-through' : 'none';
+      html += `<g class="legend-item" data-sidx="${i}">`;
+      html +=   `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}" opacity="${swatchOpacity}"/>`;
+      html +=   `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155" text-decoration="${textDeco}">${s.label}</text>`;
+      html += `</g>`;
+    });
+  }
   svg.innerHTML = html;
-  _attachChartLegend(svg, () => drawLineChart(svgId, xs, series, opts));
+  // Only attach the SVG-internal legend hooks when no external target.
+  if (!legendEl) {
+    _attachChartLegend(svg, () => drawLineChart(svgId, xs, series, opts));
+  }
 }
 
 function drawStackedBars(svgId, xs, series) {
