@@ -51,6 +51,17 @@ let RETURNS = [];           // list_returns() output, sorted by year
 const FULL = new Map();     // id → full return record (lazy)
 
 async function api(path, opts = {}) {
+  // Auto-set Content-Type: application/json when sending a body string
+  // (FastAPI requires it to parse `dict[str, Any]` parameters; without it
+  // the request is treated as form data and fails with a 422 "input
+  // should be a valid dictionary" — confusing and exposes Pydantic-speak
+  // to the user). Callers can still override by passing their own headers.
+  if (opts.body && typeof opts.body === 'string') {
+    opts = {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    };
+  }
   const r = await fetch(path, opts);
   if (!r.ok) {
     // Try to extract a JSON `detail` field (FastAPI HTTPException body) so the
@@ -58,7 +69,20 @@ async function api(path, opts = {}) {
     let detail = '';
     try {
       const body = await r.json();
-      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body);
+      if (typeof body.detail === 'string') {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        // Pydantic validation errors: [{loc, msg, type, ...}, ...].
+        // Surface human-readable messages without leaking field-internal
+        // jargon ("body", "dict", etc.) to the user.
+        detail = body.detail
+          .map(d => (d.msg || '').replace(/^Input should be a valid dictionary.*/i,
+                                          'Could not read the request body.'))
+          .filter(Boolean)
+          .join('; ');
+      } else {
+        detail = JSON.stringify(body);
+      }
     } catch (_) {
       try { detail = await r.text(); } catch (_) { detail = ''; }
     }

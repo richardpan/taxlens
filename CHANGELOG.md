@@ -2,6 +2,25 @@
 
 All notable changes to TaxLens.
 
+## [0.42.5] — 2026
+
+### Fix Planner 422 errors + user-friendly validation messages
+
+The Roth and TLH "Simulate" buttons were producing a 422 with the
+raw Pydantic message "input should be a valid dictionary" — the
+front-end's `api()` helper never set `Content-Type: application/json`,
+so FastAPI tried to interpret the JSON body as form data and bailed.
+
+- `api()` now auto-attaches `Content-Type: application/json` when the
+  caller passes a string body (almost every POST in the app, including
+  Roth, TLH, Roth ladder, TLH projection, what-if edits, override
+  commits, and dataset uploads).
+- `api()` also handles Pydantic's nested `detail: [{loc, msg, ...}]`
+  array shape — joining `msg` fields into a human-readable string and
+  rewriting "Input should be a valid dictionary" to the friendlier
+  "Could not read the request body." Users no longer see internal
+  Pydantic / FastAPI jargon when something goes wrong.
+
 ## [0.42.4] — 2026
 
 ### Advisor: per-year filter on Top opportunities chart
