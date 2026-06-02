@@ -2,6 +2,16 @@
 
 All notable changes to TaxLens.
 
+## [0.42.3] — 2026
+
+### Compare page: drop redundant tax-movement waterfall
+
+Removed the "How tax moved between years" waterfall chart and its
+~110 lines of SVG-rendering code. The "What changed?" attribution
+panel directly below it shows the same year-A → drivers → year-B
+information in a cleaner, more readable list form. Two visualizations
+of the same data was clutter.
+
 ## [0.42.2] — 2026
 
 ### Federal bracket fill: surface the *next* bracket
