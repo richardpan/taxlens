@@ -19,6 +19,21 @@ def test_no_w2_fingerprint_returns_empty():
     assert _extract_w2_box12_deferrals(text) == {}
 
 
+def test_1040_mention_of_w2_does_not_fingerprint():
+    """Regression: the 1040 itself MENTIONS 'Form W-2' constantly (e.g.
+    line 25a 'Federal income tax withheld from Form(s) W-2'). That must
+    NOT trip the W-2 fingerprint — otherwise w2_data_present gets set
+    to True for every 1040-only PDF and the advisor's verify-401k
+    provenance check is silently bypassed."""
+    text = """\
+Form 1040 U.S. Individual Income Tax Return 2024
+1a Total amount from Form(s) W-2, box 1
+25a Federal income tax withheld from Form(s) W-2 ............ 25a 8,500
+25b Federal income tax withheld from Form(s) 1099
+"""
+    assert _extract_w2_box12_deferrals(text) == {}
+
+
 def test_traditional_401k_code_d():
     text = """
     Form W-2 Wage and Tax Statement
@@ -66,7 +81,7 @@ def test_column_layout_amount_on_next_line():
     # Some vendor PDFs render the Box 12 column with the code on one row
     # and the amount in the value column.
     text = """
-    Form W-2
+    Form W-2 Wage and Tax Statement
     Box 12
     D 19,500.00
     AA 5,000.00
@@ -78,7 +93,7 @@ def test_column_layout_amount_on_next_line():
 
 def test_403b_roth_code_bb_buckets_into_roth():
     text = """
-    Form W-2
+    Form W-2 Wage and Tax Statement
     12a BB 6000.00
     """
     out = _extract_w2_box12_deferrals(text)
@@ -87,7 +102,7 @@ def test_403b_roth_code_bb_buckets_into_roth():
 
 def test_govt_457b_roth_code_ee_buckets_into_roth():
     text = """
-    Form W-2
+    Form W-2 Wage and Tax Statement
     12a EE 4000.00
     """
     out = _extract_w2_box12_deferrals(text)

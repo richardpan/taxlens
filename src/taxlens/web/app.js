@@ -658,19 +658,47 @@ async function renderYearDetail() {
     type: 'bar',
     data: {
       labels: fills.map(f => (Number(f.rate)*100).toFixed(0) + '%'),
-      datasets: [{
-        label: 'Taxable $ in bracket',
-        data: fills.map(f => Number(f.amount_in_bracket)),
-        backgroundColor: fills.map(f => rateColor(f.rate)),
-        borderRadius: 4,
-      }]
+      datasets: [
+        {
+          label: 'Taxable $ in bracket',
+          data: fills.map(f => Number(f.amount_in_bracket)),
+          backgroundColor: fills.map(f => rateColor(f.rate)),
+          borderRadius: 4,
+          stack: 'bracket',
+        },
+        {
+          // Faded "headroom" segment — completes the bracket's total
+          // width above the filled portion, so the full bar height
+          // visualizes the bracket's size. The TOP open-ended bracket
+          // has no defined upper bound; we leave it ghost-less so we
+          // don't fabricate a misleading number.
+          label: 'Headroom in bracket',
+          data: fills.map(f => {
+            if (f.upper == null) return 0;
+            const width = Number(f.upper) - Number(f.lower || 0);
+            return Math.max(0, width - Number(f.amount_in_bracket));
+          }),
+          backgroundColor: 'rgba(148, 163, 184, 0.25)',  // slate-400 @ 25%
+          borderColor: 'rgba(148, 163, 184, 0.5)',
+          borderWidth: 1,
+          borderSkipped: false,
+          borderRadius: 4,
+          stack: 'bracket',
+        },
+      ]
     },
     options: {
       maintainAspectRatio: false,
       layout: { padding: { top: 36 } },
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
+          filter: (item) => {
+            // Hide the ghost-headroom tooltip when the bracket has no
+            // headroom to report (top open bracket or fully filled).
+            if (item.datasetIndex === 1 && Number(item.raw) === 0) return false;
+            return true;
+          },
           callbacks: {
             title: (items) => {
               const f = fills[items[0].dataIndex];
@@ -683,15 +711,22 @@ async function renderYearDetail() {
             },
             label: (item) => {
               const f = fills[item.dataIndex];
-              return [
-                `In this bracket: ${fmt(f.amount_in_bracket)}`,
-                `Tax owed here:   ${fmt(f.tax_in_bracket)}`,
-              ];
+              if (item.datasetIndex === 0) {
+                return [
+                  `In this bracket: ${fmt(f.amount_in_bracket)}`,
+                  `Tax owed here:   ${fmt(f.tax_in_bracket)}`,
+                ];
+              }
+              const headroom = Number(item.raw);
+              return `Headroom before next bracket: ${fmt(headroom)}`;
             }
           }
         }
       },
-      scales: { y: { ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } } }
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, ticks: { callback: v => '$'+(v/1000).toFixed(0)+'k' } }
+      }
     },
     plugins: [marginalPlugin],
   });

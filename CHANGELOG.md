@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.38.1] — 2026
+
+### W-2 fingerprint over-match (advisor regression fix)
+
+The W-2 detection fingerprint added in v0.37.2 was too loose: it
+matched the bare phrase `Form W-2` anywhere in the text. Since a
+1040 references "Form(s) W-2" on multiple lines (line 1a, 25a, etc.),
+**every 1040-only PDF tripped the W-2 fingerprint** and got flagged
+`w2_data_present=True`, silently bypassing the v0.37.2 provenance
+check. End result: filers without a bundled W-2 still saw the
+confident "Contribute another $23,500 to your 401(k)" recommendation.
+
+Tightened the fingerprint to phrases that ONLY appear on an actual
+W-2 form:
+
+- `Wage and Tax Statement` (the W-2's letterhead title)
+- `Box 12[a-d]` with a required sub-letter (the 1040 never references
+  Box-12 rows this way)
+
+Filers who imported under v0.37.2 / v0.37.3 / v0.38.0 will need to
+**re-import** their PDFs for the corrected provenance flag to take
+effect on existing returns.
+
+Also: the Federal bracket fill chart on the Year detail tab now
+shows a faded "headroom" segment stacked above each filled bracket,
+so the total bar height visualizes the bracket's actual width
+(matches the original mockup intent).
+
+Tests: 379 passing (added a 1040-mention regression case).
+
 ## [0.38.0] — 2026
 
 ### Visualizations round 2

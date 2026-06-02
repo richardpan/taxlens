@@ -754,7 +754,15 @@ def _detect_status(pages: list[str]) -> FilingStatus | None:
 #   S   → SIMPLE 401(k) / 408(p)          traditional_401k_contributions (bucketed)
 # We sum across multiple W-2s (joint returns / multiple employers).
 _W2_FINGERPRINT = re.compile(
-    r"\bForm\s*W-?2\b|Wage\s+and\s+Tax\s+Statement|\bBox\s*12[a-d]?\b",
+    # Must be the actual W-2 form, NOT a 1040 line that REFERENCES the
+    # W-2. Plain "Form W-2" appears all over the 1040 (e.g., line 25a
+    # "Federal income tax withheld from Form(s) W-2") so it's too noisy.
+    # We only accept phrases that exclusively appear on the W-2 itself:
+    #   * "Wage and Tax Statement" — the W-2's letterhead title.
+    #   * "Box 12[a-d]" with a required sub-letter — only W-2 rows
+    #     use these markers; the 1040 never references them this way.
+    r"Wage\s+and\s+Tax\s+Statement"
+    r"|\bBox\s*12[a-d]\b",
     re.IGNORECASE,
 )
 # Match "12a D 19,500.00" / "12b  AA 5000" / "D 19500.00" inside a Box 12 region.
