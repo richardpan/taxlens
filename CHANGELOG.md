@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.38.0] — 2026
+
+### Visualizations round 2
+
+Three new SVG charts. All are in-house renderers — no Chart.js plugin
+deps — so they fit cleanly with the existing stack and inherit the
+`?` help-icon system shipped in v0.37.0.
+
+- **Deduction waterfall** (Year detail tab). Anchored bars at gross
+  income, AGI, and taxable income; floating downward steps for each
+  above-the-line adjustment (HSA, Trad. IRA, ½ SE tax, student loan,
+  educator, other) and each below-the-line deduction (standard /
+  itemized + QBI). Lets the user see at a glance which deductions
+  did the most work for them this year.
+- **Top opportunities by estimated savings** (Advisor tab top).
+  Horizontal bar chart of the top 8 advisor recommendations sorted
+  by `est_annual_savings` desc. Color-coded by severity
+  (high=rose, suggested=amber, info=sky). Hover shows the full
+  rationale. Hidden when no rec has positive savings.
+- **Year-over-year tax-change waterfall** (Compare tab). Starts at
+  the left year's total tax, applies each `/api/diff` driver as an
+  up (rose) or down (emerald) step, lands at the right year's total
+  tax. Residual is folded in as a final step so the bars sum
+  exactly. Sits above the existing per-driver bar list.
+
+All three charts have `data-help` tooltips that explain how to read
+them.
+
+Tests: 378 passing (no logic changes — pure UI additions).
+
 ## [0.37.3] — 2026
 
 ### Form 8889 as a second authoritative HSA source

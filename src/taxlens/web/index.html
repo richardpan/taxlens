@@ -249,6 +249,13 @@
       <tbody id="compareTable" class="divide-y divide-slate-100 font-mono"></tbody>
     </table>
   </div>
+  <div id="taxWaterfallCard" class="mt-6 bg-white rounded-2xl border border-slate-200 p-5 hidden">
+    <div class="flex items-baseline justify-between mb-3">
+      <h3 class="text-lg font-semibold" data-help="Waterfall chart: starts at the left year's total tax, applies each driver as a step up (red, your tax went up) or down (green, your tax went down), and lands at the right year's total tax. Use to see at a glance which factors moved your tax bill the most.">How tax moved between years</h3>
+      <div class="text-xs text-slate-500">Bars are stacked steps. Hover for detail.</div>
+    </div>
+    <svg id="taxWaterfall" viewBox="0 0 800 360" class="w-full"></svg>
+  </div>
   <div id="diffPanel" class="mt-6 bg-white rounded-2xl border border-slate-200 p-5 hidden">
     <div class="flex items-baseline justify-between mb-3">
       <h3 class="text-lg font-semibold">What changed?</h3>
@@ -362,7 +369,7 @@
 </main>
 
 <footer class="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
-  TaxLens · local-first · v0.37.3
+  TaxLens · local-first · v0.38.0
 </footer>
 
 <script src="/static/app.js"></script>

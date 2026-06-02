@@ -791,6 +791,118 @@ async function renderYearDetail() {
   }).join('');
 
   drawSankey(full);
+  drawDeductionWaterfall(full);
+}
+
+// Deduction waterfall: gross income → AGI → taxable income, with each
+// adjustment / deduction shown as a labeled downward step. Renders as
+// pure SVG so we don't need a Chart.js plugin. Steps are computed from
+// the same fields the engine uses, so the bars sum to the model's
+// actual AGI / taxable-income (no separate accounting needed).
+function drawDeductionWaterfall(full) {
+  const r = full.result, ret = full.return;
+  const num = (v) => Number(v || 0);
+  // Gross income = sum of the same buckets the Sankey shows. We use
+  // result.agi + the pre-AGI adjustments to back into a consistent gross.
+  const adjustments = [
+    ['HSA deduction',           num(ret.hsa_deduction)],
+    ['Trad. IRA',               num(ret.traditional_ira_contributions)],
+    ['½ SE tax',                num(r.se_tax) / 2],
+    ['Student loan interest',   num(ret.student_loan_interest_paid)],
+    ['Educator expenses',       num(r.educator_expense_deduction)],
+    ['Other adjustments',       num(ret.other_adjustments)],
+  ].filter(([, v]) => v > 0.5);
+  const totalAdj = adjustments.reduce((s, [, v]) => s + v, 0);
+  const agi = num(r.agi);
+  const gross = agi + totalAdj;
+  const stdItem = num(r.deduction_used);
+  const qbi = num(r.qbi_deduction);
+  const taxable = num(r.taxable_income);
+
+  // Build the step list. Sign convention: positive = goes up, negative = down.
+  // The first and last bars are anchored "totals" (full-height), the middle
+  // bars are floating steps.
+  const steps = [
+    { label: 'Gross income', kind: 'total', value: gross },
+    ...adjustments.map(([k, v]) => ({ label: k, kind: 'adj', value: -v })),
+    { label: 'AGI', kind: 'total', value: agi },
+    ...(stdItem > 0 ? [{ label: ret.itemize ? 'Itemized' : 'Standard ded.', kind: 'ded', value: -stdItem }] : []),
+    ...(qbi > 0 ? [{ label: 'QBI deduction', kind: 'ded', value: -qbi }] : []),
+    { label: 'Taxable income', kind: 'total', value: taxable },
+  ];
+
+  const target = $('#deductionWaterfall');
+  if (!target || gross <= 0) {
+    if (target) target.innerHTML = '<text x="20" y="40" font-size="13" fill="#94a3b8">No deduction data for this year.</text>';
+    return;
+  }
+
+  const W = 800, H = 280, padL = 60, padR = 16, padT = 20, padB = 60;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const barW = Math.min(70, innerW / steps.length - 8);
+  const slot = innerW / steps.length;
+  const yMax = Math.max(gross, agi);  // gross is always largest
+  const yScale = innerH / yMax;
+  // Walk the steps to compute (running) and bar segments.
+  let running = 0;
+  const drawn = steps.map((s, i) => {
+    let top, bot, color;
+    if (s.kind === 'total') {
+      // anchored bar from baseline
+      top = s.value;
+      bot = 0;
+      color = i === 0 ? '#0f172a' : (i === steps.length - 1 ? '#1e293b' : '#334155');
+      running = s.value;
+    } else {
+      // floating step: from current running down by |s.value|
+      top = running;
+      bot = running + s.value;  // s.value < 0 so bot < top
+      color = s.kind === 'adj' ? '#0ea5e9' : '#14b8a6';
+      running = bot;
+    }
+    const yTop = padT + (yMax - top) * yScale;
+    const yBot = padT + (yMax - bot) * yScale;
+    const x = padL + i * slot + (slot - barW) / 2;
+    return { ...s, x, yTop, yBot, h: Math.max(2, yBot - yTop), color, top, bot };
+  });
+
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  // Connector dotted lines from each step's top to the next bar's start
+  const connectors = drawn.slice(0, -1).map((s, i) => {
+    const next = drawn[i + 1];
+    const y = next.kind === 'total' ? padT + (yMax - 0) * yScale : s.yTop;
+    // For floating steps we connect at the running level (top of next or bottom of current)
+    const yc = next.kind === 'total'
+      ? padT + (yMax - (s.kind === 'total' ? s.value : s.bot)) * yScale
+      : padT + (yMax - (s.kind === 'total' ? s.value : s.bot)) * yScale;
+    return `<line x1="${s.x + barW}" y1="${yc}" x2="${next.x}" y2="${yc}" stroke="#cbd5e1" stroke-dasharray="3,3"/>`;
+  }).join('');
+
+  const bars = drawn.map((s) => {
+    const valLabel = s.kind === 'total' ? fmt(s.value) : (s.value < 0 ? '−' : '+') + fmt(Math.abs(s.value));
+    const valY = Math.max(padT + 12, s.yTop - 4);
+    return `
+      <rect x="${s.x}" y="${s.yTop}" width="${barW}" height="${s.h}" rx="3" fill="${s.color}">
+        <title>${esc(s.label)}: ${valLabel}</title>
+      </rect>
+      <text x="${s.x + barW/2}" y="${valY}" text-anchor="middle" font-size="10" fill="#475569" font-family="ui-sans-serif,system-ui">
+        ${valLabel}
+      </text>
+      <text x="${s.x + barW/2}" y="${H - padB + 14}" text-anchor="middle" font-size="10" fill="#334155" font-family="ui-sans-serif,system-ui">
+        <tspan>${esc(s.label.length > 14 ? s.label.slice(0,13) + '…' : s.label)}</tspan>
+      </text>`;
+  }).join('');
+
+  // Y-axis tick marks at 0 / 50% / 100% of yMax.
+  const ticks = [0, yMax/2, yMax].map(v => {
+    const y = padT + (yMax - v) * yScale;
+    return `<g>
+      <line x1="${padL - 4}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e2e8f0"/>
+      <text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${fmt(v)}</text>
+    </g>`;
+  }).join('');
+
+  target.innerHTML = ticks + connectors + bars;
 }
 
 // Lightweight SVG Sankey: income sources (left) → tax buckets + take-home (right).
@@ -1073,9 +1185,121 @@ async function renderDiff(li, ri) {
     document.getElementById('diffResidual').textContent = Math.abs(resid) >= 1
       ? `Unattributed residual (bracket-crossing & non-linear interactions): ${resid > 0 ? '+' : ''}${fmt(resid)}`
       : 'All deltas attributed cleanly.';
+    drawTaxWaterfall(d);
   } catch (e) {
     panel.classList.add('hidden');
+    document.getElementById('taxWaterfallCard')?.classList.add('hidden');
   }
+}
+
+// Year-over-year tax change waterfall. Anchored bars on the left (Year-A
+// total tax) and right (Year-B total tax); floating bars in between for
+// each driver. Up = tax went up (rose), down = tax went down (emerald).
+function drawTaxWaterfall(d) {
+  const card = document.getElementById('taxWaterfallCard');
+  const target = document.getElementById('taxWaterfall');
+  if (!card || !target) return;
+  const leftTotal  = Number(d.left.total_tax);
+  const rightTotal = Number(d.right.total_tax);
+  // Filter to drivers with material attribution; group "rules" + tiny ones into a residual.
+  const drivers = (d.drivers || [])
+    .map(x => ({ label: x.label, kind: x.kind, value: Number(x.attributed_tax || 0) }))
+    .filter(x => Math.abs(x.value) >= 1);
+  const residual = Number(d.residual || 0);
+  if (Math.abs(residual) >= 1) drivers.push({ label: 'Residual', kind: 'rules', value: residual });
+  if (drivers.length === 0 || (leftTotal === 0 && rightTotal === 0)) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+
+  // Build the step list.
+  const steps = [
+    { label: `TY${d.left.tax_year} total tax`, kind: 'total', value: leftTotal },
+    ...drivers,
+    { label: `TY${d.right.tax_year} total tax`, kind: 'total', value: rightTotal },
+  ];
+
+  const W = 800, padL = 50, padR = 16, padT = 24, padB = 80;
+  const slotW = Math.max(60, (W - padL - padR) / steps.length);
+  const totalW = padL + slotW * steps.length + padR;
+  const H = 360, innerH = H - padT - padB;
+  target.setAttribute('viewBox', `0 0 ${Math.max(W, totalW)} ${H}`);
+  const barW = Math.min(56, slotW - 12);
+
+  // Compute running level + value range so the y-axis fits.
+  let running = 0;
+  const slotInfo = steps.map((s, i) => {
+    let top, bot;
+    if (s.kind === 'total') { top = s.value; bot = 0; running = s.value; }
+    else { top = running + Math.max(0, s.value); bot = running + Math.min(0, s.value); running = running + s.value; }
+    return { ...s, top, bot, runAfter: running };
+  });
+  const yMax = Math.max(leftTotal, rightTotal, ...slotInfo.map(s => s.top));
+  const yMin = Math.min(0, ...slotInfo.map(s => s.bot));
+  const range = yMax - yMin || 1;
+  const yScale = innerH / range;
+  const yOf = (v) => padT + (yMax - v) * yScale;
+
+  const drawn = slotInfo.map((s, i) => {
+    const x = padL + i * slotW + (slotW - barW) / 2;
+    const yTop = yOf(s.top);
+    const yBot = yOf(s.bot);
+    let color;
+    if (s.kind === 'total') color = '#0f172a';
+    else if (s.value > 0)   color = '#f43f5e';  // tax went up = rose
+    else                    color = '#10b981';  // tax went down = emerald
+    return { ...s, x, yTop, yBot, h: Math.max(2, yBot - yTop), color };
+  });
+
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const valStr = (s) => s.kind === 'total'
+    ? fmt(s.value)
+    : (s.value > 0 ? '+' : '−') + fmt(Math.abs(s.value));
+
+  // Connector lines between bars at the running level.
+  const connectors = drawn.slice(0, -1).map((s, i) => {
+    const next = drawn[i + 1];
+    const yc = yOf(next.kind === 'total' ? next.value : (s.runAfter));
+    return `<line x1="${s.x + barW}" y1="${yc}" x2="${next.x}" y2="${yc}" stroke="#cbd5e1" stroke-dasharray="3,3"/>`;
+  }).join('');
+
+  // Y-axis: zero line + max line.
+  const zeroY = yOf(0);
+  const axis = `
+    <line x1="${padL - 4}" y1="${zeroY}" x2="${Math.max(W, totalW) - padR}" y2="${zeroY}" stroke="#cbd5e1"/>
+    <text x="${padL - 6}" y="${zeroY + 3}" text-anchor="end" font-size="9" fill="#94a3b8">$0</text>
+    <text x="${padL - 6}" y="${yOf(yMax) + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${fmt(yMax)}</text>`;
+
+  // Wrap labels up to ~14 chars each on two lines using a simple split.
+  const wrapLabel = (label) => {
+    if (label.length <= 14) return [label];
+    const words = label.split(/\s+/);
+    const lines = ['', ''];
+    let li = 0;
+    for (const w of words) {
+      if ((lines[li] + ' ' + w).trim().length > 14 && li === 0) li = 1;
+      lines[li] = (lines[li] + ' ' + w).trim();
+    }
+    return lines.filter(Boolean);
+  };
+
+  const bars = drawn.map((s) => {
+    const lbl = valStr(s);
+    const labelY = Math.max(padT + 12, s.yTop - 4);
+    const lines = wrapLabel(s.label);
+    const labelTspans = lines.map((ln, idx) =>
+      `<tspan x="${s.x + barW/2}" dy="${idx === 0 ? 14 : 11}">${esc(ln)}</tspan>`
+    ).join('');
+    return `
+      <rect x="${s.x}" y="${s.yTop}" width="${barW}" height="${s.h}" rx="3" fill="${s.color}">
+        <title>${esc(s.label)}: ${lbl}</title>
+      </rect>
+      <text x="${s.x + barW/2}" y="${labelY}" text-anchor="middle" font-size="10" fill="#475569" font-family="ui-sans-serif,system-ui">${lbl}</text>
+      <text x="${s.x + barW/2}" y="${H - padB + 2}" text-anchor="middle" font-size="10" fill="#334155" font-family="ui-sans-serif,system-ui">${labelTspans}</text>`;
+  }).join('');
+
+  target.innerHTML = axis + connectors + bars;
 }
 
 // ─── boot ──────────────────────────────────────────────────────────────────
@@ -1127,6 +1351,78 @@ async function renderAdvisor() {
         ].join('');
       }).join('')
     : '<div class="text-sm text-slate-500 italic">Import a return to see year-specific advice.</div>';
+
+  drawAdvisorSavingsChart(allRecs);
+}
+
+// Horizontal bar chart of recommendations sorted by est. annual savings.
+// Renders as SVG (consistent with the other Round-2 visualizations and
+// avoids needing a Chart.js plugin). Hidden when no recs have savings.
+function drawAdvisorSavingsChart(allRecs) {
+  const card = document.getElementById('advisorSavingsCard');
+  const target = document.getElementById('advisorSavingsChart');
+  if (!card || !target) return;
+  const ranked = allRecs
+    .map(r => ({ ...r, savings: Number(r.est_annual_savings || 0) }))
+    .filter(r => r.savings > 0)
+    .sort((a, b) => b.savings - a.savings)
+    .slice(0, 8);  // top 8
+  if (ranked.length === 0) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+
+  const W = 800, H = 50 + ranked.length * 36, padL = 240, padR = 110, padT = 16;
+  target.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const maxSavings = ranked[0].savings;
+  const innerW = W - padL - padR;
+
+  const SEV_FILL = {
+    high:      '#f43f5e',  // rose-500
+    suggested: '#f59e0b',  // amber-500
+    info:      '#0ea5e9',  // sky-500
+  };
+
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const trim = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+
+  const rows = ranked.map((r, i) => {
+    const y = padT + i * 36;
+    const w = (r.savings / maxSavings) * innerW;
+    const fill = SEV_FILL[r.severity] || '#64748b';
+    const labelTitle = `${r.title}\n${r.rationale}`;
+    return `
+      <g>
+        <text x="${padL - 8}" y="${y + 16}" text-anchor="end" font-size="12" fill="#1e293b" font-family="ui-sans-serif,system-ui">
+          ${esc(trim(r.title, 38))}
+          <title>${esc(labelTitle)}</title>
+        </text>
+        <rect x="${padL}" y="${y + 4}" width="${w}" height="22" rx="3" fill="${fill}" opacity="0.9">
+          <title>${esc(labelTitle)} — ${'$' + Math.round(r.savings).toLocaleString()}/yr</title>
+        </rect>
+        <text x="${padL + w + 6}" y="${y + 20}" font-size="12" fill="#0f172a" font-mono="true" font-family="ui-monospace,monospace">
+          $${Math.round(r.savings).toLocaleString()}/yr
+        </text>
+      </g>`;
+  }).join('');
+
+  // X-axis baseline + a couple of grid ticks
+  const ticks = [0, maxSavings/2, maxSavings].map(v => {
+    const x = padL + (v / maxSavings) * innerW;
+    return `<line x1="${x}" y1="${padT}" x2="${x}" y2="${H - 8}" stroke="#e2e8f0"/>
+            <text x="${x}" y="${H - 2}" text-anchor="middle" font-size="9" fill="#94a3b8">$${Math.round(v).toLocaleString()}</text>`;
+  }).join('');
+
+  // Legend
+  const legend = `
+    <g transform="translate(${padL}, ${H - 24})" font-size="10" font-family="ui-sans-serif,system-ui" fill="#475569">
+      <rect x="0" y="0" width="10" height="10" fill="${SEV_FILL.high}"/><text x="14" y="9">High</text>
+      <rect x="60" y="0" width="10" height="10" fill="${SEV_FILL.suggested}"/><text x="74" y="9">Suggested</text>
+      <rect x="148" y="0" width="10" height="10" fill="${SEV_FILL.info}"/><text x="162" y="9">Info</text>
+    </g>`;
+
+  target.innerHTML = ticks + rows + legend;
 }
 
 function advTile(label, value, sub) {
