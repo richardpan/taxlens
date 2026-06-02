@@ -1921,58 +1921,98 @@ function drawCarryforwardVintages(svgId, cardId, fulls) {
   svg.innerHTML = html;
 }
 
+function _attachChartLegend(svg, redraw) {
+  // Wire up hover-highlight and click-toggle behavior on every element
+  // tagged `.legend-item` (and matching shapes tagged `data-sidx`).
+  // Hovering a legend entry fades non-matching shapes to 0.2 opacity;
+  // clicking toggles the series in `svg._hiddenSet` and triggers a
+  // redraw via the supplied callback.
+  svg._hiddenSet = svg._hiddenSet || new Set();
+  const items = svg.querySelectorAll('.legend-item');
+  items.forEach(item => {
+    const idx = Number(item.dataset.sidx);
+    item.style.cursor = 'pointer';
+    item.addEventListener('mouseenter', () => {
+      svg.querySelectorAll('[data-sidx]').forEach(el => {
+        if (el.classList.contains('legend-item')) return;
+        if (Number(el.dataset.sidx) !== idx) el.style.opacity = '0.18';
+      });
+    });
+    item.addEventListener('mouseleave', () => {
+      svg.querySelectorAll('[data-sidx]').forEach(el => {
+        if (el.classList.contains('legend-item')) return;
+        el.style.opacity = '';
+      });
+    });
+    item.addEventListener('click', () => {
+      if (svg._hiddenSet.has(idx)) svg._hiddenSet.delete(idx);
+      else svg._hiddenSet.add(idx);
+      redraw();
+    });
+  });
+}
+
 function drawLineChart(svgId, xs, series, opts = {}) {
   const svg = document.getElementById(svgId);
   if (!svg) return;
+  svg._hiddenSet = svg._hiddenSet || new Set();
+  const hidden = svg._hiddenSet;
   const W = 600, H = 280, P = { l: 60, r: 20, t: 20, b: 40 };
   const innerW = W - P.l - P.r, innerH = H - P.t - P.b;
-  const all = series.flatMap(s => s.data);
+  const visibleData = series.flatMap((s, i) => hidden.has(i) ? [] : s.data);
+  const all = visibleData.length ? visibleData : [0];
   const ymin = Math.min(0, ...all);
   const ymax = Math.max(...all, 1);
   const xpos = i => P.l + (xs.length === 1 ? innerW / 2 : (i / (xs.length - 1)) * innerW);
   const ypos = v => P.t + innerH - ((v - ymin) / (ymax - ymin)) * innerH;
   const yfmt = opts.yfmt || (v => String(v));
   let html = '';
-  // Y gridlines
   for (let i = 0; i <= 4; i++) {
     const v = ymin + (ymax - ymin) * (i / 4);
     const y = ypos(v);
     html += `<line x1="${P.l}" y1="${y}" x2="${W - P.r}" y2="${y}" stroke="#e2e8f0"/>`;
     html += `<text x="${P.l - 6}" y="${y + 4}" font-size="10" fill="#64748b" text-anchor="end">${yfmt(v)}</text>`;
   }
-  // X labels
   xs.forEach((x, i) => {
     html += `<text x="${xpos(i)}" y="${H - P.b + 16}" font-size="11" fill="#475569" text-anchor="middle">${x}</text>`;
   });
-  // Lines
-  series.forEach(s => {
+  series.forEach((s, sidx) => {
+    if (hidden.has(sidx)) return;
     const d = s.data.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xpos(i)} ${ypos(v)}`).join(' ');
-    html += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+    html += `<path data-sidx="${sidx}" d="${d}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
     s.data.forEach((v, i) => {
-      html += `<circle cx="${xpos(i)}" cy="${ypos(v)}" r="3" fill="${s.color}"/>`;
+      html += `<circle data-sidx="${sidx}" cx="${xpos(i)}" cy="${ypos(v)}" r="3" fill="${s.color}"/>`;
     });
   });
-  // Legend
   series.forEach((s, i) => {
     const x = P.l + i * 140, y = P.t - 4;
-    html += `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}"/>`;
-    html += `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155">${s.label}</text>`;
+    const off = hidden.has(i);
+    const swatchOpacity = off ? '0.35' : '1';
+    const textDeco = off ? 'line-through' : 'none';
+    html += `<g class="legend-item" data-sidx="${i}">`;
+    html +=   `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}" opacity="${swatchOpacity}"/>`;
+    html +=   `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155" text-decoration="${textDeco}">${s.label}</text>`;
+    html += `</g>`;
   });
   svg.innerHTML = html;
+  _attachChartLegend(svg, () => drawLineChart(svgId, xs, series, opts));
 }
 
 function drawStackedBars(svgId, xs, series) {
   const svg = document.getElementById(svgId);
   if (!svg) return;
+  svg._hiddenSet = svg._hiddenSet || new Set();
+  const hidden = svg._hiddenSet;
   const W = 800, H = 320, P = { l: 70, r: 140, t: 20, b: 40 };
   const innerW = W - P.l - P.r, innerH = H - P.t - P.b;
-  const totals = xs.map((_, i) => series.reduce((s, ser) => s + (ser.data[i] || 0), 0));
+  const totals = xs.map((_, i) =>
+    series.reduce((s, ser, sidx) => s + (hidden.has(sidx) ? 0 : (ser.data[i] || 0)), 0)
+  );
   const ymax = Math.max(1, ...totals);
   const barW = innerW / Math.max(xs.length, 1) * 0.6;
   const slot  = innerW / Math.max(xs.length, 1);
   const ypos = v => P.t + innerH - (v / ymax) * innerH;
   let html = '';
-  // Y gridlines
   for (let i = 0; i <= 4; i++) {
     const v = ymax * (i / 4);
     const y = ypos(v);
@@ -1982,20 +2022,26 @@ function drawStackedBars(svgId, xs, series) {
   xs.forEach((x, i) => {
     const cx = P.l + slot * (i + 0.5);
     let acc = 0;
-    series.forEach(s => {
+    series.forEach((s, sidx) => {
+      if (hidden.has(sidx)) return;
       const v = s.data[i] || 0;
       if (v <= 0) return;
       const y0 = ypos(acc + v), y1 = ypos(acc);
-      html += `<rect x="${cx - barW / 2}" y="${y0}" width="${barW}" height="${Math.max(0, y1 - y0)}" fill="${s.color}"><title>${s.label}: ${fmt(v)}</title></rect>`;
+      html += `<rect data-sidx="${sidx}" x="${cx - barW / 2}" y="${y0}" width="${barW}" height="${Math.max(0, y1 - y0)}" fill="${s.color}"><title>${s.label}: ${fmt(v)}</title></rect>`;
       acc += v;
     });
     html += `<text x="${cx}" y="${H - P.b + 16}" font-size="11" fill="#475569" text-anchor="middle">${x}</text>`;
   });
-  // Legend
   series.forEach((s, i) => {
     const x = W - P.r + 10, y = P.t + i * 18;
-    html += `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}"/>`;
-    html += `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155">${s.label}</text>`;
+    const off = hidden.has(i);
+    const swatchOpacity = off ? '0.35' : '1';
+    const textDeco = off ? 'line-through' : 'none';
+    html += `<g class="legend-item" data-sidx="${i}">`;
+    html +=   `<rect x="${x}" y="${y}" width="10" height="10" fill="${s.color}" opacity="${swatchOpacity}"/>`;
+    html +=   `<text x="${x + 14}" y="${y + 9}" font-size="11" fill="#334155" text-decoration="${textDeco}">${s.label}</text>`;
+    html += `</g>`;
   });
   svg.innerHTML = html;
+  _attachChartLegend(svg, () => drawStackedBars(svgId, xs, series));
 }

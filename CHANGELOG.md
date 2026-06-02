@@ -2,6 +2,30 @@
 
 All notable changes to TaxLens.
 
+## [0.40.3] — 2026
+
+### Interactive chart legends
+
+Both `drawLineChart` and `drawStackedBars` (which power the Trends
+tab and the latest-year line chart on the Year detail) now have:
+
+- **Hover-highlight.** Hovering a legend swatch / label fades every
+  shape that doesn't belong to that series down to 0.18 opacity, so
+  it's easy to pick the right ribbon when colors are similar (e.g.
+  ordinary-dividends green vs. qualified-dividends green).
+- **Click-toggle visibility.** Clicking a legend entry hides that
+  series and re-renders with the y-axis re-fit; the legend swatch
+  dims and the label gets a strikethrough so the toggle state is
+  obvious. Clicking again restores the series.
+
+Hidden state is stashed on the SVG element, so re-renders triggered
+by other UI interactions (toggling another series, switching tabs
+back, etc.) preserve the user's selections.
+
+A "Tip: hover a legend item to highlight, click to toggle" hint is
+also shown under the Trends-tab header to make the affordance
+discoverable.
+
 ## [0.40.2] — 2026
 
 ### Trends - "Tax composition by year" was missing 4 of 6 categories
