@@ -1769,12 +1769,13 @@ async function renderTrends() {
   drawStackedBars('trendsTaxStack', years, taxSeries);
 
   // YoY table — deltas inline alongside each year's value.
-  // `goodWhen: 'up'` means an increase is good (income, credits, refund) →
+  // `goodWhen: 'up'` means an increase is good (income, credits, refund,
+  // taxable income — more income to be taxed = more income earned) →
   // green for ↑, red for ↓. `goodWhen: 'down'` is the inverse (taxes,
-  // taxable income, effective rate) → red for ↑, green for ↓.
+  // effective rate) → red for ↑, green for ↓.
   const yoyRows = [
     { label: 'AGI',           pick: f => Number(f.result.agi),                                                                          goodWhen: 'up'   },
-    { label: 'Taxable income',pick: f => Number(f.result.taxable_income),                                                               goodWhen: 'down' },
+    { label: 'Taxable income',pick: f => Number(f.result.taxable_income),                                                               goodWhen: 'up'   },
     { label: 'Total tax',     pick: f => Number(f.result.total_tax),                                                                    goodWhen: 'down' },
     { label: 'Effective rate',pick: f => { const a = Number(f.result.agi) || 1; return Number(f.result.total_tax) / a * 100; }, isPct: true, goodWhen: 'down' },
     { label: 'Refund / owed', pick: f => Number(f.result.refund_or_owed),                                                               goodWhen: 'up'   },

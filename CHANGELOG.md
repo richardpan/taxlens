@@ -2,6 +2,17 @@
 
 All notable changes to TaxLens.
 
+## [0.42.1] — 2026
+
+### Trends YoY: Taxable income delta is now green when up
+
+Tweak: the inline YoY delta for "Taxable income" was inheriting the
+same color logic as taxes (red when up, green when down). But more
+taxable income generally means more income earned — a positive thing.
+Switched its `goodWhen` flag from `down` to `up` so an increase shows
+green and a decrease shows red, consistent with AGI and other income
+metrics. Tax rows (Total tax, Effective rate) are unchanged.
+
 ## [0.42.0] — 2026
 
 ### Advanced what-if simulators
