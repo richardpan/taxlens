@@ -1643,20 +1643,55 @@ async function renderTrends() {
   }));
   drawStackedBars('trendsStack', years, series);
 
-  // Stacked tax composition (positive = tax owed pieces; reflects what drove total_tax)
+  // Stacked tax composition. Bars should sum to each year's total_tax,
+  // so we (a) use the actual TaxResult field names (the previous code
+  // referenced `tax_before_credits` / `amt_tax` / `self_employment_tax`,
+  // none of which exist — only NIIT and Add'l Medicare were rendering),
+  // and (b) net the result's `credits` aggregate against the gross
+  // components in priority order so each bar's stacked total equals
+  // `total_tax` rather than gross-tax-before-credits.
   const taxBuckets = [
-    { key: 'tax_before_credits',      label: 'Ordinary + qual',    color: '#0ea5e9' },
-    { key: 'amt_tax',                 label: 'AMT add-on',         color: '#f59e0b' },
-    { key: 'self_employment_tax',     label: 'SE tax',             color: '#ec4899' },
-    { key: 'niit',                    label: 'NIIT 3.8%',          color: '#a855f7' },
-    { key: 'additional_medicare_tax', label: 'Addl Medicare',      color: '#f97316' },
-    { key: 'ptc_excess_aptc_repayment', label: 'Excess APTC',      color: '#dc2626' },
+    { key: 'ordinary_tax',                         label: 'Ordinary income tax', color: '#0ea5e9' },
+    { key: '__capgains',                           label: 'Capital gains tax',   color: '#a855f7' },
+    { key: 'amt',                                  label: 'AMT add-on',          color: '#f59e0b' },
+    { key: 'se_tax',                               label: 'SE tax',              color: '#ec4899' },
+    { key: 'niit',                                 label: 'NIIT 3.8%',           color: '#14b8a6' },
+    { key: 'additional_medicare_tax',              label: 'Add\u2019l Medicare', color: '#f97316' },
+    { key: 'ptc_excess_aptc_repayment',            label: 'Excess APTC',         color: '#dc2626' },
+    { key: '__penalties',                          label: 'Penalties (§72(t)/5329)', color: '#475569' },
   ];
-  const taxSeries = taxBuckets.map(b => ({
-    label: b.label,
-    color: b.color,
-    data: fulls.map(f => Math.max(0, Number(f.result[b.key] || 0))),
-  }));
+  const taxSeries = taxBuckets.map(b => ({ label: b.label, color: b.color, data: [] }));
+  fulls.forEach(f => {
+    const r = f.result;
+    const grossByKey = {
+      ordinary_tax: Math.max(0, Number(r.ordinary_tax || 0)),
+      __capgains: Math.max(0, Number(r.qualified_tax || 0))
+                  + Math.max(0, Number(r.collectibles_tax || 0))
+                  + Math.max(0, Number(r.unrecaptured_1250_tax || 0)),
+      amt: Math.max(0, Number(r.amt || 0)),
+      se_tax: Math.max(0, Number(r.se_tax || 0)),
+      niit: Math.max(0, Number(r.niit || 0)),
+      additional_medicare_tax: Math.max(0, Number(r.additional_medicare_tax || 0)),
+      ptc_excess_aptc_repayment: Math.max(0, Number(r.ptc_excess_aptc_repayment || 0)),
+      __penalties: Math.max(0, Number(r.early_withdrawal_penalty || 0))
+                   + Math.max(0, Number(r.excess_ira_contribution_excise || 0))
+                   + Math.max(0, Number(r.rmd_shortfall_excise || 0)),
+    };
+    // Net the aggregate `credits` value against gross components in the
+    // bucket order above. Credits offset regular tax first (ordinary,
+    // capital gains, AMT) before any other line — this matches how Form
+    // 1040 and Schedule 3 cascade non-refundable credits.
+    let remaining = Math.max(0, Number(r.credits || 0));
+    taxBuckets.forEach((b, i) => {
+      let v = grossByKey[b.key];
+      if (remaining > 0) {
+        const sub = Math.min(remaining, v);
+        v -= sub;
+        remaining -= sub;
+      }
+      taxSeries[i].data.push(v);
+    });
+  });
   drawStackedBars('trendsTaxStack', years, taxSeries);
 
   // YoY table — deltas inline alongside each year's value.

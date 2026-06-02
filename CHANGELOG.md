@@ -2,6 +2,34 @@
 
 All notable changes to TaxLens.
 
+## [0.40.2] — 2026
+
+### Trends - "Tax composition by year" was missing 4 of 6 categories
+
+The Trends-tab stacked-bar chart was looking up `tax_before_credits`,
+`amt_tax`, and `self_employment_tax` on the result object, but the
+actual TaxResult fields are named `ordinary_tax` / `qualified_tax`
+(separately), `amt`, and `se_tax`. Four of six categories silently
+resolved to 0, leaving only NIIT and Additional Medicare visible.
+
+Fixed by:
+
+- Using the real field names.
+- Splitting the previous `Ordinary + qual` bucket into "Ordinary
+  income tax" and "Capital gains tax" (the latter rolls together
+  qualified-dividend / LTCG preferential rates plus the 25%/28%
+  caps for unrecaptured §1250 and collectibles).
+- Adding a "Penalties (§72(t) / 5329)" bucket so early-withdrawal
+  and Form-5329 excise taxes also show up.
+- Netting the result's aggregate `credits` value against the gross
+  components in priority order (ordinary first, then capital gains,
+  then AMT, etc. — matching how Form 1040 / Schedule 3 cascade
+  non-refundable credits). Bars now sum to **total_tax**, not to
+  gross-tax-before-credits.
+
+The tooltip is updated to spell out every bucket and to be explicit
+that bars represent post-credits tax liability.
+
 ## [0.40.1] — 2026
 
 ### Trends-page visualization fixes
