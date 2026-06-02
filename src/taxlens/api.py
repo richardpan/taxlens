@@ -88,7 +88,7 @@ async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
             "result": result.model_dump(mode="json"),
         }
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         # Anything else (encrypted PDF, parser crash, pydantic validation, etc.)
         # — return diagnostic info instead of a bare 500 so the user sees what went wrong.
@@ -98,7 +98,7 @@ async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
             422,
             f"Could not parse {file.filename or 'upload'}: {type(e).__name__}: {e}. "
             f"Try /api/debug/extract to inspect the PDF text. Tail: {' | '.join(tb)}",
-        )
+        ) from e
     finally:
         tmp_path.unlink(missing_ok=True)
 

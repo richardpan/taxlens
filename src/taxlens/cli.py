@@ -1,6 +1,7 @@
 """Typer-based CLI. Entry point: `taxlens` after `pip install -e .`."""
 from __future__ import annotations
 
+import contextlib
 import webbrowser
 from pathlib import Path
 from typing import Optional
@@ -109,14 +110,12 @@ def serve_cmd(
             console.print("[green]✓ Database unlocked.[/]")
         except ValueError as e:
             console.print(f"[red]{e}[/]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
     url = f"http://{host}:{port}/"
     if open_browser:
-        try:
+        with contextlib.suppress(Exception):
             webbrowser.open(url)
-        except Exception:
-            pass
     console.print(f"[green]TaxLens UI:[/] {url}")
     uvicorn.run("taxlens.api:app", host=host, port=port, log_level="info")
 
@@ -145,7 +144,7 @@ def unlock_cmd(
         plain = secure_db.unlock(passphrase)
     except ValueError as e:
         console.print(f"[red]{e}[/]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     console.print(f"[green]✓ Unlocked[/] → {plain}")
 
 

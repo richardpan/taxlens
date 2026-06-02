@@ -553,13 +553,9 @@ def _is_form_page(text: str) -> bool:
     because vendor summary pages never include OMB numbers."""
     if not text or not text.strip():
         return False
-    for s_pat in _SUMMARY_PAGE_PATTERNS:
-        if s_pat.search(text):
-            return False
-    for pat in _FORM_PAGE_PATTERNS:
-        if pat.search(text):
-            return True
-    return False
+    if any(s_pat.search(text) for s_pat in _SUMMARY_PAGE_PATTERNS):
+        return False
+    return any(pat.search(text) for pat in _FORM_PAGE_PATTERNS)
 
 
 def _form_pages(pages: list[str]) -> list[str]:
