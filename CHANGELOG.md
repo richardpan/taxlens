@@ -2,6 +2,16 @@
 
 All notable changes to TaxLens.
 
+## [0.42.7] — 2026
+
+### Dashboard: widen tax-composition share table to full grid width
+
+The new "Tax composition share by year" table was rendering in a
+single-column slot on the dashboard's 3-column grid, which made it
+visually narrower than the related "Tax composition by year" stacked
+bar chart sitting just below it. Promoted to `lg:col-span-3` so the
+two compositions read as a matched pair at the same width.
+
 ## [0.42.6] — 2026
 
 ### Dashboard: replace single-year donut with multi-year share table
