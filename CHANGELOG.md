@@ -2,6 +2,36 @@
 
 All notable changes to TaxLens.
 
+## [0.42.0] — 2026
+
+### Advanced what-if simulators
+
+The single-year Roth and TLH simulators were already wired; this
+release expands them with multi-year projection tools and IRMAA /
+wash-sale awareness.
+
+- **Multi-year Roth conversion ladder** —
+  `simulators.simulate_roth_conversion_ladder(base, schedule)` and
+  `POST /api/returns/{id}/simulate/roth-ladder`. Takes a per-year
+  schedule (e.g. `[40000, 40000, 40000]`), reuses the base return as
+  a static template across years, and reports per-rung tax delta +
+  marginal rate + IRMAA tier with a cumulative summary. UI: new
+  "Multi-year ladder" panel under Plan → Roth conversion.
+- **IRMAA tier detection** — single-year Roth simulator now attaches
+  an IRMAA note when the conversion bumps the filer's MAGI into a
+  higher Medicare Part B/D surcharge tier (2-year lookback per SSA
+  rules). 2025 thresholds embedded; falls back to the most recent
+  year present.
+- **TLH wash-sale note** — `simulate_tax_loss_harvest` now attaches
+  the §1091 wash-sale advisory automatically (the engine can't
+  verify trade history, but the user needs the reminder).
+- **TLH carryforward depletion projection** —
+  `simulators.project_tlh_carryforward(loss, year, years=10)` and
+  `POST /api/returns/{id}/simulate/tlh-projection`. Shows worst-case
+  $3k/yr ordinary-offset depletion across N future years. UI: new
+  panel under Plan → Tax-loss harvest.
+- 13 new tests in `tests/test_simulator_enhancements.py`.
+
 ## [0.41.0] — 2026
 
 ### SALT cap engine (§164(b)(6))

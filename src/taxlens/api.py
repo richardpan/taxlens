@@ -254,6 +254,35 @@ def simulate_tlh(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+@app.post("/api/returns/{return_id}/simulate/roth-ladder")
+def simulate_roth_ladder(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    """Project a multi-year Roth conversion ladder. Body schema:
+    ``{"schedule": [40000, 40000, 40000]}`` — the i-th entry is the
+    conversion amount in year (base.tax_year + i)."""
+    schedule = body.get("schedule") or []
+    if not isinstance(schedule, list) or not schedule:
+        raise HTTPException(400, "schedule must be a non-empty list")
+    out = service.simulate_roth_ladder(return_id, schedule)
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
+@app.post("/api/returns/{return_id}/simulate/tlh-projection")
+def simulate_tlh_projection(return_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    """Project the depletion of a TLH carryforward across future years
+    (worst-case $3k/yr ordinary offset). Body: ``{"loss_amount": ...,
+    "years": 10}``."""
+    out = service.project_tlh_carryforward(
+        return_id,
+        body.get("loss_amount", 0),
+        body.get("years", 10),
+    )
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
 # Import-log access ───────────────────────────────────────────────────────────
 # Each PDF import writes a diagnostic log (every AcroForm field, every
 # pattern hit, the final extracted dict). Surface them via the dashboard

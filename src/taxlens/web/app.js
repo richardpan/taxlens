@@ -1546,7 +1546,77 @@ function _renderSim(targetId, out) {
     '<div class="mt-3 text-slate-700">Effective marginal rate: <span class="font-mono">' + _fmtPct(out.federal_marginal_rate) + '</span></div>',
     '<div class="mt-2 text-slate-500 text-xs">Original total tax: $' + Number(out.original.total_tax).toLocaleString() + ' → after: $' + Number(out.after.total_tax).toLocaleString() + '</div>',
   ];
+  if (out.notes && out.notes.length) {
+    for (const note of out.notes) {
+      lines.push('<div class="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">⚠ ' + note + '</div>');
+    }
+  }
   document.getElementById(targetId).innerHTML = lines.join('');
+}
+
+async function runRothLadder() {
+  const id = Number(document.getElementById('planYearPicker').value);
+  const raw = (document.getElementById('rothLadderSchedule').value || '').trim();
+  if (!raw) { document.getElementById('rothLadderResult').textContent = 'Enter a comma-separated schedule (e.g. 40000, 40000, 40000).'; return; }
+  const schedule = raw.split(',').map(s => Number(s.trim().replace(/[$,]/g, ''))).filter(n => !isNaN(n));
+  if (!schedule.length) { document.getElementById('rothLadderResult').textContent = 'Could not parse schedule.'; return; }
+  document.getElementById('rothLadderResult').textContent = 'Projecting…';
+  try {
+    const out = await api('/api/returns/' + id + '/simulate/roth-ladder',
+      { method: 'POST', body: JSON.stringify({ schedule }) });
+    let html = '<div class="text-slate-700 mb-2">' +
+      'Total converted: <span class="font-mono">$' + Number(out.cumulative_converted).toLocaleString() + '</span> · ' +
+      'Total tax: <span class="font-mono">$' + Number(out.cumulative_tax).toLocaleString() + '</span> · ' +
+      'Avg marginal: <span class="font-mono">' + _fmtPct(out.avg_marginal_rate) + '</span></div>';
+    html += '<table class="w-full text-xs border-collapse"><thead><tr class="text-slate-500"><th class="text-left">Year</th><th class="text-right">Convert</th><th class="text-right">Δ tax</th><th class="text-right">Marg rate</th><th class="text-right">IRMAA tier (Y+2)</th></tr></thead><tbody>';
+    for (const r of out.rungs) {
+      const tier = Number(r.irmaa_tier);
+      const tierColor = tier === 0 ? 'text-slate-500' : (tier <= 2 ? 'text-amber-700' : 'text-rose-700');
+      html += '<tr class="border-t border-slate-200">' +
+        '<td>' + r.year + '</td>' +
+        '<td class="text-right font-mono">$' + Number(r.amount).toLocaleString() + '</td>' +
+        '<td class="text-right font-mono">$' + Number(r.tax_delta).toLocaleString() + '</td>' +
+        '<td class="text-right font-mono">' + _fmtPct(r.marginal_rate) + '</td>' +
+        '<td class="text-right font-mono ' + tierColor + '">' + tier + (tier > 0 ? ' (+$' + Number(r.irmaa_surcharge_monthly).toFixed(0) + '/mo)' : '') + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    if (out.notes && out.notes.length) {
+      for (const note of out.notes) {
+        html += '<div class="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">⚠ ' + note + '</div>';
+      }
+    }
+    document.getElementById('rothLadderResult').innerHTML = html;
+  } catch (e) {
+    document.getElementById('rothLadderResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function runTLHProjection() {
+  const id = Number(document.getElementById('planYearPicker').value);
+  const loss_amount = Number(document.getElementById('tlhAmount').value || 0);
+  if (!loss_amount) { document.getElementById('tlhProjResult').textContent = 'Enter a loss amount above first.'; return; }
+  document.getElementById('tlhProjResult').textContent = 'Projecting…';
+  try {
+    const out = await api('/api/returns/' + id + '/simulate/tlh-projection',
+      { method: 'POST', body: JSON.stringify({ loss_amount, years: 10 }) });
+    const rows = out.projection || [];
+    if (!rows.length) { document.getElementById('tlhProjResult').textContent = 'No carryforward to project.'; return; }
+    let html = '<div class="text-slate-500 text-xs mb-1">Worst-case depletion against $3k/yr ordinary offset (assumes no future capital gains):</div>';
+    html += '<table class="w-full text-xs border-collapse"><thead><tr class="text-slate-500"><th class="text-left">Year</th><th class="text-right">Carry in</th><th class="text-right">Used</th><th class="text-right">Carry out</th></tr></thead><tbody>';
+    for (const r of rows) {
+      html += '<tr class="border-t border-slate-200">' +
+        '<td>' + r.year + '</td>' +
+        '<td class="text-right font-mono">$' + Number(r.carryforward_in).toLocaleString() + '</td>' +
+        '<td class="text-right font-mono">$' + Number(r.used_against_ordinary).toLocaleString() + '</td>' +
+        '<td class="text-right font-mono">$' + Number(r.carryforward_out).toLocaleString() + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById('tlhProjResult').innerHTML = html;
+  } catch (e) {
+    document.getElementById('tlhProjResult').textContent = 'Error: ' + e.message;
+  }
 }
 
 async function runRoth() {
@@ -1583,6 +1653,10 @@ const _rothBtn = document.getElementById('rothRun');
 if (_rothBtn) _rothBtn.addEventListener('click', runRoth);
 const _tlhBtn = document.getElementById('tlhRun');
 if (_tlhBtn) _tlhBtn.addEventListener('click', runTLH);
+const _rothLadderBtn = document.getElementById('rothLadderRun');
+if (_rothLadderBtn) _rothLadderBtn.addEventListener('click', runRothLadder);
+const _tlhProjBtn = document.getElementById('tlhProjRun');
+if (_tlhProjBtn) _tlhProjBtn.addEventListener('click', runTLHProjection);
 
 // ─── Trends ─────────────────────────────────────────────────────────────────
 async function renderTrends() {

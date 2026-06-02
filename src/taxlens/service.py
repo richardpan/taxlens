@@ -420,6 +420,26 @@ class TaxLensService:
             return None
         return simulate_tax_loss_harvest(base, Decimal(loss_amount)).to_json()
 
+    def simulate_roth_ladder(self, return_id: int,
+                             schedule: list[Any]) -> dict[str, Any] | None:
+        from taxlens.simulators import simulate_roth_conversion_ladder
+        base = self._load_return(return_id)
+        if base is None:
+            return None
+        decimals = [Decimal(str(x)) for x in schedule]
+        return simulate_roth_conversion_ladder(base, decimals).to_json()
+
+    def project_tlh_carryforward(self, return_id: int, loss_amount: Decimal,
+                                 years: int = 10) -> dict[str, Any] | None:
+        from taxlens.simulators import project_tlh_carryforward
+        base = self._load_return(return_id)
+        if base is None:
+            return None
+        rows = project_tlh_carryforward(
+            Decimal(loss_amount), start_year=base.tax_year, years=int(years),
+        )
+        return {"projection": [r.to_json() for r in rows]}
+
     def commit_override(self, return_id: int, field: str, new_value: str, reason: str | None) -> bool:
         with self.sessionmaker_() as s:
             row = s.get(StoredReturn, return_id)
