@@ -1,0 +1,250 @@
+# Federal tax rules for TY 2013 — PRE-TCJA.
+# First year of the 39.6% top bracket (American Taxpayer Relief Act of
+# 2012), first year of NIIT (3.8%) and Additional Medicare Tax (0.9%)
+# under the Affordable Care Act. PEP and Pease also reinstated this
+# year. Sources: IRS Rev. Proc. 2013-15.
+
+year: 2013
+nol_full_offset: true
+
+standard_deduction:
+  single: 6100
+  mfj: 12200
+  mfs: 6100
+  hoh: 8950
+  qss: 12200
+
+ordinary_brackets:
+  single:
+    - [0,        0.10]
+    - [8925,     0.15]
+    - [36250,    0.25]
+    - [87850,    0.28]
+    - [183250,   0.33]
+    - [398350,   0.35]
+    - [400000,   0.396]
+  mfj:
+    - [0,        0.10]
+    - [17850,    0.15]
+    - [72500,    0.25]
+    - [146400,   0.28]
+    - [223050,   0.33]
+    - [398350,   0.35]
+    - [450000,   0.396]
+  mfs:
+    - [0,        0.10]
+    - [8925,     0.15]
+    - [36250,    0.25]
+    - [73200,    0.28]
+    - [111525,   0.33]
+    - [199175,   0.35]
+    - [225000,   0.396]
+  hoh:
+    - [0,        0.10]
+    - [12750,    0.15]
+    - [48600,    0.25]
+    - [125450,   0.28]
+    - [203150,   0.33]
+    - [398350,   0.35]
+    - [425000,   0.396]
+
+qualified_brackets:
+  single: [[0, 0.00], [36250, 0.15], [400000, 0.20]]
+  mfj:    [[0, 0.00], [72500, 0.15], [450000, 0.20]]
+  mfs:    [[0, 0.00], [36250, 0.15], [225000, 0.20]]
+  hoh:    [[0, 0.00], [48600, 0.15], [425000, 0.20]]
+
+se_tax:
+  net_earnings_multiplier: 0.9235
+  social_security_rate: 0.124
+  social_security_wage_base: 113700
+  medicare_rate: 0.029
+  deductible_fraction: 0.5
+
+additional_medicare:
+  rate: 0.009
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+niit:
+  rate: 0.038
+  threshold:
+    single: 200000
+    mfj:    250000
+    mfs:    125000
+    hoh:    200000
+    qss:    250000
+
+ctc:
+  per_qualifying_child: 1000
+  per_other_dependent: 0
+  refundable_per_child: 1000
+  actc_no_kid_cap: true
+  actc_earned_threshold: 3000
+  actc_rate: 0.15
+  phaseout_start:
+    single: 75000
+    mfj:    110000
+    mfs:    55000
+    hoh:    75000
+    qss:    110000
+  phaseout_per_1000_agi: 50
+
+personal_exemption:
+  amount: 3900
+  phaseout_start:
+    single: 250000
+    mfj:    300000
+    mfs:    150000
+    hoh:    275000
+    qss:    300000
+  phaseout_complete:
+    single: 372500
+    mfj:    422500
+    mfs:    211250
+    hoh:    397500
+    qss:    422500
+
+pease:
+  threshold:
+    single: 250000
+    mfj:    300000
+    mfs:    150000
+    hoh:    275000
+    qss:    300000
+  rate: 0.03
+  max_reduction: 0.80
+
+amt:
+  rate_low: 0.26
+  rate_high: 0.28
+  rate_break:
+    single: 179500
+    mfj:    179500
+    mfs:    89750
+    hoh:    179500
+    qss:    179500
+  exemption:
+    single: 51900
+    mfj:    80800
+    mfs:    40400
+    hoh:    51900
+    qss:    80800
+  exemption_phaseout_start:
+    single: 115400
+    mfj:    153900
+    mfs:    76950
+    hoh:    115400
+    qss:    153900
+  phaseout_rate: 0.25
+
+collectibles_rate: 0.28
+unrecaptured_1250_rate: 0.25
+
+contribution_limits:
+  k401_elective_deferral: 17500
+  k401_catchup_50plus: 5500
+  ira_contribution: 5500
+  ira_catchup_50plus: 1000
+  hsa_self: 3250
+  hsa_family: 6450
+  hsa_catchup_55plus: 1000
+  roth_ira_phaseout_start:
+    single: 112000
+    mfj:    178000
+    mfs:    0
+    hoh:    112000
+    qss:    178000
+  roth_ira_phaseout_end:
+    single: 127000
+    mfj:    188000
+    mfs:    10000
+    hoh:    127000
+    qss:    188000
+
+social_security:
+  base_threshold:
+    single: 25000
+    mfj:    32000
+    mfs:    0
+    hoh:    25000
+    qss:    25000
+  second_threshold:
+    single: 34000
+    mfj:    44000
+    mfs:    0
+    hoh:    34000
+    qss:    34000
+  first_tier_rate: 0.50
+  second_tier_rate: 0.85
+
+ira_deduction:
+  contribution_limit:
+    under_50: 5500
+    fifty_plus: 6500
+  phaseout_covered:
+    single: { start: 59000, end: 69000 }
+    hoh:    { start: 59000, end: 69000 }
+    mfj:    { start: 95000, end: 115000 }
+    qss:    { start: 95000, end: 115000 }
+    mfs:    { start: 0,     end: 10000 }
+  phaseout_spouse_covered_only:
+    mfj:    { start: 178000, end: 188000 }
+    mfs:    { start: 0,     end: 10000 }
+
+student_loan_interest:
+  max_deduction: 2500
+  phaseout:
+    single: { start: 60000, end: 75000 }
+    hoh:    { start: 60000, end: 75000 }
+    qss:    { start: 125000, end: 155000 }
+    mfj:    { start: 125000, end: 155000 }
+    mfs:    { disabled: true }
+
+educator_expense:
+  per_educator_cap: 250
+
+dependent_care_credit:
+  expense_cap_one: 3000
+  expense_cap_two_plus: 6000
+  refundable: false
+  rate_tiers:
+    - [15000, 0.35]
+    - [17000, 0.34]
+    - [19000, 0.33]
+    - [21000, 0.32]
+    - [23000, 0.31]
+    - [25000, 0.30]
+    - [27000, 0.29]
+    - [29000, 0.28]
+    - [31000, 0.27]
+    - [33000, 0.26]
+    - [35000, 0.25]
+    - [37000, 0.24]
+    - [39000, 0.23]
+    - [41000, 0.22]
+    - [43000, 0.21]
+    - [45000, 0.20]
+    - [99999999, 0.20]
+
+residential_clean_energy:
+  rate: 0.30
+
+clean_vehicle:
+  enforce: false
+  new_magi_cap:
+    single: 150000
+    hoh:    225000
+    mfj:    300000
+    qss:    300000
+    mfs:    150000
+  used_magi_cap:
+    single: 75000
+    hoh:    112500
+    mfj:    150000
+    qss:    150000
+    mfs:    75000

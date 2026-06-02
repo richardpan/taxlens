@@ -2,6 +2,40 @@
 
 All notable changes to TaxLens.
 
+## [0.40.0] — 2026
+
+### TY 2010 - 2014 federal rules (pre-TCJA, pre-ATRA)
+
+Extends federal coverage backward to TY 2010, so users with archived
+returns from the Bush-era / pre-Affordable-Care-Act period can run
+them through the full math+visualization pipeline.
+
+Each year-file uses the engine's existing optional fields for older
+features:
+
+- **Personal exemption** (eliminated by TCJA in 2018) — $3,650 (2010)
+  growing to $3,950 (2014). Engine subtracts amount × (1 + spouse +
+  dependents) from taxable income.
+- **Pease + PEP** (suspended 2010 - 2012, reinstated 2013, killed by
+  TCJA) — both phaseouts wired in for TY 2013 and TY 2014.
+- **NIIT and Additional Medicare Tax** — stubbed at rate 0 for
+  2010 - 2012 (these started in 2013 with the ACA), live at 3.8%
+  and 0.9% from 2013 onward.
+- **39.6% top bracket** appears starting in 2013; pre-2013 schedules
+  cap at 35%.
+- **2011 payroll-tax holiday** — TRA-2010 cut the employee SS rate
+  from 6.2% to 4.2% just for 2011, so SE rate sits at 10.4% that
+  year only.
+- **AMT exemption** values use the December 2010 / January 2013 patch
+  amounts (the values that actually applied retroactively).
+
+Sources cited inline as YAML comments: IRS Rev. Proc. 2009-50,
+2010-40, 2011-52, 2013-15, 2013-35; TRA-2010; ATRA-2012.
+
+10 new smoke tests — five rule-load checks plus a parametrized
+bracket walk for a $100k single filer across 2010 - 2014, hitting
+each year's expected ordinary tax to the cent.
+
 ## [0.39.0] — 2026
 
 ### TY 2026 federal rules
