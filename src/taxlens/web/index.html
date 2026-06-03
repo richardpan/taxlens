@@ -183,6 +183,17 @@
       <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax. Categories: ordinary income tax (bracket-walk on wages/interest/STCG); capital-gains tax (preferential 0/15/20% rates on LTCG + qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Additional Medicare (0.9% on Medicare wages above $200k/$250k); state; and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
       <div id="taxBreakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"></div>
     </div>
+    <div id="importedFieldsPanel" class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 hidden">
+      <div class="font-semibold mb-3" data-help="Each extracted line value with a badge showing where it came from: 'acroform' = read directly from the PDF's form widgets (most reliable); 'default' = pdfplumber's default text stream; 'merged' = both streams agreed; 'layout' = recovered only from the layout-aware stream (worth a manual sanity check); 'zero-backfill' = the line label was on the form but blank, so we recorded $0.">Imported fields &amp; provenance</div>
+      <div id="importedFields" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-sm"></div>
+      <div class="text-xs text-slate-500 mt-3">
+        <span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 mr-1">acroform</span>
+        <span class="inline-block px-2 py-0.5 rounded bg-sky-100 text-sky-700 mr-1">default</span>
+        <span class="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 mr-1">merged</span>
+        <span class="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-700 mr-1">layout</span>
+        <span class="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700">zero-backfill</span>
+      </div>
+    </div>
   </div>
 </section>
 

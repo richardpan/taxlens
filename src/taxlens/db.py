@@ -60,6 +60,12 @@ class StoredReturn(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     return_json: Mapped[str] = mapped_column(Text)
+    # JSON map of Return field name → extraction source ("acroform",
+    # "default", "layout", "merged", "zero-backfill"). Populated only by
+    # the PDF importer; null for txf/manual/csv. Surfaced in the UI
+    # return-detail view so layout-only extractions stay visually
+    # flagged for manual review.
+    field_sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cache: Mapped["ComputationCache | None"] = relationship(
         back_populates="ret", uselist=False, cascade="all, delete-orphan"
@@ -104,7 +110,26 @@ def make_engine(db_path: Path | None = None):
     url = f"sqlite:///{path}"
     eng = create_engine(url, future=True)
     Base.metadata.create_all(eng)
+    # Lightweight in-place migrations for older DBs created before
+    # newer columns existed. SQLite's ALTER TABLE ADD COLUMN is safe
+    # and idempotent if guarded with a column-existence check.
+    _migrate_add_columns(eng)
     return eng
+
+
+def _migrate_add_columns(eng) -> None:
+    """Add nullable columns that were introduced after the initial
+    schema. Idempotent: skips columns that already exist."""
+    additions = [
+        ("returns", "field_sources_json", "TEXT"),
+    ]
+    with eng.begin() as conn:
+        for table, col, ddl in additions:
+            existing = {
+                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
+            if col not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 def make_sessionmaker(db_path: Path | None = None) -> sessionmaker[Session]:

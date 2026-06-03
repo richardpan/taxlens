@@ -81,6 +81,7 @@ class TaxLensService:
                 source_hash=imp.source_hash,
                 source_filename=imp.source_filename,
                 return_json=dumps(imp.ret.model_dump(mode="json")),
+                field_sources_json=dumps(imp.field_sources) if imp.field_sources else None,
             )
             row.cache = ComputationCache(result_json=dumps(result.model_dump(mode="json")))
             s.add(row)
@@ -491,6 +492,9 @@ class TaxLensService:
             "imported_at": row.imported_at.isoformat(),
             "return": json.loads(row.return_json),
             "result": json.loads(row.cache.result_json) if row.cache else None,
+            "field_sources": (
+                json.loads(row.field_sources_json) if row.field_sources_json else None
+            ),
             "overrides": [
                 {
                     "field": o.field,

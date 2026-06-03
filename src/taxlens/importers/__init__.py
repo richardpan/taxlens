@@ -17,6 +17,13 @@ class Imported:
     source_hash: str      # sha256 of the source bytes
     source_filename: str | None
     warnings: list[str]
+    # Per-field extraction provenance: maps Return field name → source
+    # tag ("acroform", "default", "layout", "merged"). Importers that
+    # don't produce multi-stream extractions (TXF, manual) leave this
+    # empty. Surfaced in the UI return detail view so layout-only
+    # extractions stay visually flagged for manual review without
+    # requiring a debug session.
+    field_sources: dict[str, str] | None = None
 
 
 def sha256_file(path: Path) -> str:

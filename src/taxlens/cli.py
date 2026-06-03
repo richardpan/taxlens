@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import webbrowser
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -77,6 +78,93 @@ def show_cmd(
     for step in result["steps"]:
         console.print(f"  [{step['index']:>2}] {step['label']:<48} = ${step['output']}")
     console.print(f"  formula: [dim]{step['formula']}[/]")
+
+
+@app.command("reconcile")
+def reconcile_cmd(
+    paths: list[Path] = typer.Argument(
+        ..., exists=True, readable=True,
+        help="One or more PDF files, or directories containing PDFs.",
+    ),
+    max_delta: float = typer.Option(
+        2.00, "--max-delta",
+        help="Fail (exit code 1) if any |delta| exceeds this dollar threshold.",
+    ),
+    recursive: bool = typer.Option(
+        False, "--recursive/--no-recursive",
+        help="Recurse into subdirectories when a directory is given.",
+    ),
+) -> None:
+    """Reconcile one or more tax-return PDFs against their reported total tax.
+
+    Imports each PDF in-memory (NO writes to the local DB), computes the
+    engine's total tax, compares against the reported total tax extracted
+    from the PDF, and prints a delta table. Exits non-zero if any |delta|
+    exceeds ``--max-delta`` (default $2.00). Use this as a pre-release
+    regression gate against your own private fixture directory: nothing
+    you point it at gets committed or persisted.
+    """
+    from taxlens.engine import compute
+    from taxlens.importers import import_path
+    from taxlens.rules import load_rules
+
+    targets: list[Path] = []
+    for p in paths:
+        if p.is_dir():
+            pattern = "**/*.pdf" if recursive else "*.pdf"
+            targets.extend(sorted(p.glob(pattern)))
+        else:
+            targets.append(p)
+    if not targets:
+        console.print("[yellow]No PDFs found to reconcile.[/]")
+        raise typer.Exit(code=0)
+
+    table = Table(title=f"Reconciliation ({len(targets)} file(s))")
+    for col in ("file", "year", "computed", "reported", "delta", "status"):
+        table.add_column(col)
+
+    threshold = Decimal(str(max_delta))
+    worst = Decimal(0)
+    failures = 0
+    errors = 0
+    for fp in targets:
+        try:
+            imp = import_path(fp)
+            rules = load_rules(imp.ret.tax_year)
+            res = compute(imp.ret, rules)
+        except Exception as exc:
+            table.add_row(fp.name, "?", "—", "—", "—", f"[red]error: {exc}[/]")
+            errors += 1
+            continue
+        delta = res.reconciliation_delta
+        if delta is None:
+            table.add_row(
+                fp.name, str(imp.ret.tax_year),
+                f"${res.total_tax}", "—", "—", "[dim]no reported value[/]",
+            )
+            continue
+        if abs(delta) > abs(worst):
+            worst = delta
+        if abs(delta) > threshold:
+            failures += 1
+            status = f"[red]FAIL Δ ${delta} > ${threshold}[/]"
+        else:
+            status = "[green]OK[/]"
+        table.add_row(
+            fp.name, str(imp.ret.tax_year),
+            f"${res.total_tax}",
+            f"${res.reported_total_tax}",
+            f"${delta}",
+            status,
+        )
+
+    console.print(table)
+    console.print(
+        f"[bold]Summary:[/] {len(targets)} file(s), "
+        f"{failures} over-threshold, {errors} error(s), worst |Δ| = ${abs(worst)}"
+    )
+    if failures or errors:
+        raise typer.Exit(code=1)
 
 
 @app.command("delete")

@@ -995,6 +995,46 @@ async function renderYearDetail() {
 
   drawSankey(full);
   drawDeductionWaterfall(full);
+  drawImportedFields(full);
+}
+
+// Imported fields + provenance panel: lists every monetary field
+// extracted from the source PDF along with a badge indicating which
+// extraction stream produced it. Hidden for non-PDF sources where
+// per-field provenance isn't tracked.
+function drawImportedFields(full) {
+  const panel = document.getElementById('importedFieldsPanel');
+  const grid = document.getElementById('importedFields');
+  if (!panel || !grid) return;
+  const sources = full.field_sources;
+  if (!sources || Object.keys(sources).length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const badgeClass = {
+    'acroform':      'bg-emerald-100 text-emerald-700',
+    'default':       'bg-sky-100 text-sky-700',
+    'merged':        'bg-indigo-100 text-indigo-700',
+    'layout':        'bg-amber-100 text-amber-700',
+    'zero-backfill': 'bg-slate-100 text-slate-700',
+  };
+  const ret = full.return || {};
+  const entries = Object.entries(sources).sort(([a], [b]) => a.localeCompare(b));
+  grid.innerHTML = entries.map(([field, src]) => {
+    const cls = badgeClass[src] || 'bg-slate-100 text-slate-700';
+    const value = ret[field];
+    const valueStr = (value === null || value === undefined) ? '—'
+      : (typeof value === 'number' || (typeof value === 'string' && /^[\d.\-,]+$/.test(value))) ? fmt(value)
+      : String(value);
+    return `<div class="border border-slate-200 rounded-lg p-2 flex items-center justify-between gap-2">
+      <div class="min-w-0 flex-1">
+        <div class="text-xs text-slate-500 truncate" title="${field}">${field}</div>
+        <div class="font-mono text-sm">${valueStr}</div>
+      </div>
+      <span class="text-xs px-2 py-0.5 rounded ${cls} shrink-0">${src}</span>
+    </div>`;
+  }).join('');
 }
 
 // Deduction waterfall: gross income → AGI → taxable income, with each

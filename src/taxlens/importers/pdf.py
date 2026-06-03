@@ -1050,6 +1050,24 @@ def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str
     return out, qualifying_children, warnings
 
 
+def _labels_present(pages: list[str]) -> set[str]:
+    """Return the set of field names whose label regex matches anywhere
+    in ``pages`` — regardless of whether ``_first_money_after`` was
+    able to recover a money value. Used by the importer's phantom-value
+    detector: when the default text stream has the label but no value,
+    any layout-stream value is almost certainly noise from an adjacent
+    column and should be discarded.
+    """
+    joined = "\n".join(pages)
+    found: set[str] = set()
+    for field, patterns in LINE_PATTERNS.items():
+        for pat in patterns:
+            if re.search(pat, joined, re.IGNORECASE):
+                found.add(field)
+                break
+    return found
+
+
 def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) -> tuple[dict[str, Decimal], int, list[str]]:
     """Pick the most-complete (fields, children, warnings) tuple from
     ``results``. The "winner" is the result with the largest dict; ties
@@ -1149,15 +1167,74 @@ def import_pdf(path: Path) -> Imported:
     fields, children, fwarnings = _merge_field_results(default_result, *layout_results)
     warnings = list(fwarnings)
 
-    # Reconciliation passthrough fields can legitimately be $0 on the
-    # source 1040 even though the label IS present (e.g. line 19
-    # nonrefundable CTC = blank/0 when the filer's credit was instead
-    # claimed as the refundable line 28 ACTC, or line 28 = blank when
-    # the credit was fully absorbed nonrefundable). Distinguishing
-    # "$0 claimed" from "label not present" matters: the engine uses
-    # these as caps on its modeled credit, so leaving them as None
-    # would let the engine over-claim. Backfill 0 whenever the label
-    # text appears on the page but no money value followed it.
+    # ── Per-field provenance tracking ──────────────────────────────
+    # Tag each text-extracted field with the stream it came from so
+    # the UI can flag layout-only extractions for manual review. We
+    # populate this from the unmerged per-stream results before any
+    # downstream override / backfill / acroform-supersede pass. Later
+    # stages update entries in place when they replace a value.
+    field_sources: dict[str, str] = {}
+    for fname in fields.keys():
+        in_default = fname in default_result[0]
+        in_layout = any(fname in r[0] for r in layout_results)
+        if in_default and in_layout:
+            field_sources[fname] = "merged"
+        elif in_default:
+            field_sources[fname] = "default"
+        else:
+            field_sources[fname] = "layout"
+
+    # ── Generic phantom-value override (provenance-aware) ──────────
+    # When the default text stream FOUND the field's label but
+    # recovered no money value, and a layout stream nonetheless
+    # produced a value, that value is almost often noise from an
+    # adjacent column (e.g. an IRS form's printed margin reference
+    # being column-associated by pdfplumber with a blank row).
+    #
+    # Only apply this override when the default stream was the
+    # most-complete contributor — i.e., default produced more values
+    # than every layout stream. In that regime, default text is
+    # reliable and layout is being used as a supplement, so layout
+    # extras for default-known labels are suspect. When a layout
+    # stream is the winner (e.g. fillable forms where label/value
+    # are vertically offset and pdfplumber's default extractor splits
+    # them across rows), the whole document needs layout extraction
+    # and overriding would discard legitimate values.
+    default_values = default_result[0]
+    layout_value_counts = [len(r[0]) for r in layout_results]
+    default_is_dominant = (
+        len(default_values) > 0
+        and (not layout_value_counts or len(default_values) >= max(layout_value_counts))
+    )
+    if default_is_dominant:
+        default_labels = _labels_present(default_form_pages)
+        layout_phantom: dict[str, Decimal] = {}
+        for fname in list(fields.keys()):
+            if fname in default_values:
+                continue
+            if fname not in default_labels:
+                continue
+            layout_phantom[fname] = fields.pop(fname)
+            field_sources.pop(fname, None)
+        if layout_phantom:
+            warnings.append(
+                "Discarded layout-stream values for fields whose labels "
+                "appeared in the default text without a money value: "
+                + ", ".join(sorted(layout_phantom.keys()))
+            )
+
+    # Reconciliation cap fields can legitimately be $0 on the source
+    # 1040 even though the label IS present (e.g. line 19 nonrefundable
+    # CTC = blank/0 when the filer's credit was instead claimed as the
+    # refundable line 28 ACTC, or line 28 = blank when the credit was
+    # fully absorbed nonrefundable). Distinguishing "$0 claimed" from
+    # "label not present" matters: the engine uses these as caps on its
+    # modeled credit, so leaving them as None would let the engine
+    # over-claim. Backfill 0 whenever the label text appears on the
+    # page but no money value followed it. This list is intentionally
+    # narrow — only fields where None ≠ 0 in the engine. Generic
+    # phantom-value protection (layout vs default stream) is handled
+    # earlier and applies to ALL fields automatically.
     _ZERO_BACKFILL_LABELS = {
         "child_tax_credit_reported": [
             re.compile(r"^\s*19\s+(?:Nonrefundable\s+)?Child\s+tax\s+credit", re.IGNORECASE | re.MULTILINE),
@@ -1166,43 +1243,14 @@ def import_pdf(path: Path) -> Imported:
             re.compile(r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)", re.IGNORECASE | re.MULTILINE),
             re.compile(r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812", re.IGNORECASE | re.MULTILINE),
         ],
-        # 1040 line 6a / 6b. The layout-aware text stream regularly
-        # mis-associates the IRS form's printed standard-deduction
-        # MARGIN reference (e.g. "$13,850" for single/MFS in TY2023)
-        # with the social-security-benefits row when the actual line
-        # is blank — pdfplumber sees them in the same column. Backfill
-        # 0 whenever the line 6a label is present but default-stream
-        # extraction couldn't find a value, so the bogus layout-stream
-        # capture loses the merge tie-break.
-        "social_security_benefits": [
-            re.compile(r"\b6\s*a\s+Social\s+security\s+benefits\b", re.IGNORECASE),
-        ],
     }
     all_text = "\n".join(default_form_pages + [s for stream in layout_form_streams for s in stream])
-    default_text = "\n".join(default_form_pages)
     for fname, patterns in _ZERO_BACKFILL_LABELS.items():
-        label_in_text = any(p.search(all_text) for p in patterns)
-        if not label_in_text:
+        if fname in fields:
             continue
-        if fname not in fields:
-            # Standard backfill: label present, nothing extracted.
+        if any(p.search(all_text) for p in patterns):
             fields[fname] = Decimal(0)
-            continue
-        # Field IS in merged fields — but if it came ONLY from a layout
-        # stream (default text extraction couldn't find a value despite
-        # the label being on the page), the layout-stream value is
-        # almost certainly noise from an adjacent column (e.g. the
-        # IRS form's standard-deduction margin reference being
-        # column-associated with the social-security row). Override
-        # to 0 so the engine doesn't compute against a bogus value.
-        if fname not in default_result[0] and any(p.search(default_text) for p in patterns):
-            fields[fname] = Decimal(0)
-            warnings.append(
-                f"Layout-stream {fname} extraction overridden to 0 — the "
-                f"label was present in the default text stream but no "
-                f"money value followed, which is a stronger signal than "
-                f"a layout-stream column-alignment match."
-            )
+            field_sources[fname] = "zero-backfill"
     # If a layout stream recovered fields the default missed (or replaced
     # buggy default-extraction values wholesale), surface that — it's the
     # single most useful signal when diagnosing user reports of zero-value
@@ -1233,6 +1281,7 @@ def import_pdf(path: Path) -> Imported:
             elif existing != v:
                 overrides.append(f"{k}: text={existing} → acroform={v}")
             fields[k] = v
+            field_sources[k] = "acroform"
         warnings.append(
             f"AcroForm extraction supplied {len(acroform_fields)} field(s) "
             f"directly from PDF form widgets (the authoritative source)."
@@ -1253,6 +1302,7 @@ def import_pdf(path: Path) -> Imported:
         filing_status = FilingStatus.SINGLE
 
     reported_total_tax = fields.pop("total_tax_reported", None)
+    field_sources.pop("total_tax_reported", None)
 
     # Reconcile 1040 line 8 (the Sch-1-line-9 passthrough total) with the
     # individual income buckets to avoid double-counting unemployment.
@@ -1408,4 +1458,5 @@ def import_pdf(path: Path) -> Imported:
         source_hash=sha256_file(path),
         source_filename=path.name,
         warnings=warnings,
+        field_sources=field_sources,
     )
