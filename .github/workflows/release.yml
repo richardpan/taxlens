@@ -60,22 +60,40 @@ jobs:
 
       - name: Sync desktop/package.json version from tag
         # electron-builder names artifacts using desktop/package.json's
-        # `version` field. Without this step we'd ship every release with
-        # the stale checked-in version baked into the artifact filenames.
-        # We rewrite the file on the runner (no commit) so the artifacts
-        # produced below carry the correct version even when re-running
-        # the workflow against an older tag whose package.json was stale.
+        # `version` field, and tests/test_release_version_sync.py asserts
+        # pyproject.toml + desktop/package.json stay in lockstep.
+        # Without rewriting BOTH files, either the artifact filenames
+        # ship stale OR the version-sync test fails. We rewrite both on
+        # the runner (no commit) so the artifacts produced below carry
+        # the correct version even when re-running the workflow against
+        # an older tag whose checked-in versions were stale.
         shell: bash
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
           version="${tag#v}"
           python - <<PY
-          import json, pathlib
+          import json, pathlib, re
+          # desktop/package.json — JSON, simple replacement
           p = pathlib.Path("desktop/package.json")
           data = json.loads(p.read_text(encoding="utf-8"))
           data["version"] = "${version}"
           p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
           print(f"desktop/package.json version -> ${version}")
+          # pyproject.toml — rewrite first top-level version line so
+          # the version-sync test keeps passing under release builds
+          # for older tags whose checked-in pyproject is stale.
+          py = pathlib.Path("pyproject.toml")
+          text = py.read_text(encoding="utf-8")
+          new_text, n = re.subn(
+              r'^version\s*=\s*"[^"]+"',
+              f'version = "${version}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          assert n == 1, "did not find a version line in pyproject.toml"
+          py.write_text(new_text, encoding="utf-8")
+          print(f"pyproject.toml version -> ${version}")
           PY
 
       - name: Run tests
