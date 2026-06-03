@@ -12,7 +12,7 @@ We also spot-check:
   - Pre-TCJA Pease limitation
   - 2021 ARPA CTC (simplified: $3,000/kid fully refundable; documented caveat)
 """
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import pytest
 
@@ -38,10 +38,12 @@ BASELINE = [
 def test_single_75k_baseline(year, expected_ti, expected_tax):
     ret = Return(tax_year=year, filing_status=FilingStatus.SINGLE, wages=Decimal(75000))
     r = compute(ret)
-    assert r.agi == Decimal("75000.00"), f"TY{year} AGI"
+    assert r.agi == Decimal("75000"), f"TY{year} AGI"
     assert r.taxable_income == expected_ti, f"TY{year} taxable_income"
     assert r.ordinary_tax == expected_tax, f"TY{year} ordinary_tax"
-    assert r.total_tax == expected_tax, f"TY{year} total_tax (no other components)"
+    # total_tax is whole-dollar (IRS Pub 17 rounding); ordinary_tax keeps cents.
+    expected_whole = expected_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    assert r.total_tax == expected_whole, f"TY{year} total_tax (no other components)"
 
 
 def test_tcja_boundary_2017_vs_2018():

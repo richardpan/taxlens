@@ -17,6 +17,7 @@ FIXTURE_NAMES = [
 ]
 
 CENT = Decimal("0.01")
+TOLERANCE = Decimal("0.50")
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
@@ -28,7 +29,7 @@ def test_fixture_matches_expected(fixture, name):
         got = getattr(result, field)
         assert got is not None, f"{name}: field {field} is None"
         diff = abs(Decimal(got) - Decimal(want))
-        assert diff <= CENT, (
+        assert diff <= TOLERANCE, (
             f"{name}.{field}: expected {want}, got {got} (Δ {diff})"
         )
 

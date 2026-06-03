@@ -336,6 +336,8 @@ if WEB_DIR.exists():
     # menu button) until the user manually hard-refreshes.
     _INDEX_HTML = (WEB_DIR / "index.html").read_text(encoding="utf-8").replace(
         '/static/app.js', f'/static/app.js?v={APP_VERSION}'
+    ).replace(
+        "{{APP_VERSION}}", APP_VERSION
     )
 
     @app.get("/", response_class=HTMLResponse)

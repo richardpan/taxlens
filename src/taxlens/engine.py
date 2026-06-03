@@ -28,11 +28,25 @@ from taxlens.rules import load_rules, load_state_rules, load_locality_rules
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
+DOLLAR = Decimal("1")
 
 
 def _money(x: Decimal) -> Decimal:
     """Round to the nearest cent using bankers'... no, IRS uses HALF_UP."""
     return x.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _whole_dollar(x: Decimal) -> Decimal:
+    """Round to the nearest whole dollar — IRS Pub 17 rounding rule.
+
+    The IRS allows (and the printed 1040 always uses) whole-dollar
+    amounts on every line. Internal engine math stays at cent
+    precision so the audit trail is faithful, but every value that
+    appears on a real 1040 line is whole-dollar so reconciliation
+    against a printed return doesn't carry sub-dollar noise from
+    accumulated half-cent rounding across ~50 line items.
+    """
+    return x.quantize(DOLLAR, rounding=ROUND_HALF_UP)
 
 
 def _status(ret: Return) -> str:
@@ -2423,13 +2437,16 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
 
     delta = None
     if ret.reported_total_tax is not None:
-        delta = _money(total_tax - ret.reported_total_tax)
+        # Reconcile against the IRS-form-equivalent (whole-dollar)
+        # total tax so accumulated cent-level rounding across many
+        # line items doesn't appear as a fake delta.
+        delta = _money(_whole_dollar(total_tax) - ret.reported_total_tax)
 
     return TaxResult(
         tax_year=ret.tax_year,
         filing_status=ret.filing_status,
-        agi=_money(agi),
-        taxable_income=_money(taxable),
+        agi=_whole_dollar(agi),
+        taxable_income=_whole_dollar(taxable),
         deduction_used=_money(deduction),
         deduction_kind=deduction_kind,
         ordinary_tax=ord_tax,
@@ -2441,8 +2458,8 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         niit=niit,
         amt=amt,
         credits=credits,
-        total_tax=_money(total_tax),
-        refund_or_owed=_money(refund),
+        total_tax=_whole_dollar(total_tax),
+        refund_or_owed=_whole_dollar(refund),
         ordinary_bracket_fills=ord_fills,
         qualified_bracket_fills=qual_fills,
         steps=rec.steps,
