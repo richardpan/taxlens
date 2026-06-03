@@ -362,6 +362,17 @@ class Return(BaseModel):
     # SALT-capped + Pease-reduced math is preferred when it's already
     # producing a more conservative number.
     deduction_reported: Decimal | None = None
+    # 1040 line 20 — Schedule 3 line 8 total of nonrefundable credits
+    # passed through from Schedule 3 (FTC, CDCC, education, savers,
+    # residential clean energy, energy-efficient home improvement,
+    # clean vehicle, other §38/§30D/§25C credits, etc.). The engine
+    # models several of these from extracted inputs but cannot
+    # recover all of them from a 1040-only PDF (e.g. §25C Energy
+    # Efficient Home Improvement requires Form 5695 Part B detail
+    # we don't yet parse). When the reported value exceeds what the
+    # engine modeled, the residual is added to total nonrefundable
+    # credits as ``unmodeled_sch3_credits`` so reconciliation closes.
+    schedule_3_line_8_reported: Decimal | None = None
 
 
 class ComputationStep(BaseModel):
@@ -481,6 +492,12 @@ class TaxResult(BaseModel):
     # Part II components). Always 0 unless ``schedule_2_other_taxes_reported``
     # is set on the Return.
     unmodeled_other_taxes: Decimal = Decimal(0)
+    # Pass-through residual from 1040 line 20 (Schedule 3 line 8
+    # nonrefundable credits) that the engine couldn't account for
+    # from extracted inputs. Equals max(0, schedule_3_line_8_reported
+    # − engine-modeled Sch 3 nonref credits). Always 0 unless
+    # ``schedule_3_line_8_reported`` is set on the Return.
+    unmodeled_sch3_credits: Decimal = Decimal(0)
     credits: Decimal
     total_tax: Decimal
 

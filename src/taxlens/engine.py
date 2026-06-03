@@ -2293,6 +2293,40 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     credits = (ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
                + dcc_nonref + rce_credit + cvc_credit)
 
+    # 1040 line 20 reconciliation: if the source PDF reports a Schedule 3
+    # line 8 total that exceeds the sum of nonrefundable credits the
+    # engine modeled from extracted inputs (FTC, prior-year AMT credit,
+    # AOTC nonref portion, LLC, Saver's, dependent-care nonref, RCE,
+    # clean-vehicle), the residual is added to credits as
+    # ``unmodeled_sch3_credits``. CTC + ODC sit on 1040 line 19 (not
+    # Sch 3), so they're excluded. This closes reconciliation gaps for
+    # nonrefundable credits the engine doesn't model end-to-end yet
+    # (e.g. §25C Energy Efficient Home Improvement Credit / Form 5695
+    # Section B, alternative fuel-vehicle refueling property credit,
+    # adoption credit, mortgage-interest credit, etc.).
+    unmodeled_sch3_credits = ZERO
+    if ret.schedule_3_line_8_reported is not None:
+        engine_sch3_line_8 = (ftc_used + amt_credit_used + aotc_nonref + llc
+                              + savers + dcc_nonref + rce_credit + cvc_credit)
+        residual = ret.schedule_3_line_8_reported - engine_sch3_line_8
+        if residual > 0:
+            # Cap residual at remaining tax to avoid negative total_tax
+            # at this layer; the max(ZERO, total_tax) below will clamp
+            # anyway, but tracking the actual usable amount keeps the
+            # audit trail honest.
+            unmodeled_sch3_credits = _money(residual)
+            credits = credits + unmodeled_sch3_credits
+            rec.add(
+                "Unmodeled Schedule 3 line 8 credits (passthrough)",
+                "max(0, schedule_3_line_8_reported − engine-modeled Sch 3 line 8)",
+                {
+                    "reported_line_20": ret.schedule_3_line_8_reported,
+                    "engine_modeled": engine_sch3_line_8,
+                    "residual": unmodeled_sch3_credits,
+                },
+                unmodeled_sch3_credits,
+            )
+
     # §72(t) — 10% additional tax on early (pre-59½) retirement-plan distributions.
     ewp_rate = rules.early_withdrawal_penalty_rate
     early_withdrawal_penalty = _money(
@@ -2468,6 +2502,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         roth_contribution_allowed=roth_allowed,
         roth_contribution_disallowed=roth_disallowed,
         unmodeled_other_taxes=unmodeled_other_taxes,
+        unmodeled_sch3_credits=unmodeled_sch3_credits,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,
     )

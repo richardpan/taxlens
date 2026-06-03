@@ -506,6 +506,15 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"^\s*12\b[^\n]{0,80}?Itemized\s+deductions\s+\(from\s+Schedule\s*A\)",
                                 r"^\s*e\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
                                 ],
+    "schedule_3_line_8_reported": [
+                                # 1040 line 20 — Schedule 3 line 8 total
+                                # of nonrefundable credits. Anchored on
+                                # the line-number prefix to avoid
+                                # accidentally matching Schedule 3
+                                # itself (its line 8 is the same total
+                                # but appears later in the PDF).
+                                r"^\s*20\s+Amount\s+from\s+Schedule\s*3\s*,\s*line\s*8",
+                                ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
     "qualified_reit_ptp_dividends": [
@@ -1157,13 +1166,43 @@ def import_pdf(path: Path) -> Imported:
             re.compile(r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)", re.IGNORECASE | re.MULTILINE),
             re.compile(r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812", re.IGNORECASE | re.MULTILINE),
         ],
+        # 1040 line 6a / 6b. The layout-aware text stream regularly
+        # mis-associates the IRS form's printed standard-deduction
+        # MARGIN reference (e.g. "$13,850" for single/MFS in TY2023)
+        # with the social-security-benefits row when the actual line
+        # is blank — pdfplumber sees them in the same column. Backfill
+        # 0 whenever the line 6a label is present but default-stream
+        # extraction couldn't find a value, so the bogus layout-stream
+        # capture loses the merge tie-break.
+        "social_security_benefits": [
+            re.compile(r"\b6\s*a\s+Social\s+security\s+benefits\b", re.IGNORECASE),
+        ],
     }
     all_text = "\n".join(default_form_pages + [s for stream in layout_form_streams for s in stream])
+    default_text = "\n".join(default_form_pages)
     for fname, patterns in _ZERO_BACKFILL_LABELS.items():
-        if fname in fields:
+        label_in_text = any(p.search(all_text) for p in patterns)
+        if not label_in_text:
             continue
-        if any(p.search(all_text) for p in patterns):
+        if fname not in fields:
+            # Standard backfill: label present, nothing extracted.
             fields[fname] = Decimal(0)
+            continue
+        # Field IS in merged fields — but if it came ONLY from a layout
+        # stream (default text extraction couldn't find a value despite
+        # the label being on the page), the layout-stream value is
+        # almost certainly noise from an adjacent column (e.g. the
+        # IRS form's standard-deduction margin reference being
+        # column-associated with the social-security row). Override
+        # to 0 so the engine doesn't compute against a bogus value.
+        if fname not in default_result[0] and any(p.search(default_text) for p in patterns):
+            fields[fname] = Decimal(0)
+            warnings.append(
+                f"Layout-stream {fname} extraction overridden to 0 — the "
+                f"label was present in the default text stream but no "
+                f"money value followed, which is a stronger signal than "
+                f"a layout-stream column-alignment match."
+            )
     # If a layout stream recovered fields the default missed (or replaced
     # buggy default-extraction values wholesale), surface that — it's the
     # single most useful signal when diagnosing user reports of zero-value
