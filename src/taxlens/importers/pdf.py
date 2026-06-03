@@ -473,6 +473,13 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # TY2022+) but always begins with "Other taxes".
                                 r"Other\s+taxes,?\s+including\s+self-employment\s+tax,?\s+from\s+Schedule\s*2",
                                 r"Line\s*23\b[^\n]{0,80}?Other\s+taxes",
+                                # ── Year-resilient fallbacks (label-anchored) ──
+                                # TY2019 line 15 / TY2018 line 14 / pre-TCJA
+                                # line 62 all read "Other taxes. Attach
+                                # Schedule [2|4]". Anchor on the verbatim
+                                # phrase + Schedule reference; the line-number
+                                # shifts year-by-year but the label is stable.
+                                r"Other\s+taxes\.?\s+Attach\s+Schedule\s*[24]",
                                 ],
     "child_tax_credit_reported": [
                                 # 1040 line 19 — nonrefundable CTC + Credit
@@ -484,12 +491,30 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # credit") and pulls in its dollar value.
                                 r"^\s*19\s+(?:Nonrefundable\s+)?Child\s+tax\s+credit",
                                 r"^\s*19\s+Child\s+tax\s+credit\s+or\s+credit\s+for\s+other\s+dependents",
+                                # ── Year-resilient fallbacks (label-anchored) ──
+                                # TY2019 line 13a / TY2018 line 12a / pre-TCJA
+                                # line 52 all share the verbatim "Child tax
+                                # credit ... credit for other dependents"
+                                # phrasing (the "credit for other dependents"
+                                # add-on appeared with TCJA in TY2018, so
+                                # pre-2018 reads "Child tax credit" alone).
+                                # Negative lookahead rejects "Additional child
+                                # tax credit" (refundable portion, line 28 /
+                                # 17b / 18b — extracted separately).
+                                r"\bChild\s+tax\s+credit\s+(?:and|or)\s+credit\s+for\s+other\s+dependents",
+                                r"(?<!Additional\s)\bChild\s+tax\s+credit\b(?![^\n]*(?:additional|refundable))",
                                 ],
     "additional_ctc_reported": [
                                 # 1040 line 28 — Refundable ACTC / ARPA
                                 # refundable CTC from Schedule 8812.
                                 r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)",
                                 r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812",
+                                # ── Year-resilient fallbacks (label-anchored) ──
+                                # TY2019 line 18b / TY2018 line 17b / pre-TCJA
+                                # line 67 all read "Additional child tax
+                                # credit. Attach Schedule 8812".
+                                r"\bAdditional\s+child\s+tax\s+credit\.?\s+Attach\s+Schedule\s*8812",
+                                r"\bRefundable\s+(?:additional\s+)?child\s+tax\s+credit\b",
                                 ],
     "deduction_reported": [
                                 # 1040 line 12 — Standard or itemized
@@ -505,6 +530,15 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"^\s*12\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
                                 r"^\s*12\b[^\n]{0,80}?Itemized\s+deductions\s+\(from\s+Schedule\s*A\)",
                                 r"^\s*e\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
+                                # ── Year-resilient fallbacks (label-anchored) ──
+                                # TY2019 line 9 / TY2018 line 8 / pre-TCJA
+                                # line 40 all use the verbatim phrase
+                                # "Standard deduction or itemized deductions"
+                                # (with parenthetical schedule-A reference).
+                                # This phrase doesn't appear in instructions
+                                # or worksheets so it's a safe loose match.
+                                r"\bStandard\s+deduction\s+or\s+itemized\s+deductions\b",
+                                r"\bItemized\s+deductions\s+or\s+standard\s+deduction\b",
                                 ],
     "schedule_3_line_8_reported": [
                                 # 1040 line 20 — Schedule 3 line 8 total
@@ -514,6 +548,14 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # itself (its line 8 is the same total
                                 # but appears later in the PDF).
                                 r"^\s*20\s+Amount\s+from\s+Schedule\s*3\s*,\s*line\s*8",
+                                # ── Year-resilient fallbacks (label-anchored) ──
+                                # TY2019 line 13b reads "Add Schedule 3,
+                                # line 7, and line 13a"; TY2018 line 12b
+                                # reads "Add any amount from Schedule 3
+                                # and check here". The Schedule-3 reference
+                                # itself is the stable anchor.
+                                r"\bAmount\s+from\s+Schedule\s*3\b",
+                                r"\bAdd\s+Schedule\s*3\b",
                                 ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
