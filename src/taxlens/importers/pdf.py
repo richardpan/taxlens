@@ -473,13 +473,6 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # TY2022+) but always begins with "Other taxes".
                                 r"Other\s+taxes,?\s+including\s+self-employment\s+tax,?\s+from\s+Schedule\s*2",
                                 r"Line\s*23\b[^\n]{0,80}?Other\s+taxes",
-                                # ── Year-resilient fallbacks (label-anchored) ──
-                                # TY2019 line 15 / TY2018 line 14 / pre-TCJA
-                                # line 62 all read "Other taxes. Attach
-                                # Schedule [2|4]". Anchor on the verbatim
-                                # phrase + Schedule reference; the line-number
-                                # shifts year-by-year but the label is stable.
-                                r"Other\s+taxes\.?\s+Attach\s+Schedule\s*[24]",
                                 ],
     "child_tax_credit_reported": [
                                 # 1040 line 19 — nonrefundable CTC + Credit
@@ -491,30 +484,12 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # credit") and pulls in its dollar value.
                                 r"^\s*19\s+(?:Nonrefundable\s+)?Child\s+tax\s+credit",
                                 r"^\s*19\s+Child\s+tax\s+credit\s+or\s+credit\s+for\s+other\s+dependents",
-                                # ── Year-resilient fallbacks (label-anchored) ──
-                                # TY2019 line 13a / TY2018 line 12a / pre-TCJA
-                                # line 52 all share the verbatim "Child tax
-                                # credit ... credit for other dependents"
-                                # phrasing (the "credit for other dependents"
-                                # add-on appeared with TCJA in TY2018, so
-                                # pre-2018 reads "Child tax credit" alone).
-                                # Negative lookahead rejects "Additional child
-                                # tax credit" (refundable portion, line 28 /
-                                # 17b / 18b — extracted separately).
-                                r"\bChild\s+tax\s+credit\s+(?:and|or)\s+credit\s+for\s+other\s+dependents",
-                                r"(?<!Additional\s)\bChild\s+tax\s+credit\b(?![^\n]*(?:additional|refundable))",
                                 ],
     "additional_ctc_reported": [
                                 # 1040 line 28 — Refundable ACTC / ARPA
                                 # refundable CTC from Schedule 8812.
                                 r"^\s*28\s+Refundable\s+(?:child\s+tax\s+credit|additional\s+child\s+tax\s+credit)",
                                 r"^\s*28\s+Additional\s+child\s+tax\s+credit\s+from\s+Schedule\s*8812",
-                                # ── Year-resilient fallbacks (label-anchored) ──
-                                # TY2019 line 18b / TY2018 line 17b / pre-TCJA
-                                # line 67 all read "Additional child tax
-                                # credit. Attach Schedule 8812".
-                                r"\bAdditional\s+child\s+tax\s+credit\.?\s+Attach\s+Schedule\s*8812",
-                                r"\bRefundable\s+(?:additional\s+)?child\s+tax\s+credit\b",
                                 ],
     "deduction_reported": [
                                 # 1040 line 12 — Standard or itemized
@@ -530,15 +505,6 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"^\s*12\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
                                 r"^\s*12\b[^\n]{0,80}?Itemized\s+deductions\s+\(from\s+Schedule\s*A\)",
                                 r"^\s*e\s+Standard\s+deduction\s+or\s+itemized\s+deductions",
-                                # ── Year-resilient fallbacks (label-anchored) ──
-                                # TY2019 line 9 / TY2018 line 8 / pre-TCJA
-                                # line 40 all use the verbatim phrase
-                                # "Standard deduction or itemized deductions"
-                                # (with parenthetical schedule-A reference).
-                                # This phrase doesn't appear in instructions
-                                # or worksheets so it's a safe loose match.
-                                r"\bStandard\s+deduction\s+or\s+itemized\s+deductions\b",
-                                r"\bItemized\s+deductions\s+or\s+standard\s+deduction\b",
                                 ],
     "schedule_3_line_8_reported": [
                                 # 1040 line 20 — Schedule 3 line 8 total
@@ -548,14 +514,6 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 # itself (its line 8 is the same total
                                 # but appears later in the PDF).
                                 r"^\s*20\s+Amount\s+from\s+Schedule\s*3\s*,\s*line\s*8",
-                                # ── Year-resilient fallbacks (label-anchored) ──
-                                # TY2019 line 13b reads "Add Schedule 3,
-                                # line 7, and line 13a"; TY2018 line 12b
-                                # reads "Add any amount from Schedule 3
-                                # and check here". The Schedule-3 reference
-                                # itself is the stable anchor.
-                                r"\bAmount\s+from\s+Schedule\s*3\b",
-                                r"\bAdd\s+Schedule\s*3\b",
                                 ],
     "foreign_taxes_paid":      [r"Line\s*1\b[^\n]{0,80}?Foreign tax credit",
                                 r"Foreign tax credit\.?\s+Attach\s+Form\s*1116"],
@@ -644,6 +602,46 @@ STATUS_EXPLICIT = [
 ]
 
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
+
+
+# ─── Pre-2020 supplemental label-anchored patterns ─────────────────────────
+# These fire ONLY when the detected tax year is < 2020. The headline 1040
+# fields below all moved across line numbers between TY2018, TY2019, and
+# TY2020+; the line-prefixed patterns in LINE_PATTERNS target the TY2020+
+# layout. For older returns, anchoring on the verbatim *label* recovers the
+# value regardless of the (year-specific) line number, but those same
+# label-only fallbacks would over-match on TY2020+ forms (where the same
+# label phrase appears elsewhere — e.g. cross-reference text in
+# instructions, Schedule 8812, or the "Standard Deduction" sidebar). Gating
+# them on year keeps modern-form extraction unchanged.
+LINE_PATTERNS_PRE_2020: dict[str, list[str]] = {
+    "deduction_reported": [
+        r"\bStandard\s+deduction\s+or\s+itemized\s+deductions\b",
+        r"\bItemized\s+deductions\s+or\s+standard\s+deduction\b",
+    ],
+    "child_tax_credit_reported": [
+        # Verbatim label that appears on TY2018 line 12a / TY2019 line 13a
+        # / pre-TCJA line 52. Negative lookahead rejects the "Additional"
+        # variant (the refundable portion, captured separately).
+        r"\bChild\s+tax\s+credit\s+(?:and|or)\s+credit\s+for\s+other\s+dependents",
+        r"(?<!Additional\s)\bChild\s+tax\s+credit\b(?![^\n]*(?:additional|refundable))",
+    ],
+    "additional_ctc_reported": [
+        r"\bAdditional\s+child\s+tax\s+credit\.?\s+Attach\s+Schedule\s*8812",
+        r"\bRefundable\s+(?:additional\s+)?child\s+tax\s+credit\b",
+    ],
+    "schedule_2_other_taxes_reported": [
+        # TY2019 line 15 / TY2018 line 14 (Schedule 4 in 2018, Schedule 2 from 2019).
+        r"Other\s+taxes\.?\s+Attach\s+Schedule\s*[24]",
+    ],
+    "schedule_3_line_8_reported": [
+        # TY2018-2019 Schedule 3 references — the cross-reference text on
+        # the 1040 itself, not the Schedule 3 form's own header.
+        r"\bAmount\s+from\s+Schedule\s*3\b",
+        r"\bAdd\s+Schedule\s*3\b",
+    ],
+}
+
 
 # ─── Page classification: only extract from real IRS form pages ──────────────
 # Vendors (FreeTaxUSA, TurboTax, H&R Block) often print a friendly summary
@@ -1071,14 +1069,22 @@ def _extract_form_8889(joined_text: str) -> dict[str, object]:
     return out
 
 
-def _extract_fields(pages: list[str]) -> tuple[dict[str, Decimal], int, list[str]]:
+def _extract_fields(
+    pages: list[str],
+    tax_year: int | None = None,
+) -> tuple[dict[str, Decimal], int, list[str]]:
     out: dict[str, Decimal] = {}
     warnings: list[str] = []
     qualifying_children = 0
     joined = "\n".join(pages)
 
+    use_pre2020_supplement = tax_year is not None and tax_year < 2020
+
     for field, patterns in LINE_PATTERNS.items():
-        for pat in patterns:
+        all_patterns = list(patterns)
+        if use_pre2020_supplement and field in LINE_PATTERNS_PRE_2020:
+            all_patterns += LINE_PATTERNS_PRE_2020[field]
+        for pat in all_patterns:
             value = _first_money_after(pat, joined)
             if value is not None:
                 if field == "qualifying_children":
@@ -1204,8 +1210,8 @@ def import_pdf(path: Path) -> Imported:
     #   3. loose layout  (handles small vertical offsets in fillable forms)
     # This is the key robustness fix: a label/value pair that one stream
     # splits across non-adjacent lines will still be recovered from another.
-    default_result = _extract_fields(default_form_pages)
-    layout_results = [_extract_fields(stream) for stream in layout_form_streams]
+    default_result = _extract_fields(default_form_pages, tax_year=tax_year)
+    layout_results = [_extract_fields(stream, tax_year=tax_year) for stream in layout_form_streams]
     fields, children, fwarnings = _merge_field_results(default_result, *layout_results)
     warnings = list(fwarnings)
 

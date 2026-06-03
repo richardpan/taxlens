@@ -150,9 +150,31 @@ CASES = [
 
 @pytest.mark.parametrize("name,text,expected", CASES, ids=[c[0] for c in CASES])
 def test_label_anchored_extraction_pre_2020(name: str, text: str, expected: dict) -> None:
-    fields, _children, _warnings = _extract_fields([text])
+    year = int(name.replace("TY", ""))
+    fields, _children, _warnings = _extract_fields([text], tax_year=year)
     misses = [k for k in expected if k not in fields]
     wrongs = [(k, expected[k], fields[k]) for k in expected
               if k in fields and fields[k] != expected[k]]
     assert not misses, f"{name} missed labels: {misses}"
     assert not wrongs, f"{name} wrong values: {wrongs}"
+
+
+def test_pre2020_supplement_not_applied_for_modern_years() -> None:
+    """The pre-2020 supplemental patterns must NOT fire when the
+    detected tax year is >= 2020. The same label phrases that uniquely
+    anchor the right line on TY2018/2019 layouts can over-match on
+    TY2020+ forms (where the same phrasing also appears in
+    cross-reference text, the Standard Deduction sidebar, Schedule
+    8812 itself, etc.). Gating on year keeps modern-form extraction
+    bit-for-bit identical to the pre-supplement behavior — proven
+    here by running a TY2019 layout under year=2023 and confirming
+    the supplement does not contribute any of its fields.
+    """
+    fields, _ch, _ws = _extract_fields([TY2019_TEXT], tax_year=2023)
+    # The TY2019 layout has 'deduction' / 'CTC' / 'other taxes' on
+    # lines that the legacy patterns don't anchor — those fields
+    # should be ABSENT under year=2023, demonstrating the supplement
+    # was not applied.
+    assert "deduction_reported" not in fields
+    assert "child_tax_credit_reported" not in fields
+    assert "schedule_2_other_taxes_reported" not in fields
