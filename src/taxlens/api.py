@@ -19,10 +19,39 @@ from taxlens.service import TaxLensService
 
 WEB_DIR = Path(__file__).parent / "web"
 
-try:
-    APP_VERSION = _pkg_version("taxlens")
-except PackageNotFoundError:  # pragma: no cover — editable install fallback
-    APP_VERSION = "dev"
+def _read_version() -> str:
+    """Resolve the package version.
+
+    Prefer installed-package metadata; fall back to parsing
+    ``pyproject.toml`` next to the source tree so source/editable
+    runs (where the dist-info may be missing or stale) still surface
+    the real version in the UI footer instead of the literal "dev".
+    """
+    try:
+        return _pkg_version("taxlens")
+    except PackageNotFoundError:
+        pass
+    # Walk up looking for pyproject.toml.
+    here = Path(__file__).resolve()
+    for parent in [here, *here.parents]:
+        candidate = parent / "pyproject.toml"
+        if candidate.is_file():
+            try:
+                import tomllib  # py311+
+            except ModuleNotFoundError:  # pragma: no cover
+                import tomli as tomllib  # type: ignore[no-redef]
+            try:
+                data = tomllib.loads(candidate.read_text(encoding="utf-8"))
+                v = data.get("project", {}).get("version")
+                if v:
+                    return str(v)
+            except Exception:
+                pass
+            break
+    return "dev"
+
+
+APP_VERSION = _read_version()
 
 app = FastAPI(title="TaxLens", version=APP_VERSION)
 service = TaxLensService.open()
