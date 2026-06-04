@@ -1642,6 +1642,46 @@ def import_pdf(path: Path) -> Imported:
             "POST /api/debug/extract to inspect what the importer is seeing."
         )
 
+    # ── Filing-status sanity check via reported standard deduction ──────────
+    # When the form's "Filing Status" checkbox column doesn't cleanly identify
+    # the selected option (e.g. pre-2020 fillable layouts where pdfplumber
+    # mis-orders text and the X marker ends up next to a different option than
+    # the actual one), the extracted deduction_reported value is a reliable
+    # cross-check: if the filer took the standard deduction, the line-40 /
+    # line-9 / line-12 amount equals exactly the year's std-deduction figure
+    # for one (or more) filing statuses. When the detected status's std
+    # deduction doesn't match the reported deduction but exactly one other
+    # status's does — or several do (Single and MFS share the same value in
+    # most years) — prefer the matching status. We use a priority order
+    # (Single > MFS > HOH > QSS > MFJ) since Single is dominant and MFS
+    # requires explicit spousal info we'd otherwise see in the form.
+    if (filing_status is not None and tax_year is not None
+            and "deduction_reported" in fields):
+        try:
+            from taxlens.rules import load_rules as _load_rules
+            _rules = _load_rules(tax_year)
+            _std_table = _rules.standard_deduction
+            _reported_ded = fields["deduction_reported"]
+            _detected_std = _std_table.get(filing_status.value)
+            if _detected_std is not None and _reported_ded != _detected_std:
+                _matches = [s for s, v in _std_table.items() if v == _reported_ded]
+                if _matches and filing_status.value not in _matches:
+                    _priority = ["single", "mfs", "hoh", "qss", "mfj"]
+                    _best = sorted(
+                        _matches,
+                        key=lambda s: _priority.index(s) if s in _priority else 99,
+                    )[0]
+                    warnings.append(
+                        f"Filing status corrected from {filing_status.value} to "
+                        f"{_best} based on reported standard deduction "
+                        f"(${_reported_ded} matches {_best} std deduction for "
+                        f"TY{tax_year})."
+                    )
+                    filing_status = FilingStatus(_best)
+        except Exception:
+            # Rules unavailable or other failure — leave detected status alone.
+            pass
+
     try:
         ret = Return(
             tax_year=tax_year,
