@@ -22,3 +22,8 @@ htmlcov/
 # into pytest's tmp_path. Do not commit any generated copies.
 docs/importer_samples/
 *.pdf
+
+# Session-scoped probe / trace scripts (created during debugging,
+# never meant to be committed).
+_probe*.py
+_trace*.py

@@ -146,6 +146,35 @@ class _StepRecorder:
 
 # ────────────────────────── individual computation stages ──────────────────────────
 
+
+def _residual_passthrough(
+    reported: Decimal | None,
+    engine_modeled: Decimal,
+    *,
+    title: str,
+    formula: str,
+    details: dict[str, Any],
+    rec: _StepRecorder,
+) -> Decimal:
+    """Reconcile a reported subtotal against engine-modeled components.
+
+    When the source PDF reports a 1040/Schedule subtotal that the engine
+    can't fully reproduce from extracted inputs (e.g. Schedule 3 line 8,
+    Schedule 2 Part I/II), surface the positive residual as a passthrough
+    so total_tax / credits reconciles. Returns ``ZERO`` when ``reported``
+    is None or when the residual is non-positive; otherwise records a
+    step and returns the cents-rounded residual.
+    """
+    if reported is None:
+        return ZERO
+    residual = reported - engine_modeled
+    if residual <= 0:
+        return ZERO
+    residual = _money(residual)
+    rec.add(title, formula, {**details, "residual": residual}, residual)
+    return residual
+
+
 def _compute_schedule_e(ret: Return, rec: _StepRecorder) -> tuple[Decimal, Decimal, Decimal, Decimal, dict[str, Decimal]]:
     """Returns (net_schedule_e, passive_loss_disallowed, new_pal_carryforward,
     released_on_disposition, per_activity_suspended_out).
@@ -1474,7 +1503,7 @@ def _compute_income_tax(
         table_tax, _table_fills = walk_brackets(
             midpoint, ordinary_brackets, include_next_empty=False,
         )
-        ord_tax = table_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        ord_tax = _whole_dollar(table_tax)
     rec.add(
         "Ordinary income tax (bracket walk)",
         "sum of bracket fills on (taxable − qd_ltcg − unrec_1250 − collectibles)",
@@ -1524,18 +1553,18 @@ def _compute_income_tax(
     # income > 0) we round here so ord_tax + qual_tax sums match the
     # form's reconciliation arithmetic.
     if qd_ltcg > 0:
-        qual_tax = qual_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        qual_tax = _whole_dollar(qual_tax)
     # Form 1040 line 16 ("Tax") is reported as a whole-dollar value on
     # every return — whether computed via Tax Tables (already whole),
     # the Tax Computation Worksheet (TI ≥ $100K, rounds at final step),
     # or QDCGTW (whole-dollar at every step). Round each component to
     # whole dollars so accumulated cents don't bleed into total_tax.
     # Sub-$100K Tax-Tables results above are already whole.
-    ord_tax = ord_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    ord_tax = _whole_dollar(ord_tax)
     if coll_tax > 0:
-        coll_tax = coll_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        coll_tax = _whole_dollar(coll_tax)
     if unrec_tax > 0:
-        unrec_tax = unrec_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        unrec_tax = _whole_dollar(unrec_tax)
     return (
         _money(ord_tax),
         _money(qual_tax),
@@ -1802,7 +1831,7 @@ def _compute_niit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -
     # Form 8960 line 17 reports NIIT as a whole-dollar value; matching
     # the form rounding here keeps total_tax additions on the form
     # line-by-line whole-dollar boundary.
-    tax = tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    tax = _whole_dollar(tax)
     rec.add(
         "Net Investment Income Tax (Form 8960)",
         f"min(investment_income, max(0, agi − {threshold})) × {rate}",
@@ -2220,17 +2249,16 @@ def _compute_education_credits(
 
 # ────────────────────────── public entry point ──────────────────────────
 
-def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
-    """Run the full federal tax computation for one return."""
-    rules = rules or load_rules(ret.tax_year)
-    if rules.year != ret.tax_year:
-        raise ValueError(f"rules year {rules.year} ≠ return year {ret.tax_year}")
 
-    rec = _StepRecorder()
+def _run_depreciation_prepass(
+    ret: Return, rec: _StepRecorder,
+) -> tuple[Return, Decimal, dict[str, Decimal]]:
+    """Compute Form 4562 MACRS depreciation + §1250 disposition recapture
+    for all rental properties and fold the results into an "effective"
+    Return that downstream stages see.
 
-    # ── Schedule E MACRS depreciation (Form 4562) ──
-    # Compute per-property MACRS depreciation and any disposition gain/recapture,
-    # then fold the results into an "effective" Return that downstream stages see.
+    Returns ``(updated_ret, total_current_year_depreciation, accumulated_map)``.
+    """
     prop_results = _dep_compute_all(ret.rental_properties, ret.tax_year)
     total_depreciation = sum((p.current_year_deduction for p in prop_results), ZERO)
     total_recapture_1250 = sum((p.sale_recapture_1250 for p in prop_results), ZERO)
@@ -2258,6 +2286,58 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
             "unrecaptured_1250_gains": ret.unrecaptured_1250_gains + total_recapture_1250,
             "long_term_capital_gains": ret.long_term_capital_gains + total_excess_ltcg,
         })
+    return ret, total_depreciation, accumulated_map
+
+
+def _compute_actc(
+    ret: Return, rules: Rules, ctc_leftover: Decimal, rec: _StepRecorder,
+) -> Decimal:
+    """Form 8812 — refundable Additional Child Tax Credit.
+
+    Caller is responsible for computing ``ctc_leftover = ctc − ctc_nonref_used``
+    (the unused nonrefundable CTC after stacking against post-AMT regular tax).
+    """
+    actc_kid_cap = Decimal(rules.ctc.get("refundable_per_child", 1700)) * ret.qualifying_children
+    earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
+    actc_earned_threshold = Decimal(rules.ctc.get("actc_earned_threshold", 2500))
+    actc_rate = Decimal(str(rules.ctc.get("actc_rate", "0.15")))
+    earnings_test = max(ZERO, (earned - actc_earned_threshold) * actc_rate)
+    if rules.ctc.get("actc_full_refund", False):
+        # ARPA 2021: fully refundable, no earnings test, no per-kid cap.
+        actc = ctc_leftover
+    elif rules.ctc.get("actc_no_kid_cap", False):
+        # Pre-TCJA: 15% × (earned − $3k), no per-kid cap.
+        actc = min(ctc_leftover, earnings_test)
+    else:
+        actc = min(ctc_leftover, actc_kid_cap, earnings_test)
+    if ret.additional_ctc_reported is not None and actc > ret.additional_ctc_reported:
+        rec.add(
+            "Cap ACTC at reported 1040 line 28 (passthrough)",
+            "min(modeled ACTC, additional_ctc_reported)",
+            {"modeled": actc, "reported_line_28": ret.additional_ctc_reported},
+            ret.additional_ctc_reported,
+        )
+        actc = ret.additional_ctc_reported
+    if actc > ZERO:
+        rec.add(
+            "Additional Child Tax Credit (Form 8812) — refundable",
+            "min(unused CTC, $1,700 × kids, 15% × (earned − $2,500))",
+            {"ctc_leftover": ctc_leftover, "kid_cap": actc_kid_cap,
+             "earnings_test": earnings_test, "earned": earned},
+            actc,
+        )
+    return actc
+
+
+def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
+    """Run the full federal tax computation for one return."""
+    rules = rules or load_rules(ret.tax_year)
+    if rules.year != ret.tax_year:
+        raise ValueError(f"rules year {rules.year} ≠ return year {ret.tax_year}")
+
+    rec = _StepRecorder()
+
+    ret, total_depreciation, accumulated_map = _run_depreciation_prepass(ret, rec)
 
     se_tax, half_se_tax = _compute_se_tax(ret, rules, rec)
     sch_e_net, pal_carry, _, pal_released, per_activity_pal_out = _compute_schedule_e(ret, rec)
@@ -2320,35 +2400,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     tax_after_other_nonref = max(ZERO, pre_amt_regular + amt - other_nonref)
     ctc_nonref_used = min(ctc, tax_after_other_nonref)
     ctc_leftover = ctc - ctc_nonref_used
-    actc_kid_cap = Decimal(rules.ctc.get("refundable_per_child", 1700)) * ret.qualifying_children
-    earned = max(ZERO, ret.wages) + max(ZERO, ret.se_income)
-    actc_earned_threshold = Decimal(rules.ctc.get("actc_earned_threshold", 2500))
-    actc_rate = Decimal(str(rules.ctc.get("actc_rate", "0.15")))
-    earnings_test = max(ZERO, (earned - actc_earned_threshold) * actc_rate)
-    if rules.ctc.get("actc_full_refund", False):
-        # ARPA 2021: fully refundable, no earnings test, no per-kid cap.
-        actc = ctc_leftover
-    elif rules.ctc.get("actc_no_kid_cap", False):
-        # Pre-TCJA: 15% × (earned − $3k), no per-kid cap.
-        actc = min(ctc_leftover, earnings_test)
-    else:
-        actc = min(ctc_leftover, actc_kid_cap, earnings_test)
-    if ret.additional_ctc_reported is not None and actc > ret.additional_ctc_reported:
-        rec.add(
-            "Cap ACTC at reported 1040 line 28 (passthrough)",
-            "min(modeled ACTC, additional_ctc_reported)",
-            {"modeled": actc, "reported_line_28": ret.additional_ctc_reported},
-            ret.additional_ctc_reported,
-        )
-        actc = ret.additional_ctc_reported
-    if actc > ZERO:
-        rec.add(
-            "Additional Child Tax Credit (Form 8812) — refundable",
-            "min(unused CTC, $1,700 × kids, 15% × (earned − $2,500))",
-            {"ctc_leftover": ctc_leftover, "kid_cap": actc_kid_cap,
-             "earnings_test": earnings_test, "earned": earned},
-            actc,
-        )
+    actc = _compute_actc(ret, rules, ctc_leftover, rec)
 
     credits = (ctc_nonref_used + ftc_used + amt_credit_used + aotc_nonref + llc + savers
                + dcc_nonref + rce_credit + cvc_credit)
@@ -2368,24 +2420,18 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     if ret.schedule_3_line_8_reported is not None:
         engine_sch3_line_8 = (ftc_used + amt_credit_used + aotc_nonref + llc
                               + savers + dcc_nonref + rce_credit + cvc_credit)
-        residual = ret.schedule_3_line_8_reported - engine_sch3_line_8
-        if residual > 0:
-            # Cap residual at remaining tax to avoid negative total_tax
-            # at this layer; the max(ZERO, total_tax) below will clamp
-            # anyway, but tracking the actual usable amount keeps the
-            # audit trail honest.
-            unmodeled_sch3_credits = _money(residual)
-            credits = credits + unmodeled_sch3_credits
-            rec.add(
-                "Unmodeled Schedule 3 line 8 credits (passthrough)",
-                "max(0, schedule_3_line_8_reported − engine-modeled Sch 3 line 8)",
-                {
-                    "reported_line_20": ret.schedule_3_line_8_reported,
-                    "engine_modeled": engine_sch3_line_8,
-                    "residual": unmodeled_sch3_credits,
-                },
-                unmodeled_sch3_credits,
-            )
+        unmodeled_sch3_credits = _residual_passthrough(
+            ret.schedule_3_line_8_reported,
+            engine_sch3_line_8,
+            title="Unmodeled Schedule 3 line 8 credits (passthrough)",
+            formula="max(0, schedule_3_line_8_reported − engine-modeled Sch 3 line 8)",
+            details={
+                "reported_line_20": ret.schedule_3_line_8_reported,
+                "engine_modeled": engine_sch3_line_8,
+            },
+            rec=rec,
+        )
+        credits = credits + unmodeled_sch3_credits
 
     # §72(t) — 10% additional tax on early (pre-59½) retirement-plan distributions.
     ewp_rate = rules.early_withdrawal_penalty_rate
@@ -2426,20 +2472,18 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         engine_other_part_ii = (se_tax + addl_medicare + niit
                                 + early_withdrawal_penalty
                                 + excess_ira_excise + rmd_excise)
-        residual = ret.schedule_2_other_taxes_reported - engine_other_part_ii
-        if residual > 0:
-            unmodeled_other_taxes = _money(residual)
-            total_tax = total_tax + unmodeled_other_taxes
-            rec.add(
-                "Unmodeled Schedule 2 Part II other taxes (passthrough)",
-                "max(0, schedule_2_other_taxes_reported − engine-modeled Part II)",
-                {
-                    "reported_line_23": ret.schedule_2_other_taxes_reported,
-                    "engine_modeled": engine_other_part_ii,
-                    "residual": unmodeled_other_taxes,
-                },
-                unmodeled_other_taxes,
-            )
+        unmodeled_other_taxes = _residual_passthrough(
+            ret.schedule_2_other_taxes_reported,
+            engine_other_part_ii,
+            title="Unmodeled Schedule 2 Part II other taxes (passthrough)",
+            formula="max(0, schedule_2_other_taxes_reported − engine-modeled Part II)",
+            details={
+                "reported_line_23": ret.schedule_2_other_taxes_reported,
+                "engine_modeled": engine_other_part_ii,
+            },
+            rec=rec,
+        )
+        total_tax = total_tax + unmodeled_other_taxes
 
     # 1040 line 17 / Schedule 2 Part I reconciliation: AMT + excess APTC
     # repayment. The engine models AMT directly and APTC repayment when
@@ -2451,21 +2495,19 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
     unmodeled_part_i_taxes = ZERO
     if ret.schedule_2_part_i_reported is not None:
         engine_part_i = amt + aptc_repayment
-        residual_p1 = ret.schedule_2_part_i_reported - engine_part_i
-        if residual_p1 > 0:
-            unmodeled_part_i_taxes = _money(residual_p1)
-            total_tax = total_tax + unmodeled_part_i_taxes
-            rec.add(
-                "Unmodeled Schedule 2 Part I taxes (passthrough)",
-                "max(0, schedule_2_part_i_reported − amt − aptc_repayment)",
-                {
-                    "reported_line_17": ret.schedule_2_part_i_reported,
-                    "engine_amt": amt,
-                    "engine_aptc_repayment": aptc_repayment,
-                    "residual": unmodeled_part_i_taxes,
-                },
-                unmodeled_part_i_taxes,
-            )
+        unmodeled_part_i_taxes = _residual_passthrough(
+            ret.schedule_2_part_i_reported,
+            engine_part_i,
+            title="Unmodeled Schedule 2 Part I taxes (passthrough)",
+            formula="max(0, schedule_2_part_i_reported − amt − aptc_repayment)",
+            details={
+                "reported_line_17": ret.schedule_2_part_i_reported,
+                "engine_amt": amt,
+                "engine_aptc_repayment": aptc_repayment,
+            },
+            rec=rec,
+        )
+        total_tax = total_tax + unmodeled_part_i_taxes
     rec.add(
         "Total tax",
         "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit"

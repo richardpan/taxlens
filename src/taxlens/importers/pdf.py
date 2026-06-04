@@ -236,6 +236,282 @@ def _pick_money(tail: str, matches: list) -> "re.Match | None":
     return None
 
 
+_STRICT_MONEY_PAT = re.compile(
+    r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?|\$?\s*-?[0-9]+\.[0-9]{1,2}"
+)
+
+
+def _try_same_line_money(
+    line: str,
+    label_match: re.Match[str],
+    *,
+    lines: list[str],
+    i: int,
+    label_key: str | None,
+    echo_guarded: list[str] | None,
+) -> Decimal | None:
+    """Same-line extraction phase of :func:`_first_money_after`.
+
+    Returns the money value found on the same line as the label, or
+    ``None`` to signal the caller should fall through to the next-line
+    fallback scan. Mutates ``echo_guarded`` when a bare 1-2 digit
+    line-number echo is detected so downstream phantom-override logic
+    can avoid discarding a layout-stream value.
+    """
+    tail = line[label_match.end():]
+    pn = _PAREN_NEG.search(tail)
+    money_matches = _money_matches_in(tail)
+    if pn:
+        try:
+            return -_money(pn.group(1))
+        except InvalidOperation:
+            pass
+    if not money_matches:
+        return None
+    picked = _pick_money(tail, money_matches)
+    if picked is None:
+        return None
+    # Guard against trailing line-number echo with NO value
+    # column. E.g. Form 8889 line 13 when the user has no
+    # personal HSA contribution renders as
+    #     "13 HSA deduction (see instructions). . . . . . . 13"
+    # — the trailing "13" is the line-number echo column,
+    # not a $13 deduction.
+    #
+    # Two situations trigger the guard:
+    # 1. Picked digit equals the leading line-number on the
+    #    same line (the canonical "echo column" case).
+    # 2. Picked is a bare 1-2 digit integer at end-of-line
+    #    AND it is the ONLY money on the line AND no leading
+    #    line-number is present. This catches pre-TCJA-style
+    #    layouts where pdfplumber emits the label and value
+    #    on separate lines but ALSO renders the line-number
+    #    echo column on the label line, leaving the label
+    #    line ending in a bare line-number (e.g. "Wages,
+    #    salaries, tips, etc. ... 7" with the actual wages
+    #    on the next line). Without this branch, ``_pick_money``
+    #    returns the echo digit and we report wages=$7.
+    picked_str = picked.group(0).strip()
+    is_echo = False
+    if re.fullmatch(r"\d{1,2}", picked_str) and tail[picked.end():].strip() == "":
+        m_lead = re.match(r"\s*(\d{1,2})[a-z]?\s", line)
+        # Also recognise the line-number when it appears as
+        # a standalone 1-2 digit token within the first ~25
+        # chars of the line (e.g. "Income 7 Wages, ..." in
+        # pre-TCJA layouts where pdfplumber merges the
+        # section header onto the first data row). Only
+        # treat as a line-number when an alphabetic label
+        # follows it. Allow multiple sidebar words before
+        # the line number — pre-TCJA pages often merge
+        # the standard-deduction sidebar ("Standard
+        # Deduction for— Single or") onto a 1040 row,
+        # giving lines like "Single or 48 Foreign tax
+        # credit. Attach Form 1116 ... 48". The line
+        # number is still the canonical anchor; the
+        # leading words are sidebar bleed.
+        m_inline_no = (
+            None if m_lead else
+            re.match(r"\s*[A-Za-z]{2,}(?:\s+[A-Za-z]+){0,4}\s+(\d{1,2})[a-z]?\s+[A-Za-z]", line[:60])
+        )
+        if m_lead and m_lead.group(1) == picked_str:
+            is_echo = True
+        elif m_inline_no and m_inline_no.group(1) == picked_str:
+            is_echo = True
+            if echo_guarded is not None and label_key:
+                echo_guarded.append(label_key)
+        elif (len(money_matches) == 1 and m_lead is None
+              and label_key not in _COUNT_FIELDS):
+            # Bare line-number at end-of-line, no leading
+            # number to confirm — almost certainly an echo
+            # column on a wrapped label. Fall through to
+            # the next-line scan, which will pick up the
+            # real value column. Skip count fields
+            # (qualifying_children) which legitimately
+            # extract small integers.
+            if _next_line_has_money(lines, i):
+                is_echo = True
+                if echo_guarded is not None and label_key:
+                    echo_guarded.append(label_key)
+            else:
+                # Even without next-line money, recognize
+                # the trailing digit as an echo when it
+                # appears as a doubled echo (``N N``) on
+                # a nearby line — strong evidence the
+                # form is rendering line-number echo
+                # columns without real value columns,
+                # not a sub-$100 whole-dollar value.
+                if _nearby_doubled_echo(lines, i, picked_str):
+                    is_echo = True
+                    if echo_guarded is not None and label_key:
+                        echo_guarded.append(label_key)
+    if is_echo:
+        return None
+    try:
+        return _money(picked.group(0))
+    except InvalidOperation:
+        return None
+
+
+def _try_next_line_money(lines: list[str], i: int) -> Decimal | None:
+    """Next-line fallback phase of :func:`_first_money_after`.
+
+    Scans up to 5 non-empty lines after ``i`` looking for a value
+    column rendered separately from the label. Returns the money
+    value found, or ``None`` if the scan reaches a hard break
+    boundary (page header, next labeled row) without finding one.
+    """
+    for j in range(i + 1, min(i + 6, len(lines))):
+        nxt_raw = lines[j]
+        nxt = nxt_raw.strip()
+        if not nxt:
+            continue
+        if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]{3,}", nxt_raw):
+            return None
+        # The loose-layout stream sometimes MERGES the next form row
+        # into what should be the continuation of the prior label.
+        # Detect that pattern: a 1-2 digit line-number followed by
+        # 3+ alphabetic label chars within the first ~80 chars of
+        # the line. This catches e.g. "Deduction for- 7 Capital gain"
+        # without rejecting legitimate label-wraps like "term capital
+        # gains or losses, go to Part II below..." (which has no
+        # digit-then-label sequence early in the line).
+        if re.search(r"(?:^|\s)\d{1,2}[a-z]?\s+[A-Za-z]{3,}", nxt_raw[:80]):
+            return None
+        # Page-break boundary: Form 1040 prints "Department of the
+        # Treasury – Internal Revenue Service (99)" / "U.S. Individual
+        # Income Tax Return" / "OMB No. ..." at the top of every page.
+        # When a label appears at the bottom of one page with no value,
+        # the fallback would otherwise scan into the next page's header
+        # and capture stray tokens like "(99)" or the form year. Break
+        # so the outer loop tries the next occurrence of the label
+        # (post-page-break, the value usually appears on the same line
+        # as a re-statement of the label, e.g. pre-2018 line 38
+        # "Amount from line 37 (adjusted gross income) ... 100,922").
+        if re.search(
+            r"Department\s+of\s+the\s+Treasury|"
+            r"Internal\s+Revenue\s+Service|"
+            r"U\.S\.\s+Individual\s+Income|"
+            r"OMB\s+No\.",
+            nxt_raw,
+            re.IGNORECASE,
+        ):
+            return None
+        if _NOISE_LINE.match(nxt):
+            continue
+        pn = _PAREN_NEG.search(nxt)
+        if pn:
+            # Apply the same strictness to paren-negatives in the
+            # next-line scan as we do to plain money: require either a
+            # thousands-grouping comma, a cent decimal, or 3+ digits.
+            # IRS Form 1040 prints "(99)" as a fixed OMB indicator on
+            # every pre-2020 first page (e.g. "Department of the
+            # Treasury–Internal Revenue Service (99)"); without this
+            # guard, fallbacks for fields whose label appears late on
+            # the prior page (e.g. AGI line 37) capture "(99)" as -99.
+            inner = pn.group(1)
+            if ("," in inner) or ("." in inner) or len(inner) >= 3:
+                try:
+                    return -_money(inner)
+                except InvalidOperation:
+                    pass
+        strict = [
+            m for m in _STRICT_MONEY_PAT.finditer(nxt)
+            if not _is_form_id_digit(nxt, m.start())
+            # Reject `$`-prefixed values in next-line fallback. IRS
+            # 1040 columnar values are bare digits with comma group
+            # separators (no `$` glyph); the only places `$N,NNN`
+            # actually appears in vendor-rendered PDFs are the
+            # standard-deduction sidebar ("$12,200", "$24,400",
+            # "$18,350" etc.) and cover-page payment instructions
+            # ("$1,004 your payment goes through"). When a label
+            # extraction falls through to the next-line scan and
+            # the only candidate begins with `$`, that's almost
+            # certainly sidebar bleed (e.g. TY2019 line 5b taxable
+            # SS shows the std-deduction sidebar's $12,200 directly
+            # underneath a blank value column).
+            and not nxt[m.start():m.start()+1] == "$"
+        ]
+        if strict:
+            # Peek-ahead: if the current line is JUST a bare money
+            # value (no surrounding label text) AND the next non-empty
+            # line is a TOTALING successor row (e.g. "22 Combine the
+            # amounts ... is your total income"), this value belongs
+            # to that totalizer, not to the label we're currently
+            # extracting. pdfplumber sometimes floats the value
+            # column for the totalizer ABOVE its label when an
+            # immediately-prior labeled row has an empty value
+            # column (e.g. pre-TCJA line 21 "Other income" with
+            # value 0 followed by "90,015." on its own line followed
+            # by "22 Combine the amounts ... is your total income").
+            # Without this guard the line-21 fallback captures the
+            # total-income value. We restrict the skip to totalizer
+            # successors so we don't over-suppress the standard
+            # case where a bare value column legitimately precedes
+            # a non-totaling labeled row.
+            if re.match(r"^\s*\$?\s*-?\d[\d,]*(?:\.\d{0,2})?\s*$", nxt):
+                for k in range(j + 1, min(j + 4, len(lines))):
+                    peek_raw = lines[k]
+                    peek = peek_raw.strip()
+                    if not peek:
+                        continue
+                    if _NOISE_LINE.match(peek):
+                        continue
+                    if re.match(
+                        r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+(?:"
+                        r"Combine|Add\s+lines?|Total|Subtract\s+line"
+                        r")\b",
+                        peek_raw,
+                        re.IGNORECASE,
+                    ):
+                        strict = []
+                    break
+        if strict:
+            try:
+                return _money(strict[-1].group(0))
+            except InvalidOperation:
+                pass
+        # Fallback: "<line-number-echo> <integer>" continuation lines
+        # like "8 0", "25c 0", "10c 220" — common when the value column
+        # is rendered on its own row by vendor exports. Strict_money_pat
+        # rejects bare 1-2 digit integers; allow them here because the
+        # line-number echo gives us confidence this IS the value column.
+        m_echo = re.match(r"^\s*(\d{1,2})[a-z]?\s+(-?\d{1,6})\s*$", nxt_raw)
+        if m_echo:
+            # Reject pure "doubled echo" rows like "21 21" or "27 27"
+            # — these are line-number-echo columns with NO value
+            # column rendered, common in pre-TCJA vendor exports
+            # for empty-value rows. The two integers being equal
+            # AND both ≤ 99 (so the value, if real, would have to
+            # be a sub-$100 whole-dollar amount — never the case
+            # on a real 1040) is a strong signature.
+            lead_int, val_int = m_echo.group(1), m_echo.group(2)
+            if lead_int == val_int and len(val_int) <= 2:
+                return None
+            try:
+                return _money(m_echo.group(2))
+            except InvalidOperation:
+                pass
+        # End-of-line variant: the value column is at the END of a
+        # wrapped continuation line, anchored by a line-number echo
+        # immediately before the value (e.g. Schedule D line 7 wraps:
+        # "...go to Part III on page 2 . . . . . 7 74."). The line
+        # starts with continuation prose, not the line number, so
+        # the start-anchored m_echo above doesn't fire. We require
+        # the dot-leader/whitespace gap before the line-number to
+        # avoid false-firing on prose like "page 2".
+        m_tail_echo = re.search(
+            r"(?:\.\s*){2,}\s*\d{1,2}[a-z]?\s+(-?\d{1,6})\s*\.?\s*$",
+            nxt_raw,
+        )
+        if m_tail_echo:
+            try:
+                return _money(m_tail_echo.group(1))
+            except InvalidOperation:
+                pass
+        return None
+    return None
+
+
 def _first_money_after(label_re: str, text: str, *,
                        echo_guarded: list[str] | None = None,
                        label_key: str | None = None) -> Decimal | None:
@@ -255,256 +531,21 @@ def _first_money_after(label_re: str, text: str, *,
     value just because the default-stream label-line had no value column.
     """
     label_pat = re.compile(label_re, re.IGNORECASE)
-    # Stricter pattern for next-line fallback: real money has ≥3 digits or a cent decimal.
-    strict_money_pat = re.compile(
-        r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?|\$?\s*-?[0-9]+\.[0-9]{1,2}"
-    )
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = label_pat.search(line)
         if not m:
             continue
-        tail = line[m.end():]
-        pn = _PAREN_NEG.search(tail)
-        money_matches = _money_matches_in(tail)
-        if pn:
-            try:
-                return -_money(pn.group(1))
-            except InvalidOperation:
-                pass
-        if money_matches:
-            picked = _pick_money(tail, money_matches)
-            if picked is not None:
-                # Guard against trailing line-number echo with NO value
-                # column. E.g. Form 8889 line 13 when the user has no
-                # personal HSA contribution renders as
-                #     "13 HSA deduction (see instructions). . . . . . . 13"
-                # — the trailing "13" is the line-number echo column,
-                # not a $13 deduction.
-                #
-                # Two situations trigger the guard:
-                # 1. Picked digit equals the leading line-number on the
-                #    same line (the canonical "echo column" case).
-                # 2. Picked is a bare 1-2 digit integer at end-of-line
-                #    AND it is the ONLY money on the line AND no leading
-                #    line-number is present. This catches pre-TCJA-style
-                #    layouts where pdfplumber emits the label and value
-                #    on separate lines but ALSO renders the line-number
-                #    echo column on the label line, leaving the label
-                #    line ending in a bare line-number (e.g. "Wages,
-                #    salaries, tips, etc. ... 7" with the actual wages
-                #    on the next line). Without this branch, ``_pick_money``
-                #    returns the echo digit and we report wages=$7.
-                picked_str = picked.group(0).strip()
-                is_echo = False
-                if re.fullmatch(r"\d{1,2}", picked_str):
-                    if tail[picked.end():].strip() == "":
-                        m_lead = re.match(r"\s*(\d{1,2})[a-z]?\s", line)
-                        # Also recognise the line-number when it appears as
-                        # a standalone 1-2 digit token within the first ~25
-                        # chars of the line (e.g. "Income 7 Wages, ..." in
-                        # pre-TCJA layouts where pdfplumber merges the
-                        # section header onto the first data row). Only
-                        # treat as a line-number when an alphabetic label
-                        # follows it. Allow multiple sidebar words before
-                        # the line number — pre-TCJA pages often merge
-                        # the standard-deduction sidebar ("Standard
-                        # Deduction for— Single or") onto a 1040 row,
-                        # giving lines like "Single or 48 Foreign tax
-                        # credit. Attach Form 1116 ... 48". The line
-                        # number is still the canonical anchor; the
-                        # leading words are sidebar bleed.
-                        m_inline_no = (
-                            None if m_lead else
-                            re.match(r"\s*[A-Za-z]{2,}(?:\s+[A-Za-z]+){0,4}\s+(\d{1,2})[a-z]?\s+[A-Za-z]", line[:60])
-                        )
-                        if m_lead and m_lead.group(1) == picked_str:
-                            is_echo = True
-                        elif m_inline_no and m_inline_no.group(1) == picked_str:
-                            is_echo = True
-                            if echo_guarded is not None and label_key:
-                                echo_guarded.append(label_key)
-                        elif (len(money_matches) == 1 and m_lead is None
-                              and label_key not in _COUNT_FIELDS):
-                            # Bare line-number at end-of-line, no leading
-                            # number to confirm — almost certainly an echo
-                            # column on a wrapped label. Fall through to
-                            # the next-line scan, which will pick up the
-                            # real value column. Skip count fields
-                            # (qualifying_children) which legitimately
-                            # extract small integers.
-                            if _next_line_has_money(lines, i):
-                                is_echo = True
-                                if echo_guarded is not None and label_key:
-                                    echo_guarded.append(label_key)
-                            else:
-                                # Even without next-line money, recognize
-                                # the trailing digit as an echo when it
-                                # appears as a doubled echo (``N N``) on
-                                # a nearby line — strong evidence the
-                                # form is rendering line-number echo
-                                # columns without real value columns,
-                                # not a sub-$100 whole-dollar value.
-                                if _nearby_doubled_echo(lines, i, picked_str):
-                                    is_echo = True
-                                    if echo_guarded is not None and label_key:
-                                        echo_guarded.append(label_key)
-                if not is_echo:
-                    try:
-                        return _money(picked.group(0))
-                    except InvalidOperation:
-                        pass
-        # Same-line fallback failed — scan up to 5 next non-empty lines,
-        # skipping pure noise.
-        for j in range(i + 1, min(i + 6, len(lines))):
-            nxt_raw = lines[j]
-            nxt = nxt_raw.strip()
-            if not nxt:
-                continue
-            if re.match(r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+[A-Za-z]{3,}", nxt_raw):
-                break
-            # The loose-layout stream sometimes MERGES the next form row
-            # into what should be the continuation of the prior label.
-            # Detect that pattern: a 1-2 digit line-number followed by
-            # 3+ alphabetic label chars within the first ~80 chars of
-            # the line. This catches e.g. "Deduction for- 7 Capital gain"
-            # without rejecting legitimate label-wraps like "term capital
-            # gains or losses, go to Part II below..." (which has no
-            # digit-then-label sequence early in the line).
-            if re.search(r"(?:^|\s)\d{1,2}[a-z]?\s+[A-Za-z]{3,}", nxt_raw[:80]):
-                break
-            # Page-break boundary: Form 1040 prints "Department of the
-            # Treasury – Internal Revenue Service (99)" / "U.S. Individual
-            # Income Tax Return" / "OMB No. ..." at the top of every page.
-            # When a label appears at the bottom of one page with no value,
-            # the fallback would otherwise scan into the next page's header
-            # and capture stray tokens like "(99)" or the form year. Break
-            # so the outer loop tries the next occurrence of the label
-            # (post-page-break, the value usually appears on the same line
-            # as a re-statement of the label, e.g. pre-2018 line 38
-            # "Amount from line 37 (adjusted gross income) ... 100,922").
-            if re.search(
-                r"Department\s+of\s+the\s+Treasury|"
-                r"Internal\s+Revenue\s+Service|"
-                r"U\.S\.\s+Individual\s+Income|"
-                r"OMB\s+No\.",
-                nxt_raw,
-                re.IGNORECASE,
-            ):
-                break
-            if _NOISE_LINE.match(nxt):
-                continue
-            pn = _PAREN_NEG.search(nxt)
-            if pn:
-                # Apply the same strictness to paren-negatives in the
-                # next-line scan as we do to plain money: require either a
-                # thousands-grouping comma, a cent decimal, or 3+ digits.
-                # IRS Form 1040 prints "(99)" as a fixed OMB indicator on
-                # every pre-2020 first page (e.g. "Department of the
-                # Treasury–Internal Revenue Service (99)"); without this
-                # guard, fallbacks for fields whose label appears late on
-                # the prior page (e.g. AGI line 37) capture "(99)" as -99.
-                inner = pn.group(1)
-                if ("," in inner) or ("." in inner) or len(inner) >= 3:
-                    try:
-                        return -_money(inner)
-                    except InvalidOperation:
-                        pass
-            strict = [
-                m for m in strict_money_pat.finditer(nxt)
-                if not _is_form_id_digit(nxt, m.start())
-                # Reject `$`-prefixed values in next-line fallback. IRS
-                # 1040 columnar values are bare digits with comma group
-                # separators (no `$` glyph); the only places `$N,NNN`
-                # actually appears in vendor-rendered PDFs are the
-                # standard-deduction sidebar ("$12,200", "$24,400",
-                # "$18,350" etc.) and cover-page payment instructions
-                # ("$1,004 your payment goes through"). When a label
-                # extraction falls through to the next-line scan and
-                # the only candidate begins with `$`, that's almost
-                # certainly sidebar bleed (e.g. TY2019 line 5b taxable
-                # SS shows the std-deduction sidebar's $12,200 directly
-                # underneath a blank value column).
-                and not nxt[m.start():m.start()+1] == "$"
-            ]
-            if strict:
-                # Peek-ahead: if the current line is JUST a bare money
-                # value (no surrounding label text) AND the next non-empty
-                # line is a TOTALING successor row (e.g. "22 Combine the
-                # amounts ... is your total income"), this value belongs
-                # to that totalizer, not to the label we're currently
-                # extracting. pdfplumber sometimes floats the value
-                # column for the totalizer ABOVE its label when an
-                # immediately-prior labeled row has an empty value
-                # column (e.g. pre-TCJA line 21 "Other income" with
-                # value 0 followed by "90,015." on its own line followed
-                # by "22 Combine the amounts ... is your total income").
-                # Without this guard the line-21 fallback captures the
-                # total-income value. We restrict the skip to totalizer
-                # successors so we don't over-suppress the standard
-                # case where a bare value column legitimately precedes
-                # a non-totaling labeled row.
-                if re.match(r"^\s*\$?\s*-?\d[\d,]*(?:\.\d{0,2})?\s*$", nxt):
-                    for k in range(j + 1, min(j + 4, len(lines))):
-                        peek_raw = lines[k]
-                        peek = peek_raw.strip()
-                        if not peek:
-                            continue
-                        if _NOISE_LINE.match(peek):
-                            continue
-                        if re.match(
-                            r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+(?:"
-                            r"Combine|Add\s+lines?|Total|Subtract\s+line"
-                            r")\b",
-                            peek_raw,
-                            re.IGNORECASE,
-                        ):
-                            strict = []
-                        break
-            if strict:
-                try:
-                    return _money(strict[-1].group(0))
-                except InvalidOperation:
-                    pass
-            # Fallback: "<line-number-echo> <integer>" continuation lines
-            # like "8 0", "25c 0", "10c 220" — common when the value column
-            # is rendered on its own row by vendor exports. Strict_money_pat
-            # rejects bare 1-2 digit integers; allow them here because the
-            # line-number echo gives us confidence this IS the value column.
-            m_echo = re.match(r"^\s*(\d{1,2})[a-z]?\s+(-?\d{1,6})\s*$", nxt_raw)
-            if m_echo:
-                # Reject pure "doubled echo" rows like "21 21" or "27 27"
-                # — these are line-number-echo columns with NO value
-                # column rendered, common in pre-TCJA vendor exports
-                # for empty-value rows. The two integers being equal
-                # AND both ≤ 99 (so the value, if real, would have to
-                # be a sub-$100 whole-dollar amount — never the case
-                # on a real 1040) is a strong signature.
-                lead_int, val_int = m_echo.group(1), m_echo.group(2)
-                if lead_int == val_int and len(val_int) <= 2:
-                    break
-                try:
-                    return _money(m_echo.group(2))
-                except InvalidOperation:
-                    pass
-            # End-of-line variant: the value column is at the END of a
-            # wrapped continuation line, anchored by a line-number echo
-            # immediately before the value (e.g. Schedule D line 7 wraps:
-            # "...go to Part III on page 2 . . . . . 7 74."). The line
-            # starts with continuation prose, not the line number, so
-            # the start-anchored m_echo above doesn't fire. We require
-            # the dot-leader/whitespace gap before the line-number to
-            # avoid false-firing on prose like "page 2".
-            m_tail_echo = re.search(
-                r"(?:\.\s*){2,}\s*\d{1,2}[a-z]?\s+(-?\d{1,6})\s*\.?\s*$",
-                nxt_raw,
-            )
-            if m_tail_echo:
-                try:
-                    return _money(m_tail_echo.group(1))
-                except InvalidOperation:
-                    pass
-            break
+        val = _try_same_line_money(
+            line, m,
+            lines=lines, i=i,
+            label_key=label_key, echo_guarded=echo_guarded,
+        )
+        if val is not None:
+            return val
+        val = _try_next_line_money(lines, i)
+        if val is not None:
+            return val
     return None
 
 
@@ -1535,6 +1576,114 @@ def _merge_field_results(
     return merged, children, warnings, echo_guarded
 
 
+def _apply_acroform_override(
+    fields: dict,
+    field_sources: dict[str, str],
+    acroform_fields: dict,
+    acroform_warnings: list[str],
+    warnings: list[str],
+) -> None:
+    """AcroForm widget values override text-derived ones.
+
+    The form dictionary is the authoritative source — text extraction
+    is, at best, OCR-ing the rendered version of the same data — so
+    when both agree we waste no cycles, and when they disagree the
+    AcroForm value is the one we trust. Surface a warning whenever
+    an override actually happens so the user can spot any unexpected
+    discrepancies on the dashboard. Mutates ``fields``, ``field_sources``,
+    and ``warnings`` in place.
+    """
+    if not acroform_fields:
+        return
+    overrides: list[str] = []
+    new_keys: list[str] = []
+    for k, v in acroform_fields.items():
+        existing = fields.get(k)
+        if existing is None:
+            new_keys.append(k)
+        elif existing != v:
+            overrides.append(f"{k}: text={existing} → acroform={v}")
+        fields[k] = v
+        field_sources[k] = "acroform"
+    warnings.append(
+        f"AcroForm extraction supplied {len(acroform_fields)} field(s) "
+        f"directly from PDF form widgets (the authoritative source)."
+    )
+    if new_keys:
+        warnings.append(f"AcroForm added: {sorted(new_keys)}.")
+    if overrides:
+        warnings.append("AcroForm overrode text-extracted values: " + "; ".join(overrides))
+    warnings.extend(acroform_warnings)
+
+
+def _recover_w2_box12(
+    fields: dict, w2_text: str, warnings: list[str],
+) -> tuple[bool, int]:
+    """Recover W-2 box 12 elective deferrals (codes D/AA/etc) from the
+    bundled W-2 text. The 1040 itself doesn't show 401(k) contributions,
+    so this is the only way to capture them when the W-2 is in the PDF.
+
+    Returns ``(w2_present, box12_added_count)`` so callers can wire the
+    verify-payroll advisor rule. Mutates ``fields`` and ``warnings``
+    in place.
+    """
+    box12 = _extract_w2_box12_deferrals(w2_text)
+    # Provenance: if a W-2 is anywhere in this PDF we have authoritative
+    # data on the box-12 buckets (401(k) deferrals, HSA payroll). If no
+    # W-2 is present, default-zero contributions are NOT a confirmed zero
+    # — they're "unknown". Advisor rules use this flag.
+    w2_present = bool(_W2_FINGERPRINT.search(w2_text))
+    if w2_present:
+        fields["w2_data_present"] = True
+        # W-2 Box 12 code W is the canonical payroll-HSA source, so
+        # seeing a W-2 also gives authoritative HSA data.
+        fields["hsa_data_known"] = True
+    box12_added: list[str] = []
+    for k, v in box12.items():
+        # Only add — never override a value that text or AcroForm already
+        # supplied (the user may have manually entered totals elsewhere).
+        if fields.get(k) in (None, Decimal(0)):
+            fields[k] = v
+            box12_added.append(f"{k}=${int(v):,}")
+    if box12_added:
+        warnings.append(
+            "Recovered pre-tax payroll contributions from W-2 box 12: "
+            + ", ".join(box12_added)
+        )
+    return w2_present, len(box12_added)
+
+
+def _recover_form_8889(
+    fields: dict, w2_text: str, warnings: list[str],
+) -> bool:
+    """Recover HSA contributions from a bundled Form 8889. Independent
+    of W-2 — even on 1040-only PDFs the 8889 itself is usually included
+    whenever the filer touched an HSA, so this is a strong second
+    source for ``hsa_contributions``.
+
+    Returns ``form_8889_present`` so callers can wire advisor flags.
+    Mutates ``fields`` and ``warnings`` in place.
+    """
+    f8889 = _extract_form_8889(w2_text)
+    form_8889_present = bool(f8889.pop("_form_8889_present", False))
+    f8889.pop("_hsa_coverage", None)  # not yet wired into the Return model
+    f8889_added: list[str] = []
+    for k, v in f8889.items():
+        if fields.get(k) in (None, Decimal(0)):
+            fields[k] = v
+            f8889_added.append(f"{k}=${int(v):,}")  # type: ignore[arg-type]
+    if f8889_added:
+        warnings.append(
+            "Recovered HSA contributions from Form 8889: "
+            + ", ".join(f8889_added)
+        )
+    if form_8889_present:
+        # Authoritative HSA data is in the PDF — advisor's verify-hsa
+        # rule should NOT fire even if no W-2 was bundled.
+        fields["hsa_data_known"] = True  # type: ignore[assignment]
+    return form_8889_present
+
+
 def import_pdf(path: Path) -> Imported:
     from taxlens.importers.import_log import ImportLogger, logging_enabled
     logger: ImportLogger | None = ImportLogger(source_path=path) if logging_enabled() else None
@@ -1711,32 +1860,10 @@ def import_pdf(path: Path) -> Imported:
             f"default text extraction missed: {sorted(layout_only)}."
         )
 
-    # AcroForm values OVERRIDE text-derived values. The form dictionary is
-    # the authoritative source — text extraction is, at best, OCR-ing the
-    # rendered version of the same data — so when both agree we waste no
-    # cycles, and when they disagree the AcroForm value is the one we
-    # trust. Surface a warning whenever an override actually happens so
-    # the user can spot any unexpected discrepancies on the dashboard.
-    if acroform_fields:
-        overrides: list[str] = []
-        new_keys: list[str] = []
-        for k, v in acroform_fields.items():
-            existing = fields.get(k)
-            if existing is None:
-                new_keys.append(k)
-            elif existing != v:
-                overrides.append(f"{k}: text={existing} → acroform={v}")
-            fields[k] = v
-            field_sources[k] = "acroform"
-        warnings.append(
-            f"AcroForm extraction supplied {len(acroform_fields)} field(s) "
-            f"directly from PDF form widgets (the authoritative source)."
-        )
-        if new_keys:
-            warnings.append(f"AcroForm added: {sorted(new_keys)}.")
-        if overrides:
-            warnings.append("AcroForm overrode text-extracted values: " + "; ".join(overrides))
-        warnings.extend(acroform_warnings)
+    # AcroForm values OVERRIDE text-derived values.
+    _apply_acroform_override(
+        fields, field_sources, acroform_fields, acroform_warnings, warnings,
+    )
 
     if tax_year is None:
         raise ValueError(
@@ -1776,59 +1903,16 @@ def import_pdf(path: Path) -> Imported:
                     "ordinary income."
                 )
 
-    # Recover W-2 box 12 elective deferrals (codes D/AA/etc) — the 1040
-    # itself doesn't show 401(k) contributions, so this is the only way
-    # to capture them when the W-2 is bundled in the same PDF.
+    # Recover W-2 box 12 elective deferrals and Form 8889 HSA detail
+    # (independent recovery passes — both can fire on the same PDF).
     w2_text = "\n".join(default_pages)
     for stream in layout_form_streams:
         w2_text += "\n" + "\n".join(stream)
-    box12 = _extract_w2_box12_deferrals(w2_text)
-    # Provenance: if a W-2 is anywhere in this PDF we have authoritative
-    # data on the box-12 buckets (401(k) deferrals, HSA payroll). If no
-    # W-2 is present, default-zero contributions are NOT a confirmed zero
-    # — they're "unknown". Advisor rules use this flag.
-    w2_present = bool(_W2_FINGERPRINT.search(w2_text))
-    if w2_present:
-        fields["w2_data_present"] = True
-        # W-2 Box 12 code W is the canonical payroll-HSA source, so
-        # seeing a W-2 also gives authoritative HSA data.
-        fields["hsa_data_known"] = True
-    box12_added: list[str] = []
-    for k, v in box12.items():
-        # Only add — never override a value that text or AcroForm already
-        # supplied (the user may have manually entered totals elsewhere).
-        if fields.get(k) in (None, Decimal(0)):
-            fields[k] = v
-            box12_added.append(f"{k}=${int(v):,}")
-    if box12_added:
-        warnings.append(
-            "Recovered pre-tax payroll contributions from W-2 box 12: "
-            + ", ".join(box12_added)
-        )
-
-    # Form 8889 (HSA) — independent of W-2. Even on 1040-only PDFs the
-    # 8889 itself is usually included whenever the filer touched an HSA,
-    # so this is a strong second source for hsa_contributions.
-    f8889 = _extract_form_8889(w2_text)
-    form_8889_present = bool(f8889.pop("_form_8889_present", False))
-    f8889.pop("_hsa_coverage", None)  # not yet wired into the Return model
-    f8889_added: list[str] = []
-    for k, v in f8889.items():
-        if fields.get(k) in (None, Decimal(0)):
-            fields[k] = v
-            f8889_added.append(f"{k}=${int(v):,}")  # type: ignore[arg-type]
-    if f8889_added:
-        warnings.append(
-            "Recovered HSA contributions from Form 8889: "
-            + ", ".join(f8889_added)
-        )
-    if form_8889_present:
-        # Authoritative HSA data is in the PDF — advisor's verify-hsa
-        # rule should NOT fire even if no W-2 was bundled.
-        fields["hsa_data_known"] = True  # type: ignore[assignment]
+    w2_present, box12_added_count = _recover_w2_box12(fields, w2_text, warnings)
+    form_8889_present = _recover_form_8889(fields, w2_text, warnings)
 
     if (
-        not box12_added
+        not box12_added_count
         and not form_8889_present
         and not w2_present
         and fields.get("wages", Decimal(0)) >= Decimal(10_000)
