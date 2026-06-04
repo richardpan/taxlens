@@ -1451,20 +1451,20 @@ def _compute_income_tax(
         ordinary_taxable, ordinary_brackets, include_next_empty=True,
     )
     # IRS Tax Tables midpoint rounding (Pub 17 / 1040 instructions).
-    # When the QDCGTW path is used (qd_ltcg > 0) AND the worksheet's
-    # ordinary portion is under $100,000, the form instructions direct
-    # the filer to look up tax using the Tax Tables — which round each
-    # $50 bucket of taxable income to its midpoint (and use $25
-    # buckets below $3,000) before applying the bracket schedule, then
-    # round to whole dollars. The continuous bracket walk we use for
-    # everything else under-states tax on the QDCGTW ordinary portion
-    # by up to ~$5 because the midpoint sits a few dollars above
-    # actual ordinary_taxable. We only apply this in the QDCGTW path
-    # because the engine's pinned cents-precision behaviour for the
-    # standalone bracket walk (no qualified income) is locked in by
-    # historical test fixtures; opt-in restricts the change to the
-    # narrow case where IRS guidance unambiguously specifies tables.
-    if qd_ltcg > 0 and ordinary_taxable > 0 and ordinary_taxable < Decimal(100_000):
+    # When taxable income is under $100,000, the IRS form instructions
+    # direct the filer to look up tax using the printed Tax Tables —
+    # which round each $50 bucket of taxable income to its midpoint
+    # (and use $25 buckets below $3,000) before applying the bracket
+    # schedule, then round to whole dollars. The continuous bracket
+    # walk under-states tax by up to ~$5 because the table midpoint
+    # sits a few dollars above the actual taxable amount.
+    #
+    # Applied unconditionally for ordinary_taxable < $100K (whether or
+    # not the QDCGTW path is engaged) so reconciliation accuracy holds
+    # for filers without qualified income too. For TI ≥ $100K the
+    # filer uses the Tax Computation Worksheet which is mathematically
+    # identical to the engine's continuous bracket walk.
+    if ordinary_taxable > 0 and ordinary_taxable < Decimal(100_000):
         if ordinary_taxable < Decimal(3000):
             bucket_low = (int(ordinary_taxable) // 25) * 25
             midpoint = Decimal(bucket_low) + Decimal("12.50")

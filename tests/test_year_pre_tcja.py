@@ -77,11 +77,11 @@ def test_2014_inflation_bumps() -> None:
 # Each entry: (year, deduction+exemption, taxable_income, expected_ordinary_tax).
 # Ordinary tax computed by walking the IRS bracket schedule by hand.
 _SINGLE_100K_CASES = [
-    (2010, Decimal("9350.00"),  Decimal("90650.00"), Decimal("19091.25")),
-    (2011, Decimal("9500.00"),  Decimal("90500.00"), Decimal("18957.00")),
-    (2012, Decimal("9750.00"),  Decimal("90250.00"), Decimal("18730.50")),
-    (2013, Decimal("10000.00"), Decimal("90000.00"), Decimal("18493.25")),
-    (2014, Decimal("10150.00"), Decimal("89850.00"), Decimal("18333.75")),
+    (2010, Decimal("9350.00"),  Decimal("90650.00"), Decimal("19098.00")),
+    (2011, Decimal("9500.00"),  Decimal("90500.00"), Decimal("18964.00")),
+    (2012, Decimal("9750.00"),  Decimal("90250.00"), Decimal("18738.00")),
+    (2013, Decimal("10000.00"), Decimal("90000.00"), Decimal("18500.00")),
+    (2014, Decimal("10150.00"), Decimal("89850.00"), Decimal("18341.00")),
 ]
 
 

@@ -24,14 +24,14 @@ def _make_clean_return(path: Path, *, tax_year: int = 2024) -> None:
     """Synthesize a 1040 whose engine output should match the reported
     total_tax embedded in the PDF — the resulting delta is rounding-only."""
     # Single filer, $100k wages, std ded $14,600, taxable $85,400,
-    # 2024 single tax ≈ $13,841. Reported tax = engine's expected
-    # output rounded to whole dollars → delta within $1.
+    # 2024 single tax (IRS Tax Tables) = $13,847. Reported tax matches
+    # engine output → delta = $0.
     make_1040_pdf(
         path,
         tax_year=tax_year,
         filing_status_label="Single",
         wages=Decimal("100000"),
-        total_tax_reported=Decimal("13841"),
+        total_tax_reported=Decimal("13847"),
     )
 
 

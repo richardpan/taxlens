@@ -44,7 +44,7 @@ def test_2026_simple_single_return_brackets_correctly() -> None:
     assert result.agi == Decimal("100000.00")
     assert result.deduction_used == Decimal("16100.00")
     assert result.taxable_income == Decimal("83900.00")
-    assert result.ordinary_tax == Decimal("13170.00")
+    assert result.ordinary_tax == Decimal("13176.00")
 
 
 def test_2026_mfj_top_bracket_starts_at_768700() -> None:

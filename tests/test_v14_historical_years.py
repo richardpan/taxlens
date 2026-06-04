@@ -23,14 +23,14 @@ from taxlens.models import FilingStatus, Return
 # (year, expected_taxable_income, expected_ordinary_tax) for a single filer,
 # $75k wages, no dependents, no itemize, no other income. Hand-calculated.
 BASELINE = [
-    (2015, Decimal("64700.00"), Decimal("11968.75")),
-    (2016, Decimal("64650.00"), Decimal("11933.75")),
-    (2017, Decimal("64600.00"), Decimal("11888.75")),
-    (2018, Decimal("63000.00"), Decimal("9799.50")),   # first TCJA year
-    (2019, Decimal("62800.00"), Decimal("9674.50")),
-    (2020, Decimal("62600.00"), Decimal("9562.00")),
-    (2021, Decimal("62450.00"), Decimal("9487.50")),
-    (2022, Decimal("62050.00"), Decimal("9268.00")),
+    (2015, Decimal("64700.00"), Decimal("11975.00")),
+    (2016, Decimal("64650.00"), Decimal("11940.00")),
+    (2017, Decimal("64600.00"), Decimal("11895.00")),
+    (2018, Decimal("63000.00"), Decimal("9805.00")),   # first TCJA year
+    (2019, Decimal("62800.00"), Decimal("9680.00")),
+    (2020, Decimal("62600.00"), Decimal("9568.00")),
+    (2021, Decimal("62450.00"), Decimal("9493.00")),
+    (2022, Decimal("62050.00"), Decimal("9274.00")),
 ]
 
 
