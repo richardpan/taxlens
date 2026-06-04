@@ -672,6 +672,12 @@ STATUS_EXPLICIT = [
     re.compile(r"Filing\s*Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
     re.compile(r"Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
     re.compile(r"Your\s+filing\s+status\s+is\s+([A-Za-z][^\n.]{0,40})", re.IGNORECASE),
+    # Pre-TCJA fillable forms (TY2016/TY2017) print "Filing Status" with
+    # no colon, followed by the option list and an inline X marker:
+    #   "Filing Status 1 X Single 4 Head of household (with qualifying ...)"
+    # Capture the tail so the X-detection branch in _detect_status can
+    # identify the selected option.
+    re.compile(r"Filing\s+Status\s+(\d?\s*X\s+[A-Za-z][^\n]{0,80})", re.IGNORECASE),
 ]
 
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
@@ -689,24 +695,26 @@ CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
 # them on year keeps modern-form extraction unchanged.
 LINE_PATTERNS_PRE_2020: dict[str, list[str]] = {
     "deduction_reported": [
-        # TY2019 line 9 / TY2018 line 8 phrasing. Pre-TCJA forms use a
-        # different phrase ("Itemized deductions (from Schedule A) or
-        # your standard deduction") which we deliberately do NOT match
-        # here: pre-TCJA returns also need the dependents-count from
-        # line 6d to compute personal exemptions, and extracting only
-        # the deduction without the matching exemption count causes the
-        # engine to over-deduct (max() picks itemized while exemption
-        # count stays at the conservative default), widening deltas.
-        # Until we have safe dependents-count extraction, pre-TCJA
-        # deduction is left unextracted so engine defaults are used.
+        # TY2019 line 9 / TY2018 line 8 phrasing.
         r"\bStandard\s+deduction\s+or\s+itemized\s+deductions\b",
+        # Pre-TCJA (TY2017 and earlier) 1040 line 40 phrasing. The label
+        # straddles two lines on some vendor exports — anchor on the
+        # leading "Itemized deductions" with "Schedule A" reference and
+        # tolerate the "or your standard deduction" continuation.
+        r"\bItemized\s+deductions\s*\(\s*from\s+Schedule\s*A\)",
+        r"\bItemized\s+deductions\s+\(from\s+Schedule\s*A\)\s+or\s+your\s+standard\s+deduction",
     ],
     "child_tax_credit_reported": [
-        # Verbatim label that appears on TY2018 line 12a / TY2019 line 13a
-        # / pre-TCJA line 52. Negative lookahead rejects the "Additional"
-        # variant (the refundable portion, captured separately).
-        r"\bChild\s+tax\s+credit\s+(?:and|or)\s+credit\s+for\s+other\s+dependents",
-        r"(?<!Additional\s)\bChild\s+tax\s+credit\b(?![^\n]*(?:additional|refundable))",
+        # Anchor on the full label phrase that appears on the actual 1040
+        # line (TY2017 and earlier: "Child tax credit ... Attach Schedule
+        # 8812"; TY2018: "Child tax credit/credit for other dependents";
+        # TY2019: "Child tax credit or credit for other dependents").
+        # The bare "\bChild tax credit\b" fallback was removed because it
+        # over-matched on instructional sidebar prose ("child tax credit
+        # did not live with...") on page 1 of pre-TCJA returns and pulled
+        # an unrelated downstream value (typically the standard deduction)
+        # via the next-line fallback scan.
+        r"Child\s+tax\s+credit(?:\s*/\s*credit|\s+(?:and|or)\s+credit|\.?\s+Attach\s+Schedule\s*8812)",
     ],
     "additional_ctc_reported": [
         r"\bAdditional\s+child\s+tax\s+credit\.?\s+Attach\s+Schedule\s*8812",
@@ -930,9 +938,32 @@ def _detect_status(pages: list[str]) -> FilingStatus | None:
     # 1. Highest priority: explicit "Filing Status: X" markers (TurboTax, H&R Block).
     for pat in STATUS_EXPLICIT:
         for m in pat.finditer(joined):
-            phrase = m.group(1).strip().lower()
+            phrase = m.group(1).strip()
+            phrase_lower = phrase.lower()
+            # 1a. Inline-X marker: a bare uppercase X token (bounded by
+            #     whitespace) immediately precedes the selected option's
+            #     label. Examples:
+            #       "Filing status: X Single Married filing jointly ..."
+            #       "Filing Status 1 X Single 4 Head of household ..."
+            #     Without this branch, the substring scan below would
+            #     match the FIRST keyword present anywhere in the
+            #     captured phrase (typically "married filing jointly",
+            #     which follows "Single" in the form's printed order)
+            #     and return MFJ even on Single-filed returns.
+            x_match = re.search(r"(?:^|\s)X\s+(\S.*)", phrase)
+            if x_match:
+                after = x_match.group(1).lower()
+                best_status: FilingStatus | None = None
+                best_pos = 31
+                for status, needle in explicit_map:
+                    pos = after.find(needle)
+                    if pos != -1 and pos < best_pos:
+                        best_pos = pos
+                        best_status = status
+                if best_status is not None:
+                    return best_status
             for status, needle in explicit_map:
-                if needle in phrase:
+                if needle in phrase_lower:
                     return status
 
     # 2. Check-mark indicators on the actual form.
@@ -1181,6 +1212,25 @@ def _extract_fields(
                 else:
                     out[field] = value
                 break
+
+    # Sanity check: STCG and LTCG with identical non-zero values are
+    # essentially impossible in a real return; this fingerprint occurs
+    # when the loose LTCG fallback patterns (Schedule D Part II header,
+    # 1040 line 7/13 "Capital gain or (loss)") trip a next-line scan
+    # that picks up the same aggregate figure as the STCG line. The
+    # 1040's line 13 is a COMBINED ST+LT total — when LT is actually
+    # zero, attributing it to LTCG falsely applies preferential rates
+    # and undercomputes tax. Prefer ST treatment in this case.
+    stcg = out.get("short_term_capital_gains")
+    ltcg = out.get("long_term_capital_gains")
+    if stcg is not None and ltcg is not None and stcg == ltcg and stcg != 0:
+        del out["long_term_capital_gains"]
+        warnings.append(
+            "Dropped long_term_capital_gains because it equals "
+            "short_term_capital_gains (likely Schedule D aggregate "
+            "bleed; treating gain as short-term)."
+        )
+
     return out, qualifying_children, warnings, set(echo_guarded)
 
 
