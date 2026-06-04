@@ -26,10 +26,12 @@ def test_index_has_no_external_urls():
 def test_vendored_assets_are_present():
     """The two vendored CDNs must exist on disk; otherwise the dashboard
     would silently render with no styling or charts."""
-    assert (WEB / "vendor" / "tailwind.js").is_file()
+    assert (WEB / "vendor" / "tailwind.css").is_file()
     assert (WEB / "vendor" / "chart.umd.min.js").is_file()
-    # Sanity-check file size (catches an empty/truncated download).
-    assert (WEB / "vendor" / "tailwind.js").stat().st_size > 50_000
+    # Sanity-check file size (catches an empty/truncated download). Tailwind
+    # is now a tree-shaken pre-built stylesheet (~17 KB) instead of the
+    # 440 KB runtime tailwind.js, so the floor is much lower.
+    assert (WEB / "vendor" / "tailwind.css").stat().st_size > 5_000
     assert (WEB / "vendor" / "chart.umd.min.js").stat().st_size > 50_000
 
 
@@ -46,11 +48,16 @@ def test_index_response_has_strict_csp():
 
 
 def test_vendor_assets_served_at_static_paths():
-    """The vendored JS must be reachable through the /static mount used
-    by index.html's <script> tags."""
+    """The vendored assets must be reachable through the /static mount used
+    by index.html's <script>/<link> tags."""
     from taxlens.api import app
     client = TestClient(app)
-    for path in ("/static/vendor/tailwind.js", "/static/vendor/chart.umd.min.js"):
+    # Tailwind CSS is small (~17 KB tree-shaken); Chart.js is large.
+    cases = [
+        ("/static/vendor/tailwind.css", 5_000),
+        ("/static/vendor/chart.umd.min.js", 50_000),
+    ]
+    for path, min_bytes in cases:
         r = client.get(path)
         assert r.status_code == 200, f"{path} did not serve (status {r.status_code})"
-        assert len(r.content) > 50_000
+        assert len(r.content) > min_bytes
