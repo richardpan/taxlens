@@ -1148,76 +1148,134 @@ function drawDeductionWaterfall(full) {
   target.innerHTML = ticks + connectors + bars;
 }
 
-// Lightweight SVG Sankey: income sources (left) → tax buckets + take-home (right).
-// Flow widths are proportional to (source$ * bucket$ / gross$).
+// Lightweight SVG Sankey: income sources (left) → tax pools + take-home (right).
+// Each source is allocated to the tax pools it ACTUALLY feeds (e.g. LTCG
+// flows only into the qualified-rate pool, never into ordinary), then the
+// per-pool aggregate is the engine's actual computed tax. Take-home is
+// the residual after every tax outflow. Sankey conservation is preserved
+// by construction: each source's outflows sum back to its dollar value.
 function drawSankey(full) {
   const r = full.result, ret = full.return;
+  const num = (v) => Number(v || 0);
+
+  // Income sources, with per-source flags marking which tax pools they
+  // legitimately feed. Each flag is a fractional weight in [0, 1] —
+  // for sources that feed a pool fully (e.g. wages → ordinary), the
+  // weight is 1; for pools they bypass entirely (e.g. wages → qualified
+  // tax), the weight is 0.
+  //
+  //   ord  = ordinary income tax (1040 line 16 ordinary slice)
+  //   qual = qualified-rate tax (LTCG + qual div, includes coll/§1250)
+  //   se   = self-employment tax (Schedule SE)
+  //   med  = Additional Medicare Tax (Form 8959, applies to wages + SE)
+  //   niit = Net Investment Income Tax (Form 8960, investment income only)
   const SRC = [
-    ['Wages',        Number(ret.wages || 0),                                   '#34d399'],
-    ['Interest',     Number(ret.interest_income || 0),                         '#fbbf24'],
-    ['Qual div',     Number(ret.qualified_dividends || 0),                     '#60a5fa'],
-    ['Ord div',      Number(ret.ordinary_dividends || 0) - Number(ret.qualified_dividends || 0), '#3b82f6'],
-    ['LTCG',         Number(ret.long_term_capital_gains || 0),                 '#a78bfa'],
-    ['STCG',         Number(ret.short_term_capital_gains || 0),                '#c084fc'],
-    ['SE',           Number(ret.se_income || 0),                               '#f472b6'],
-    ['Pensions',     Number(ret.pension_distributions_taxable || 0),           '#22d3ee'],
-    ['IRA dist.',    Number(ret.ira_distributions_taxable || 0),               '#06b6d4'],
-    ['SS taxable',   Number(r.social_security_taxable || 0),                   '#facc15'],
-    ['Unemployment', Number(ret.unemployment_compensation || 0),               '#fb923c'],
-    ['Other',        Number(ret.other_ordinary_income || 0),                   '#94a3b8'],
+    ['Wages',        num(ret.wages),                                              '#34d399', {ord: 1, qual: 0, se: 0, med: 1, niit: 0}],
+    ['Interest',     num(ret.interest_income),                                    '#fbbf24', {ord: 1, qual: 0, se: 0, med: 0, niit: 1}],
+    ['Qual div',     num(ret.qualified_dividends),                                '#60a5fa', {ord: 0, qual: 1, se: 0, med: 0, niit: 1}],
+    ['Ord div',      num(ret.ordinary_dividends) - num(ret.qualified_dividends),  '#3b82f6', {ord: 1, qual: 0, se: 0, med: 0, niit: 1}],
+    ['LTCG',         num(ret.long_term_capital_gains),                            '#a78bfa', {ord: 0, qual: 1, se: 0, med: 0, niit: 1}],
+    ['STCG',         num(ret.short_term_capital_gains),                           '#c084fc', {ord: 1, qual: 0, se: 0, med: 0, niit: 1}],
+    ['SE',           num(ret.se_income),                                          '#f472b6', {ord: 1, qual: 0, se: 1, med: 1, niit: 0}],
+    ['Pensions',     num(ret.pension_distributions_taxable),                      '#22d3ee', {ord: 1, qual: 0, se: 0, med: 0, niit: 0}],
+    ['IRA dist.',    num(ret.ira_distributions_taxable),                          '#06b6d4', {ord: 1, qual: 0, se: 0, med: 0, niit: 0}],
+    ['SS taxable',   num(r.social_security_taxable),                              '#facc15', {ord: 1, qual: 0, se: 0, med: 0, niit: 0}],
+    ['Unemployment', num(ret.unemployment_compensation),                          '#fb923c', {ord: 1, qual: 0, se: 0, med: 0, niit: 0}],
+    ['Other',        num(ret.other_ordinary_income),                              '#94a3b8', {ord: 1, qual: 0, se: 0, med: 0, niit: 0}],
   ].filter(s => s[1] > 0);
 
-  const fedTax = Number(r.ordinary_tax || 0) + Number(r.qualified_tax || 0)
-               + Number(r.collectibles_tax || 0) + Number(r.unrecaptured_1250_tax || 0)
-               + Number(r.amt || 0) - Number(r.credits || 0);
-  const fica   = Number(r.se_tax || 0) + Number(r.additional_medicare_tax || 0) + Number(r.niit || 0)
-               + Number(r.early_withdrawal_penalty || 0);
-  const state  = Number(r.state_result ? r.state_result.state_tax : 0);
-  const gross  = SRC.reduce((s, x) => s + x[1], 0);
-  const totalTax = Math.max(0, fedTax) + fica + state;
-  const takeHome = Math.max(0, gross - totalTax);
+  // Tax pools — each is the engine's actual computed tax, NOT estimated
+  // by allocation. Sankey flows redistribute these totals across the
+  // sources that feed them.
+  const ordTax  = Math.max(0, num(r.ordinary_tax) + num(r.amt) - num(r.credits));
+  const qualTax = num(r.qualified_tax) + num(r.collectibles_tax) + num(r.unrecaptured_1250_tax);
+  const seTax   = num(r.se_tax);
+  const medTax  = num(r.additional_medicare_tax);
+  const niitTax = num(r.niit);
+  const stateTax = num(r.state_result ? r.state_result.state_tax : 0);
+  const gross   = SRC.reduce((s, x) => s + x[1], 0);
 
+  // Per-pool denominator: sum of (source.val × source's pool weight).
+  const poolDenom = (key) => SRC.reduce((s, x) => s + x[1] * x[3][key], 0);
+  const denomOrd  = poolDenom('ord');
+  const denomQual = poolDenom('qual');
+  const denomSe   = poolDenom('se');
+  const denomMed  = poolDenom('med');
+  const denomNiit = poolDenom('niit');
+
+  // For each source, compute its dollar flow into each pool. Conservation
+  // holds: sum across pools of source.val × weight × pool / denom_pool +
+  // residual = source.val.
+  const flowFor = (src, weight, poolTotal, denom) =>
+    denom > 0 ? src * weight * (poolTotal / denom) : 0;
+
+  const srcFlows = SRC.map(([label, val, color, w]) => {
+    const f = {
+      ord:   flowFor(val, w.ord,  ordTax,  denomOrd),
+      qual:  flowFor(val, w.qual, qualTax, denomQual),
+      se:    flowFor(val, w.se,   seTax,   denomSe),
+      med:   flowFor(val, w.med,  medTax,  denomMed),
+      niit:  flowFor(val, w.niit, niitTax, denomNiit),
+      // State tax distributes proportionally over total income (close
+      // enough — most states piggyback on AGI not on per-source tax).
+      state: gross > 0 ? val * (stateTax / gross) : 0,
+    };
+    f.totalTax = f.ord + f.qual + f.se + f.med + f.niit + f.state;
+    f.takeHome = Math.max(0, val - f.totalTax);
+    return { label, val, color, f };
+  });
+
+  // Build bucket totals from the engine's authoritative figures.
+  const totalTakeHome = srcFlows.reduce((s, x) => s + x.f.takeHome, 0);
   const BUCKETS = [
-    ['Federal income tax', Math.max(0, fedTax), '#0f172a'],
-    ['FICA / SE / NIIT',   fica,                '#475569'],
-    ['State tax',          state,               '#14b8a6'],
-    ['Take-home',          takeHome,            '#10b981'],
-  ].filter(b => b[1] > 0);
+    { key: 'ord',      label: 'Ordinary tax',     val: ordTax,        color: '#0f172a' },
+    { key: 'qual',     label: 'Qual / LTCG tax',  val: qualTax,       color: '#312e81' },
+    { key: 'se',       label: 'SE tax',           val: seTax,         color: '#7e22ce' },
+    { key: 'med',      label: "Add'l Medicare",   val: medTax,        color: '#9333ea' },
+    { key: 'niit',     label: 'NIIT',             val: niitTax,       color: '#475569' },
+    { key: 'state',    label: 'State tax',        val: stateTax,      color: '#14b8a6' },
+    { key: 'takeHome', label: 'Take-home',        val: totalTakeHome, color: '#10b981' },
+  ].filter(b => b.val > 0.5);
 
-  if (gross <= 0) { $('#sankey').innerHTML = '<div class="text-sm text-slate-400 italic">No income data.</div>'; return; }
+  if (gross <= 0 || BUCKETS.length === 0) {
+    $('#sankey').innerHTML = '<div class="text-sm text-slate-400 italic">No income data.</div>';
+    return;
+  }
 
-  const W = 800, H = 280, PAD = 8, COL_W = 140, GAP = 6;
-  const totalRight = BUCKETS.reduce((s, b) => s + b[1], 0) || 1;
+  const W = 800, H = 320, PAD = 8, COL_W = 130, GAP = 6;
+  const totalRight = BUCKETS.reduce((s, b) => s + b.val, 0) || 1;
   const totalLeft  = gross;
   const usableH = H - PAD * 2 - GAP * Math.max(SRC.length, BUCKETS.length);
   const leftScale  = (usableH) / totalLeft;
   const rightScale = (usableH) / totalRight;
 
-  // Layout source rects
+  // Layout source rects (left column).
   let yL = PAD;
-  const srcRects = SRC.map(([label, val, color]) => {
-    const h = Math.max(6, val * leftScale);
-    const rect = { label, val, color, x: 20, y: yL, w: COL_W, h };
+  const srcRects = srcFlows.map((s, i) => {
+    const h = Math.max(6, s.val * leftScale);
+    const rect = { ...s, x: 20, y: yL, w: COL_W, h };
     yL += h + GAP;
     return rect;
   });
   let yR = PAD;
-  const bktRects = BUCKETS.map(([label, val, color]) => {
-    const h = Math.max(8, val * rightScale);
-    const rect = { label, val, color, x: W - 20 - COL_W, y: yR, w: COL_W, h };
+  const bktRects = BUCKETS.map(b => {
+    const h = Math.max(8, b.val * rightScale);
+    const rect = { ...b, x: W - 20 - COL_W, y: yR, w: COL_W, h };
     yR += h + GAP;
     return rect;
   });
 
-  // For each source, distribute its outflow across buckets proportionally.
-  // Track running offset within each side so flows stack cleanly.
+  // Generate flows per (source, bucket) using the per-source per-pool
+  // dollars computed above. srcOff/bktOff track running offsets so
+  // ribbons stack cleanly along each rectangle's edge.
   const srcOff = srcRects.map(() => 0);
   const bktOff = bktRects.map(() => 0);
   const flows = [];
   srcRects.forEach((src, si) => {
     bktRects.forEach((bkt, bi) => {
-      const share = (src.val * bkt.val) / (totalLeft * totalRight);
-      const thick = share * totalRight * rightScale; // pixels
+      const dollars = src.f[bkt.key] || 0;
+      if (dollars < 0.5) return;
+      const thick = dollars * rightScale;
       if (thick < 0.5) return;
       const y1 = src.y + srcOff[si] + thick / 2;
       const y2 = bkt.y + bktOff[bi] + thick / 2;
@@ -1228,15 +1286,16 @@ function drawSankey(full) {
       flows.push({
         d: `M${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`,
         stroke: src.color, width: thick,
+        title: `${src.label} → ${bkt.label}: ${fmt(dollars)}`,
       });
     });
   });
 
   const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const svg = `
-    <svg viewBox="0 0 ${W} ${H}" class="w-full" style="max-height:340px">
+    <svg viewBox="0 0 ${W} ${H}" class="w-full" style="max-height:380px">
       <g stroke-opacity="0.45" fill="none">
-        ${flows.map(f => `<path d="${f.d}" stroke="${f.stroke}" stroke-width="${f.width.toFixed(2)}"/>`).join('')}
+        ${flows.map(f => `<path d="${f.d}" stroke="${f.stroke}" stroke-width="${f.width.toFixed(2)}"><title>${esc(f.title)}</title></path>`).join('')}
       </g>
       <g font-size="11" font-family="ui-sans-serif,system-ui" fill="white">
         ${srcRects.map(s => `
@@ -1955,6 +2014,50 @@ async function renderTrends() {
 
   // Carryforward vintage composition (FTC §904(c) + NOL §172 lots)
   drawCarryforwardVintages('trendsCarryVintages', 'trendsCarryCard', fulls);
+
+  // Advisor savings sparkline — total est_annual_savings per year.
+  // Cross-year recommendations are split evenly across the years they
+  // apply to so the per-year totals sum to the same grand total shown
+  // on the Advisor tab. We do this lazily — a failure here shouldn't
+  // block other Trends panels.
+  try {
+    const advisor = await api('/api/advisor');
+    const perYearSavings = {};
+    (advisor.per_year || []).forEach(p => {
+      const yr = Number(p.tax_year);
+      const sum = (p.recommendations || []).reduce(
+        (s, rec) => s + Number(rec.est_annual_savings || 0), 0);
+      if (sum > 0) perYearSavings[yr] = (perYearSavings[yr] || 0) + sum;
+    });
+    // Cross-year recs: if `applicable_years` is present, split across
+    // those; otherwise spread evenly across all imported years.
+    (advisor.cross_year || []).forEach(rec => {
+      const sav = Number(rec.est_annual_savings || 0);
+      if (sav <= 0) return;
+      const apply = Array.isArray(rec.applicable_years) && rec.applicable_years.length
+        ? rec.applicable_years.map(Number) : years;
+      const per = sav / apply.length;
+      apply.forEach(yr => {
+        perYearSavings[yr] = (perYearSavings[yr] || 0) + per;
+      });
+    });
+    const savingsData = years.map(y => perYearSavings[y] || 0);
+    const hasAny = savingsData.some(v => v > 0.5);
+    const emptyEl = document.getElementById('trendsAdvisorSavingsEmpty');
+    if (!hasAny) {
+      document.getElementById('trendsAdvisorSavings').innerHTML = '';
+      if (emptyEl) emptyEl.classList.remove('hidden');
+    } else {
+      if (emptyEl) emptyEl.classList.add('hidden');
+      drawLineChart('trendsAdvisorSavings', years, [
+        { label: 'Est. annual savings', data: savingsData, color: '#10b981' },
+      ], { yfmt: fmt, legendTarget: 'trendsAdvisorSavingsLegend' });
+    }
+  } catch (e) {
+    // Advisor endpoint failure is non-fatal — leave the panel blank.
+    document.getElementById('trendsAdvisorSavings').innerHTML =
+      '<text x="20" y="40" font-size="13" fill="#94a3b8">Advisor data unavailable.</text>';
+  }
 }
 
 function drawBracketHeatmap(svgId, fulls) {

@@ -379,6 +379,14 @@
       </div>
       <svg id="trendsBracketHeat" viewBox="0 0 800 320" class="w-full"></svg>
     </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="font-semibold" data-help="Per-year sparkline of total potential annual tax savings the Advisor identified. Each year's value sums every recommendation's est_annual_savings (e.g. unmaxed 401(k), missed HSA, Roth conversion ladder, tax-loss harvest). Use to track whether the actions you took narrowed the gap year over year — a downward trend means you're capturing more of the available savings. Cross-year recommendations are split evenly across their applicable years.">Advisor savings opportunity by year</div>
+        <div id="trendsAdvisorSavingsLegend" class="flex flex-wrap gap-3 text-xs"></div>
+      </div>
+      <svg id="trendsAdvisorSavings" viewBox="0 0 600 200" class="w-full h-48"></svg>
+      <div id="trendsAdvisorSavingsEmpty" class="text-xs text-slate-400 italic mt-2 hidden">No advisor recommendations with estimated savings.</div>
+    </div>
     <div id="trendsCarryCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
       <div class="flex items-baseline justify-between mb-2">
         <div class="font-semibold" data-help="Each stacked bar = end-of-year balance for a carryforward (capital loss, NOL, FTC) broken down by vintage (year of origination). Older vintages stacked first. Bars are flagged when a vintage is approaching its expiration (FTC > 10y, pre-TCJA NOL > 20y).">Carryforward vintage composition</div>
