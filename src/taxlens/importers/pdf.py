@@ -110,6 +110,13 @@ def _is_form_id_digit(tail: str, start: int) -> bool:
     # '5329-A'. The leading number is a form identifier, not money.
     if end < len(tail) - 1 and tail[end] == "-" and tail[end + 1].isalpha():
         return True
+    # Followed directly by an uppercase letter (no separator) → glued form
+    # identifier like '1040NR', '5329A'. pdfplumber sometimes emits the form
+    # suffix without the dash, e.g. 'Form 1040, line 25, or Form\n1040NR'
+    # where the line-wrapped '1040NR' has no preceding "Form" word on the
+    # same line and would otherwise pass the prefix-word check.
+    if end < len(tail) and tail[end].isalpha() and tail[end].isupper():
+        return True
     return False
 
 
@@ -326,14 +333,43 @@ def _first_money_after(label_re: str, text: str, *,
             # digit-then-label sequence early in the line).
             if re.search(r"(?:^|\s)\d{1,2}[a-z]?\s+[A-Za-z]{3,}", nxt_raw[:80]):
                 break
+            # Page-break boundary: Form 1040 prints "Department of the
+            # Treasury – Internal Revenue Service (99)" / "U.S. Individual
+            # Income Tax Return" / "OMB No. ..." at the top of every page.
+            # When a label appears at the bottom of one page with no value,
+            # the fallback would otherwise scan into the next page's header
+            # and capture stray tokens like "(99)" or the form year. Break
+            # so the outer loop tries the next occurrence of the label
+            # (post-page-break, the value usually appears on the same line
+            # as a re-statement of the label, e.g. pre-2018 line 38
+            # "Amount from line 37 (adjusted gross income) ... 100,922").
+            if re.search(
+                r"Department\s+of\s+the\s+Treasury|"
+                r"Internal\s+Revenue\s+Service|"
+                r"U\.S\.\s+Individual\s+Income|"
+                r"OMB\s+No\.",
+                nxt_raw,
+                re.IGNORECASE,
+            ):
+                break
             if _NOISE_LINE.match(nxt):
                 continue
             pn = _PAREN_NEG.search(nxt)
             if pn:
-                try:
-                    return -_money(pn.group(1))
-                except InvalidOperation:
-                    pass
+                # Apply the same strictness to paren-negatives in the
+                # next-line scan as we do to plain money: require either a
+                # thousands-grouping comma, a cent decimal, or 3+ digits.
+                # IRS Form 1040 prints "(99)" as a fixed OMB indicator on
+                # every pre-2020 first page (e.g. "Department of the
+                # Treasury–Internal Revenue Service (99)"); without this
+                # guard, fallbacks for fields whose label appears late on
+                # the prior page (e.g. AGI line 37) capture "(99)" as -99.
+                inner = pn.group(1)
+                if ("," in inner) or ("." in inner) or len(inner) >= 3:
+                    try:
+                        return -_money(inner)
+                    except InvalidOperation:
+                        pass
             strict = [
                 m for m in strict_money_pat.finditer(nxt)
                 if not _is_form_id_digit(nxt, m.start())
@@ -351,6 +387,40 @@ def _first_money_after(label_re: str, text: str, *,
                 # underneath a blank value column).
                 and not nxt[m.start():m.start()+1] == "$"
             ]
+            if strict:
+                # Peek-ahead: if the current line is JUST a bare money
+                # value (no surrounding label text) AND the next non-empty
+                # line is a TOTALING successor row (e.g. "22 Combine the
+                # amounts ... is your total income"), this value belongs
+                # to that totalizer, not to the label we're currently
+                # extracting. pdfplumber sometimes floats the value
+                # column for the totalizer ABOVE its label when an
+                # immediately-prior labeled row has an empty value
+                # column (e.g. pre-TCJA line 21 "Other income" with
+                # value 0 followed by "90,015." on its own line followed
+                # by "22 Combine the amounts ... is your total income").
+                # Without this guard the line-21 fallback captures the
+                # total-income value. We restrict the skip to totalizer
+                # successors so we don't over-suppress the standard
+                # case where a bare value column legitimately precedes
+                # a non-totaling labeled row.
+                if re.match(r"^\s*\$?\s*-?\d[\d,]*(?:\.\d{0,2})?\s*$", nxt):
+                    for k in range(j + 1, min(j + 4, len(lines))):
+                        peek_raw = lines[k]
+                        peek = peek_raw.strip()
+                        if not peek:
+                            continue
+                        if _NOISE_LINE.match(peek):
+                            continue
+                        if re.match(
+                            r"^\s*(?:Line\s*)?\d+\s*[a-z]?\s+(?:"
+                            r"Combine|Add\s+lines?|Total|Subtract\s+line"
+                            r")\b",
+                            peek_raw,
+                            re.IGNORECASE,
+                        ):
+                            strict = []
+                        break
             if strict:
                 try:
                     return _money(strict[-1].group(0))
@@ -772,6 +842,14 @@ LINE_PATTERNS_PRE_2020: dict[str, list[str]] = {
         # the 1040 itself, not the Schedule 3 form's own header.
         r"\bAmount\s+from\s+Schedule\s*3\b",
         r"\bAdd\s+Schedule\s*3\b",
+    ],
+    "other_ordinary_income": [
+        # Pre-TCJA (TY2017 and earlier) 1040 line 21 — "Other income.
+        # List type and amount". Common contributors are HSA testing-
+        # period income (code "HSA"), gambling winnings, jury duty,
+        # cancellation of debt income. Schedule 1 didn't exist yet, so
+        # this is the only home for these items pre-2018.
+        r"^\s*21\s+Other\s+income\.?\s+List\s+type",
     ],
 }
 
@@ -1295,6 +1373,54 @@ def _labels_present(pages: list[str]) -> set[str]:
     return found
 
 
+def _labels_with_missing_value_column(
+    pages: list[str],
+    line_patterns: dict[str, list[str]],
+) -> set[str]:
+    """Return field names whose label appears in ``pages`` only on lines
+    that end in a bare line-number echo (e.g. ``8a Taxable interest.
+    Attach Schedule B if required 8a``) with no money column between
+    the label and the trailing echo. These lines indicate the value
+    column was rendered separately by the PDF (as a layout-stream
+    extraction would recover) and the default-text stream legitimately
+    has no value to offer — so a layout-stream value is genuine, not
+    phantom, and should NOT be discarded by the phantom-value detector.
+    """
+    joined = "\n".join(pages)
+    lines = joined.splitlines()
+    found: set[str] = set()
+    money_pat = re.compile(_MONEY)
+    for field, patterns in line_patterns.items():
+        for pat in patterns:
+            label_re = re.compile(pat, re.IGNORECASE)
+            label_line_idxs = [i for i, ln in enumerate(lines) if label_re.search(ln)]
+            if not label_line_idxs:
+                continue
+            all_echo_only = True
+            for i in label_line_idxs:
+                ln = lines[i]
+                m = label_re.search(ln)
+                tail = ln[m.end():]
+                trailing_echo = re.search(r"\b(\d{1,2}[a-z]?)\s*$", tail)
+                if not trailing_echo:
+                    all_echo_only = False
+                    break
+                # Money tokens between label and trailing echo, after
+                # filtering form-id digits like "1099-R" / "8949".
+                pre_echo = tail[: trailing_echo.start()]
+                real_money = [
+                    mm for mm in money_pat.finditer(pre_echo)
+                    if not _is_form_id_digit(pre_echo, mm.start())
+                ]
+                if real_money:
+                    all_echo_only = False
+                    break
+            if all_echo_only:
+                found.add(field)
+                break
+    return found
+
+
 def _merge_field_results(
     *results: tuple[dict[str, Decimal], int, list[str], set[str]],
 ) -> tuple[dict[str, Decimal], int, list[str], set[str]]:
@@ -1442,6 +1568,16 @@ def import_pdf(path: Path) -> Imported:
     )
     if default_is_dominant:
         default_labels = _labels_present(default_form_pages)
+        # Pre-2020 forms commonly render the value column on a separate
+        # line from the label (with both a leading and trailing line-
+        # number echo on the label line). Default-stream same-line scan
+        # legitimately returns None for these — so layout-stream values
+        # are genuine, not phantom.
+        echo_only_labels = _labels_with_missing_value_column(
+            default_form_pages, LINE_PATTERNS
+        ) | _labels_with_missing_value_column(
+            default_form_pages, LINE_PATTERNS_PRE_2020
+        )
         layout_phantom: dict[str, Decimal] = {}
         for fname in list(fields.keys()):
             if fname in default_values:
@@ -1454,6 +1590,8 @@ def import_pdf(path: Path) -> Imported:
             # column is on the next line — exactly the layout stream's
             # strength — so layout's value is genuine, not phantom.
             if fname in echo_guarded_fields:
+                continue
+            if fname in echo_only_labels:
                 continue
             layout_phantom[fname] = fields.pop(fname)
             field_sources.pop(fname, None)
@@ -1681,6 +1819,35 @@ def import_pdf(path: Path) -> Imported:
         except Exception:
             # Rules unavailable or other failure — leave detected status alone.
             pass
+
+    # Pre-TCJA (TY2017 and earlier) "Other Taxes" passthrough. The
+    # post-2018 Schedule 2 Part II fields (Self-employment tax, ACA
+    # individual responsibility, Form 8959/8960, Form 5329 excise, etc.)
+    # were rendered directly on Form 1040 lines 57-62 in the pre-TCJA
+    # layout — there is no Schedule 2 yet. We capture line 56 (tax
+    # after credits) and compute ``schedule_2_other_taxes_reported``
+    # synthetically as ``line_63 − line_56`` so the existing engine
+    # passthrough (residual = reported − engine-modeled) closes the
+    # gap for items the engine doesn't model from extracted inputs
+    # (most commonly the ACA Shared Responsibility Payment and the
+    # Form 8889 HDHP excise).
+    if (tax_year is not None and tax_year < 2018
+            and reported_total_tax is not None
+            and "schedule_2_other_taxes_reported" not in fields):
+        _passthrough_text = "\n".join(
+            default_form_pages
+            + [s for stream in layout_form_streams for s in stream]
+        )
+        _line56 = _first_money_after(
+            r"Subtract\s+line\s+55\s+from\s+line\s+47",
+            _passthrough_text,
+            label_key="pre_tcja_tax_after_credits",
+        )
+        if _line56 is not None and _line56 >= 0:
+            _residual = reported_total_tax - _line56
+            if _residual > 0:
+                fields["schedule_2_other_taxes_reported"] = _residual
+                field_sources["schedule_2_other_taxes_reported"] = "pre-tcja-synth"
 
     try:
         ret = Return(
