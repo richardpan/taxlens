@@ -671,13 +671,29 @@ STATUS_PATTERNS = [
 STATUS_EXPLICIT = [
     re.compile(r"Filing\s*Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
     re.compile(r"Status\s*[:\-]\s*([A-Za-z][^\n]{0,40})", re.IGNORECASE),
-    re.compile(r"Your\s+filing\s+status\s+is\s+([A-Za-z][^\n.]{0,40})", re.IGNORECASE),
+    # Anchored to line-start (MULTILINE) so we don't match instructional
+    # prose like Form 8962's "...if your filing status is married filing
+    # separately unless you qualify..." which would otherwise drag the
+    # captured tail to MFS on any return that includes a PTC reconciliation.
+    re.compile(
+        r"^\s*Your\s+filing\s+status\s+is\s*:?\s*([A-Za-z][^\n.]{0,40})",
+        re.IGNORECASE | re.MULTILINE,
+    ),
     # Pre-TCJA fillable forms (TY2016/TY2017) print "Filing Status" with
     # no colon, followed by the option list and an inline X marker:
     #   "Filing Status 1 X Single 4 Head of household (with qualifying ...)"
     # Capture the tail so the X-detection branch in _detect_status can
     # identify the selected option.
     re.compile(r"Filing\s+Status\s+(\d?\s*X\s+[A-Za-z][^\n]{0,80})", re.IGNORECASE),
+    # TY2019/2018 1040 layout: "Filing status" (no colon) followed by the
+    # option list with the selected option marked by a bare uppercase X
+    # somewhere in the middle of the option line, e.g.:
+    #   "Filing status Single X Married filing jointly Married filing
+    #    separately (MFS) Head of household (HOH) Qualifying widow(er) (QW)"
+    # Capture the entire option-list tail so the X-detection branch in
+    # _detect_status can locate the marker by proximity to the selected
+    # status keyword.
+    re.compile(r"Filing\s+status\s+([A-Za-z][^\n]{0,180}\sX\s[^\n]{0,80})"),
 ]
 
 CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
