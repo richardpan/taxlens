@@ -285,10 +285,17 @@ def _first_money_after(label_re: str, text: str, *,
                         # pre-TCJA layouts where pdfplumber merges the
                         # section header onto the first data row). Only
                         # treat as a line-number when an alphabetic label
-                        # follows it.
+                        # follows it. Allow multiple sidebar words before
+                        # the line number — pre-TCJA pages often merge
+                        # the standard-deduction sidebar ("Standard
+                        # Deduction for— Single or") onto a 1040 row,
+                        # giving lines like "Single or 48 Foreign tax
+                        # credit. Attach Form 1116 ... 48". The line
+                        # number is still the canonical anchor; the
+                        # leading words are sidebar bleed.
                         m_inline_no = (
                             None if m_lead else
-                            re.match(r"\s*[A-Za-z]{2,}\s+(\d{1,2})[a-z]?\s+[A-Za-z]", line[:30])
+                            re.match(r"\s*[A-Za-z]{2,}(?:\s+[A-Za-z]+){0,4}\s+(\d{1,2})[a-z]?\s+[A-Za-z]", line[:60])
                         )
                         if m_lead and m_lead.group(1) == picked_str:
                             is_echo = True
@@ -435,6 +442,23 @@ def _first_money_after(label_re: str, text: str, *,
             if m_echo:
                 try:
                     return _money(m_echo.group(1))
+                except InvalidOperation:
+                    pass
+            # End-of-line variant: the value column is at the END of a
+            # wrapped continuation line, anchored by a line-number echo
+            # immediately before the value (e.g. Schedule D line 7 wraps:
+            # "...go to Part III on page 2 . . . . . 7 74."). The line
+            # starts with continuation prose, not the line number, so
+            # the start-anchored m_echo above doesn't fire. We require
+            # the dot-leader/whitespace gap before the line-number to
+            # avoid false-firing on prose like "page 2".
+            m_tail_echo = re.search(
+                r"(?:\.\s*){2,}\s*\d{1,2}[a-z]?\s+(-?\d{1,6})\s*\.?\s*$",
+                nxt_raw,
+            )
+            if m_tail_echo:
+                try:
+                    return _money(m_tail_echo.group(1))
                 except InvalidOperation:
                     pass
             break
