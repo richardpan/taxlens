@@ -2394,11 +2394,37 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
                 },
                 unmodeled_other_taxes,
             )
+
+    # 1040 line 17 / Schedule 2 Part I reconciliation: AMT + excess APTC
+    # repayment. The engine models AMT directly and APTC repayment when
+    # Form 8962 inputs are extracted; if the source PDF reports a Part I
+    # total higher than what the engine recomputes (typically because the
+    # importer didn't capture Form 8962 SLCSP / enrollment-premium detail
+    # so APTC repayment defaults to 0), add the residual as
+    # ``unmodeled_part_i_taxes``.
+    unmodeled_part_i_taxes = ZERO
+    if ret.schedule_2_part_i_reported is not None:
+        engine_part_i = amt + aptc_repayment
+        residual_p1 = ret.schedule_2_part_i_reported - engine_part_i
+        if residual_p1 > 0:
+            unmodeled_part_i_taxes = _money(residual_p1)
+            total_tax = total_tax + unmodeled_part_i_taxes
+            rec.add(
+                "Unmodeled Schedule 2 Part I taxes (passthrough)",
+                "max(0, schedule_2_part_i_reported − amt − aptc_repayment)",
+                {
+                    "reported_line_17": ret.schedule_2_part_i_reported,
+                    "engine_amt": amt,
+                    "engine_aptc_repayment": aptc_repayment,
+                    "residual": unmodeled_part_i_taxes,
+                },
+                unmodeled_part_i_taxes,
+            )
     rec.add(
         "Total tax",
         "ordinary + qualified + coll + 1250 + amt + se + addl_medicare + niit"
         " + APTC_repay + early_wd_penalty + 5329_excise − credits"
-        " + unmodeled_other_taxes",
+        " + unmodeled_other_taxes + unmodeled_part_i_taxes",
         {
             "ordinary": ord_tax, "qualified": qual_tax,
             "collectibles": coll_tax, "unrecaptured_1250": unrec_tax,
@@ -2408,6 +2434,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
             "excess_ira_excise": excess_ira_excise,
             "rmd_excise": rmd_excise,
             "unmodeled_other_taxes": unmodeled_other_taxes,
+            "unmodeled_part_i_taxes": unmodeled_part_i_taxes,
             "credits": credits,
         },
         total_tax,
@@ -2519,6 +2546,7 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         roth_contribution_allowed=roth_allowed,
         roth_contribution_disallowed=roth_disallowed,
         unmodeled_other_taxes=unmodeled_other_taxes,
+        unmodeled_part_i_taxes=unmodeled_part_i_taxes,
         unmodeled_sch3_credits=unmodeled_sch3_credits,
         reported_total_tax=ret.reported_total_tax,
         reconciliation_delta=delta,

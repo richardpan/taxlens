@@ -337,6 +337,17 @@ class Return(BaseModel):
     # ``unmodeled_other_taxes`` so reconciliation closes without forcing
     # the engine to over-compute.
     schedule_2_other_taxes_reported: Decimal | None = None
+    # 1040 line 17 (TY2019+) / line 11 (TY2020+ — varies by year) —
+    # Schedule 2 Part I total: AMT (Form 6251) + Excess Advance Premium
+    # Tax Credit Repayment (Form 8962). The engine models AMT directly
+    # and, when Form 8962 inputs are extracted, also models the APTC
+    # repayment. When the source PDF reports a Part I total higher than
+    # what the engine recomputes (typically because the importer didn't
+    # capture Form 8962 enrollment-premium / SLCSP detail and so APTC
+    # repayment defaults to 0), the residual is added to total_tax as
+    # ``unmodeled_part_i_taxes`` so reconciliation closes without
+    # forcing the engine to over-compute.
+    schedule_2_part_i_reported: Decimal | None = None
     # 1040 line 19 — Schedule 8812 nonrefundable CTC + Credit for Other
     # Dependents as actually claimed on the source return. The engine
     # models CTC/ODC from ``qualifying_children``/``other_dependents``
@@ -492,6 +503,12 @@ class TaxResult(BaseModel):
     # Part II components). Always 0 unless ``schedule_2_other_taxes_reported``
     # is set on the Return.
     unmodeled_other_taxes: Decimal = Decimal(0)
+    # Pass-through residual from 1040 line 17 / Schedule 2 Part I total
+    # (AMT + excess APTC repayment) that the engine couldn't account
+    # for from extracted inputs. Equals max(0, schedule_2_part_i_reported
+    # − amt − aptc_repayment). Always 0 unless
+    # ``schedule_2_part_i_reported`` is set on the Return.
+    unmodeled_part_i_taxes: Decimal = Decimal(0)
     # Pass-through residual from 1040 line 20 (Schedule 3 line 8
     # nonrefundable credits) that the engine couldn't account for
     # from extracted inputs. Equals max(0, schedule_3_line_8_reported

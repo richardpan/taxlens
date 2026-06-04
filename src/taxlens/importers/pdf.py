@@ -31,7 +31,7 @@ _PAREN_NEG = re.compile(r"\(\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*\)")
 #   - parenthetical hint: "(see instructions)" / "(Form 8949)"
 #   - "Attach Schedule ..." or "Attach Form ..." continuations
 _NOISE_LINE = re.compile(
-    r"^\s*(?:[\.\s]+|\d+\s*[a-z]?|\([^)]*\)|Attach\s+(?:Schedule|Form|Form\(s\))\s+\S.*|[^\w\s]{1,3}|[A-Za-z]{1,3})\s*$",
+    r"^\s*(?:[\.\s]+|\d{1,2}\s*[a-z]?|\([^)]*\)|Attach\s+(?:Schedule|Form|Form\(s\))\s+\S.*|[^\w\s]{1,3}|[A-Za-z]{1,3})\s*$",
     re.IGNORECASE,
 )
 
@@ -337,6 +337,19 @@ def _first_money_after(label_re: str, text: str, *,
             strict = [
                 m for m in strict_money_pat.finditer(nxt)
                 if not _is_form_id_digit(nxt, m.start())
+                # Reject `$`-prefixed values in next-line fallback. IRS
+                # 1040 columnar values are bare digits with comma group
+                # separators (no `$` glyph); the only places `$N,NNN`
+                # actually appears in vendor-rendered PDFs are the
+                # standard-deduction sidebar ("$12,200", "$24,400",
+                # "$18,350" etc.) and cover-page payment instructions
+                # ("$1,004 your payment goes through"). When a label
+                # extraction falls through to the next-line scan and
+                # the only candidate begins with `$`, that's almost
+                # certainly sidebar bleed (e.g. TY2019 line 5b taxable
+                # SS shows the std-deduction sidebar's $12,200 directly
+                # underneath a blank value column).
+                and not nxt[m.start():m.start()+1] == "$"
             ]
             if strict:
                 try:
@@ -547,6 +560,11 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"Other\s+taxes,?\s+including\s+self-employment\s+tax,?\s+from\s+Schedule\s*2",
                                 r"Line\s*23\b[^\n]{0,80}?Other\s+taxes",
                                 ],
+    "schedule_2_part_i_reported": [
+                                # 1040 line 17 (TY2020+) — Schedule 2 Part I
+                                # passthrough (AMT + excess APTC repayment).
+                                r"^\s*17\s+Amount\s+from\s+Schedule\s*2,?\s*line\s*3\b",
+                                ],
     "child_tax_credit_reported": [
                                 # 1040 line 19 — nonrefundable CTC + Credit
                                 # for Other Dependents from Schedule 8812.
@@ -739,6 +757,15 @@ LINE_PATTERNS_PRE_2020: dict[str, list[str]] = {
     "schedule_2_other_taxes_reported": [
         # TY2019 line 15 / TY2018 line 14 (Schedule 4 in 2018, Schedule 2 from 2019).
         r"Other\s+taxes\.?\s+Attach\s+Schedule\s*[24]",
+    ],
+    "schedule_2_part_i_reported": [
+        # TY2019: Schedule 2 line 3 ("Add lines 1 and 2. Enter here and
+        # include on Form 1040 or 1040-SR, line 12b"). The 1040 itself
+        # only prints the SUM (line 12a + Sch 2 Part I) on line 12b,
+        # so we have to anchor on the Schedule 2 form's own line 3
+        # phrasing. TY2018 used Schedule 4 with similar phrasing on the
+        # corresponding totalizer line.
+        r"Add\s+lines\s+1\s+and\s+2\.\s+Enter\s+here\s+and\s+include\s+on\s+Form\s+1040",
     ],
     "schedule_3_line_8_reported": [
         # TY2018-2019 Schedule 3 references — the cross-reference text on

@@ -558,35 +558,46 @@ def make_freetaxusa_realistic_1040(path: Path, r: ThirdPartyReturn) -> None:
     c.setFont("Helvetica", 10)
 
     # Each tuple: (label, [optional noise lines that pdfplumber may emit
-    # between the label and the value], value)
+    # between the label and the value], value).
+    # NOTE: Real 1040 facsimiles render columnar values as bare digits
+    # (e.g. "120,000" not "$120,000") — the dollar sign only appears on
+    # vendor cover-page summaries and instructional sidebar text. We
+    # emit bare digits here to match observed FreeTaxUSA exports
+    # (TY2024+) so the importer's "$-prefix → sidebar bleed" guard
+    # doesn't reject these legitimate column values.
+    def _bare(d: Decimal | int) -> str:
+        n = Decimal(d).quantize(Decimal("0.01"))
+        sign = "-" if n < 0 else ""
+        return f"{sign}{int(abs(n)):,}"
+
     rows = [
         ("1a Total amount from Form(s) W-2, box 1",
          ["(see instructions)", ". . . . . . . . . . . . . . . . . . . . . . . . . ."],
-         _money(r.wages)),
+         _bare(r.wages)),
         ("1z Add lines 1a through 1h",
          [". . . . . . . . . . . . . . . . . . . . . . . . . ."],
-         _money(r.wages)),
+         _bare(r.wages)),
         ("2b Taxable interest",
          ["Attach Schedule B if required"],
-         _money(r.interest)),
-        ("3a Qualified dividends", [], _money(r.qual_div)),
+         _bare(r.interest)),
+        ("3a Qualified dividends", [], _bare(r.qual_div)),
         ("3b Ordinary dividends",
          ["Attach Schedule B if required"],
-         _money(r.ord_div)),
+         _bare(r.ord_div)),
         ("7  Capital gain or (loss). Attach Schedule D",
          ["if required.  If not required, check here .... ▶ ☐"],
-         "($3,000)" if False else _money(Decimal(0))),  # placeholder, no cap loss in base fixture
+         "(3,000)" if False else _bare(Decimal(0))),  # placeholder, no cap loss in base fixture
         ("11 Adjusted gross income.  Subtract line 10 from line 9",
          [],
-         _money(agi)),
+         _bare(agi)),
         ("15 Taxable income.  Subtract line 14 from line 11",
          ["If zero or less, enter -0-"],
-         _money(ti)),
+         _bare(ti)),
         ("24 Add lines 22 and 23.  This is your total tax",
          ["▶"],
-         _money(r.total_tax) if r.total_tax else "$0"),
+         _bare(r.total_tax) if r.total_tax else "0"),
         ("25a Federal income tax withheld from Form(s) W-2", [],
-         _money(r.withholding)),
+         _bare(r.withholding)),
     ]
     y = height - 90
     for label, noise, value in rows:
