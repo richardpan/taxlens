@@ -1022,6 +1022,33 @@ def _form_pages(pages: list[str]) -> list[str]:
     return keep if keep else pages
 
 
+def _cluster_words_by_y(words: list[dict], y_tol: float) -> str:
+    """Cluster pre-extracted words by y-coordinate into visual rows.
+    Each cluster sorted by x0, joined with spaces; rows joined by newlines.
+    """
+    if not words:
+        return ""
+    # words must already be sorted by (top, x0); we sort defensively.
+    words = sorted(words, key=lambda w: (w["top"], w["x0"]))
+    lines: list[str] = []
+    cur: list[dict] = []
+    cur_y: float | None = None
+    for w in words:
+        if cur_y is None or abs(w["top"] - cur_y) <= y_tol:
+            cur.append(w)
+            if cur_y is None:
+                cur_y = w["top"]
+        else:
+            cur.sort(key=lambda x: x["x0"])
+            lines.append(" ".join(x["text"] for x in cur))
+            cur = [w]
+            cur_y = w["top"]
+    if cur:
+        cur.sort(key=lambda x: x["x0"])
+        lines.append(" ".join(x["text"] for x in cur))
+    return "\n".join(lines)
+
+
 def _layout_text(page, y_tol: float = 3.0) -> str:
     """Reconstruct a page's text from positioned words, clustering by
     y-coordinate so each visual row becomes ONE text line.
@@ -1054,26 +1081,7 @@ def _layout_text(page, y_tol: float = 3.0) -> str:
         words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
     except Exception:
         return ""
-    if not words:
-        return ""
-    words.sort(key=lambda w: (w["top"], w["x0"]))
-    lines: list[str] = []
-    cur: list[dict] = []
-    cur_y: float | None = None
-    for w in words:
-        if cur_y is None or abs(w["top"] - cur_y) <= y_tol:
-            cur.append(w)
-            if cur_y is None:
-                cur_y = w["top"]
-        else:
-            cur.sort(key=lambda x: x["x0"])
-            lines.append(" ".join(x["text"] for x in cur))
-            cur = [w]
-            cur_y = w["top"]
-    if cur:
-        cur.sort(key=lambda x: x["x0"])
-        lines.append(" ".join(x["text"] for x in cur))
-    return "\n".join(lines)
+    return _cluster_words_by_y(words, y_tol)
 
 
 def _extract_text_per_page(path: Path) -> tuple[list[str], list[list[str]], bool]:
@@ -1106,8 +1114,18 @@ def _extract_text_per_page(path: Path) -> tuple[list[str], list[list[str]], bool
         with pdfplumber.open(str(path)) as pdf:
             for p in pdf.pages:
                 default_pages.append(p.extract_text() or "")
-                layout_tight.append(_layout_text(p, y_tol=3.0))
-                layout_loose.append(_layout_text(p, y_tol=8.0))
+                # Extract words ONCE, then cluster at both tolerances.
+                # extract_words is the dominant cost (re-runs char→word
+                # grouping each call); reusing the result halves layout
+                # work per page.
+                try:
+                    words = p.extract_words(
+                        use_text_flow=False, keep_blank_chars=False
+                    )
+                except Exception:
+                    words = []
+                layout_tight.append(_cluster_words_by_y(words, 3.0))
+                layout_loose.append(_cluster_words_by_y(words, 8.0))
     except Exception as e:
         msg = str(e).lower()
         if "encrypt" in msg or "password" in msg:

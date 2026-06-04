@@ -256,8 +256,15 @@ def load_demo() -> dict[str, Any]:
     """Bulk-import the bundled demo returns (idempotent: re-importing replaces)."""
     from taxlens.demo import demo_files
     loaded: list[dict[str, Any]] = []
-    for path in demo_files():
-        row, result, warnings = service.import_file(path)
+    paths = list(demo_files())
+    for path, (row, result, warnings) in zip(paths, service.import_files(paths)):
+        if row is None or result is None:
+            loaded.append({
+                "id": None, "tax_year": None, "filing_status": None,
+                "total_tax": None, "warnings": warnings,
+                "source_filename": path.name, "error": True,
+            })
+            continue
         loaded.append({
             "id": row.id, "tax_year": row.tax_year,
             "filing_status": row.filing_status,
