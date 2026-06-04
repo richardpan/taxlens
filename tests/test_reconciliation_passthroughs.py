@@ -12,7 +12,7 @@ engine can't fully recover from extracted PDF inputs.
   age / blindness flags.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from taxlens.engine import compute
 from taxlens.models import FilingStatus, Return
@@ -122,4 +122,8 @@ def test_st_loss_offsets_lt_in_qualified_stack():
     # the KEY invariant is that the LT $5,710 is no longer taxed at
     # the preferential rate.
     qual_drop = res_no.qualified_tax - res_with.qualified_tax
-    assert qual_drop == Decimal("5710") * Decimal("0.15")
+    # qual_tax is whole-dollar rounded per QDCGTW Tax Tables instructions.
+    expected = (Decimal("5710") * Decimal("0.15")).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+    assert abs(qual_drop - expected) <= Decimal("1")

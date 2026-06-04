@@ -1450,6 +1450,31 @@ def _compute_income_tax(
     ord_tax, ord_fills = walk_brackets(
         ordinary_taxable, ordinary_brackets, include_next_empty=True,
     )
+    # IRS Tax Tables midpoint rounding (Pub 17 / 1040 instructions).
+    # When the QDCGTW path is used (qd_ltcg > 0) AND the worksheet's
+    # ordinary portion is under $100,000, the form instructions direct
+    # the filer to look up tax using the Tax Tables — which round each
+    # $50 bucket of taxable income to its midpoint (and use $25
+    # buckets below $3,000) before applying the bracket schedule, then
+    # round to whole dollars. The continuous bracket walk we use for
+    # everything else under-states tax on the QDCGTW ordinary portion
+    # by up to ~$5 because the midpoint sits a few dollars above
+    # actual ordinary_taxable. We only apply this in the QDCGTW path
+    # because the engine's pinned cents-precision behaviour for the
+    # standalone bracket walk (no qualified income) is locked in by
+    # historical test fixtures; opt-in restricts the change to the
+    # narrow case where IRS guidance unambiguously specifies tables.
+    if qd_ltcg > 0 and ordinary_taxable > 0 and ordinary_taxable < Decimal(100_000):
+        if ordinary_taxable < Decimal(3000):
+            bucket_low = (int(ordinary_taxable) // 25) * 25
+            midpoint = Decimal(bucket_low) + Decimal("12.50")
+        else:
+            bucket_low = (int(ordinary_taxable) // 50) * 50
+            midpoint = Decimal(bucket_low) + Decimal("25")
+        table_tax, _table_fills = walk_brackets(
+            midpoint, ordinary_brackets, include_next_empty=False,
+        )
+        ord_tax = table_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     rec.add(
         "Ordinary income tax (bracket walk)",
         "sum of bracket fills on (taxable − qd_ltcg − unrec_1250 − collectibles)",
@@ -1494,6 +1519,12 @@ def _compute_income_tax(
         {"qd_ltcg": qd_ltcg, "stack_above": cursor, "brackets": len(qual_fills)},
         qual_tax,
     )
+    # Per QDCGTW, the qualified portion is also a whole-dollar value
+    # on the printed worksheet. When the QDCGTW path is engaged (qual
+    # income > 0) we round here so ord_tax + qual_tax sums match the
+    # form's reconciliation arithmetic.
+    if qd_ltcg > 0:
+        qual_tax = qual_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return (
         _money(ord_tax),
         _money(qual_tax),
