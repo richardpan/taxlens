@@ -67,7 +67,7 @@ def test_non_itemizer_charity_extraction_2020_above_line():
 b Charitable contributions if you take the standard deduction. See instructions 10b 220
 c Add lines 10a and 10b. These are your total adjustments to income . . . . 10c 220
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("charitable_contributions_non_itemizer") == Decimal("220")
 
 
@@ -77,5 +77,5 @@ def test_non_itemizer_charity_extraction_2021_below_line():
 1040 (2021)
 b Charitable contributions if you take the standard deduction. See instructions 12b 600
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("charitable_contributions_non_itemizer") == Decimal("600")

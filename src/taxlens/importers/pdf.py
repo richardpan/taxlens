@@ -119,7 +119,34 @@ def _money_matches_in(tail: str) -> list:
     return [m for m in money_pat.finditer(tail) if not _is_form_id_digit(tail, m.start())]
 
 
+def _next_line_has_money(lines: list[str], i: int) -> bool:
+    """Quick lookahead: does the next non-empty, non-noise line within a
+    short window contain a *real* money value (≥ 3 digits or a decimal)?
+    Used by the widened echo-guard to decide whether a bare 1-2 digit
+    end-of-line token is an echo column (with the real value on the next
+    row) or a legitimate small integer.
+    """
+    strict = re.compile(
+        r"\$?\s*-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})(?:\.[0-9]{1,2})?"
+        r"|\$?\s*-?[0-9]+\.[0-9]{1,2}"
+    )
+    for j in range(i + 1, min(i + 4, len(lines))):
+        nxt = lines[j].strip()
+        if not nxt:
+            continue
+        if _NOISE_LINE.match(nxt):
+            continue
+        if strict.search(nxt):
+            return True
+        return False
+    return False
+
+
 _LINE_NO_ECHO = re.compile(r"(?:^|\s)(\d{1,2}[a-z]?)\s*$")
+# Fields that legitimately extract small (1-2 digit) integers — exempt from
+# the widened echo-guard which would otherwise discard counts like
+# qualifying_children=2.
+_COUNT_FIELDS = frozenset({"qualifying_children"})
 # Words that, when they're the LAST whitespace-separated token preceding a
 # money match, mean the "money" is really a reference (line number, page
 # number, column letter) embedded in form-instruction prose. Without this
@@ -181,7 +208,9 @@ def _pick_money(tail: str, matches: list) -> "re.Match | None":
     return None
 
 
-def _first_money_after(label_re: str, text: str) -> Decimal | None:
+def _first_money_after(label_re: str, text: str, *,
+                       echo_guarded: list[str] | None = None,
+                       label_key: str | None = None) -> Decimal | None:
     """Find the first money string that appears on the SAME LINE as a label match,
     falling back to the next several non-empty lines if the label line has no
     number (TurboTax / H&R Block / FreeTaxUSA often render label and amount in
@@ -191,6 +220,11 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
     Money matches that are actually part of a form identifier (`W-2`, `1099-R`,
     `8949`) are filtered out — otherwise the withholding line would extract
     '-2' from 'Form(s) W-2'.
+
+    When ``echo_guarded`` is provided and the same-line scan refuses a bare
+    1-2 digit line-number echo, the caller's ``label_key`` is appended so
+    downstream phantom-override logic can avoid discarding a layout-stream
+    value just because the default-stream label-line had no value column.
     """
     label_pat = re.compile(label_re, re.IGNORECASE)
     # Stricter pattern for next-line fallback: real money has ≥3 digits or a cent decimal.
@@ -218,17 +252,56 @@ def _first_money_after(label_re: str, text: str) -> Decimal | None:
                 # personal HSA contribution renders as
                 #     "13 HSA deduction (see instructions). . . . . . . 13"
                 # — the trailing "13" is the line-number echo column,
-                # not a $13 deduction. If the picked match is a bare
-                # 1-2 digit integer at end-of-line AND equals the
-                # leading line-number on this same line, treat as no
-                # value and fall through to the next-line scan.
+                # not a $13 deduction.
+                #
+                # Two situations trigger the guard:
+                # 1. Picked digit equals the leading line-number on the
+                #    same line (the canonical "echo column" case).
+                # 2. Picked is a bare 1-2 digit integer at end-of-line
+                #    AND it is the ONLY money on the line AND no leading
+                #    line-number is present. This catches pre-TCJA-style
+                #    layouts where pdfplumber emits the label and value
+                #    on separate lines but ALSO renders the line-number
+                #    echo column on the label line, leaving the label
+                #    line ending in a bare line-number (e.g. "Wages,
+                #    salaries, tips, etc. ... 7" with the actual wages
+                #    on the next line). Without this branch, ``_pick_money``
+                #    returns the echo digit and we report wages=$7.
                 picked_str = picked.group(0).strip()
                 is_echo = False
                 if re.fullmatch(r"\d{1,2}", picked_str):
                     if tail[picked.end():].strip() == "":
                         m_lead = re.match(r"\s*(\d{1,2})[a-z]?\s", line)
+                        # Also recognise the line-number when it appears as
+                        # a standalone 1-2 digit token within the first ~25
+                        # chars of the line (e.g. "Income 7 Wages, ..." in
+                        # pre-TCJA layouts where pdfplumber merges the
+                        # section header onto the first data row). Only
+                        # treat as a line-number when an alphabetic label
+                        # follows it.
+                        m_inline_no = (
+                            None if m_lead else
+                            re.match(r"\s*[A-Za-z]{2,}\s+(\d{1,2})[a-z]?\s+[A-Za-z]", line[:30])
+                        )
                         if m_lead and m_lead.group(1) == picked_str:
                             is_echo = True
+                        elif m_inline_no and m_inline_no.group(1) == picked_str:
+                            is_echo = True
+                            if echo_guarded is not None and label_key:
+                                echo_guarded.append(label_key)
+                        elif (len(money_matches) == 1 and m_lead is None
+                              and label_key not in _COUNT_FIELDS):
+                            # Bare line-number at end-of-line, no leading
+                            # number to confirm — almost certainly an echo
+                            # column on a wrapped label. Fall through to
+                            # the next-line scan, which will pick up the
+                            # real value column. Skip count fields
+                            # (qualifying_children) which legitimately
+                            # extract small integers.
+                            if _next_line_has_money(lines, i):
+                                is_echo = True
+                                if echo_guarded is not None and label_key:
+                                    echo_guarded.append(label_key)
                 if not is_echo:
                     try:
                         return _money(picked.group(0))
@@ -616,8 +689,17 @@ CHECKED_HINT = re.compile(r"\[\s*[xX✓]\s*\]|\(X\)|☒|\u2611|\[X\]")
 # them on year keeps modern-form extraction unchanged.
 LINE_PATTERNS_PRE_2020: dict[str, list[str]] = {
     "deduction_reported": [
+        # TY2019 line 9 / TY2018 line 8 phrasing. Pre-TCJA forms use a
+        # different phrase ("Itemized deductions (from Schedule A) or
+        # your standard deduction") which we deliberately do NOT match
+        # here: pre-TCJA returns also need the dependents-count from
+        # line 6d to compute personal exemptions, and extracting only
+        # the deduction without the matching exemption count causes the
+        # engine to over-deduct (max() picks itemized while exemption
+        # count stays at the conservative default), widening deltas.
+        # Until we have safe dependents-count extraction, pre-TCJA
+        # deduction is left unextracted so engine defaults are used.
         r"\bStandard\s+deduction\s+or\s+itemized\s+deductions\b",
-        r"\bItemized\s+deductions\s+or\s+standard\s+deduction\b",
     ],
     "child_tax_credit_reported": [
         # Verbatim label that appears on TY2018 line 12a / TY2019 line 13a
@@ -1072,20 +1154,24 @@ def _extract_form_8889(joined_text: str) -> dict[str, object]:
 def _extract_fields(
     pages: list[str],
     tax_year: int | None = None,
-) -> tuple[dict[str, Decimal], int, list[str]]:
+) -> tuple[dict[str, Decimal], int, list[str], set[str]]:
     out: dict[str, Decimal] = {}
     warnings: list[str] = []
     qualifying_children = 0
     joined = "\n".join(pages)
 
     use_pre2020_supplement = tax_year is not None and tax_year < 2020
+    echo_guarded: list[str] = []
 
     for field, patterns in LINE_PATTERNS.items():
         all_patterns = list(patterns)
         if use_pre2020_supplement and field in LINE_PATTERNS_PRE_2020:
             all_patterns += LINE_PATTERNS_PRE_2020[field]
         for pat in all_patterns:
-            value = _first_money_after(pat, joined)
+            value = _first_money_after(
+                pat, joined,
+                echo_guarded=echo_guarded, label_key=field,
+            )
             if value is not None:
                 if field == "qualifying_children":
                     try:
@@ -1095,7 +1181,7 @@ def _extract_fields(
                 else:
                     out[field] = value
                 break
-    return out, qualifying_children, warnings
+    return out, qualifying_children, warnings, set(echo_guarded)
 
 
 def _labels_present(pages: list[str]) -> set[str]:
@@ -1116,11 +1202,13 @@ def _labels_present(pages: list[str]) -> set[str]:
     return found
 
 
-def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) -> tuple[dict[str, Decimal], int, list[str]]:
-    """Pick the most-complete (fields, children, warnings) tuple from
-    ``results``. The "winner" is the result with the largest dict; ties
-    are broken in argument order so existing fixtures (where default-text
-    extraction has always worked) keep their prior behavior.
+def _merge_field_results(
+    *results: tuple[dict[str, Decimal], int, list[str], set[str]],
+) -> tuple[dict[str, Decimal], int, list[str], set[str]]:
+    """Pick the most-complete (fields, children, warnings, echo_guarded)
+    tuple from ``results``. The "winner" is the result with the largest
+    dict; ties are broken in argument order so existing fixtures (where
+    default-text extraction has always worked) keep their prior behavior.
 
     Why "most complete" instead of "first non-None per field":
     default-text extraction on PDFs whose labels and values are rendered
@@ -1134,16 +1222,20 @@ def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) ->
 
     Fields from runner-up streams that aren't in the winner are still
     folded in (set-default semantics) so a partial recovery from another
-    stream isn't discarded entirely.
+    stream isn't discarded entirely. ``echo_guarded`` sets are unioned
+    across all results so the phantom-override pass downstream can avoid
+    discarding a layout-stream value just because another stream's
+    label-line had no money column.
     """
     if not results:
-        return {}, 0, []
+        return {}, 0, [], set()
     winner_idx = max(range(len(results)), key=lambda i: len(results[i][0]))
-    base_fields, base_children, base_warnings = results[winner_idx]
+    base_fields, base_children, base_warnings, base_echo = results[winner_idx]
     merged = dict(base_fields)
     children = base_children
     warnings = list(base_warnings)
-    for i, (fields, ch, ws) in enumerate(results):
+    echo_guarded: set[str] = set(base_echo)
+    for i, (fields, ch, ws, eg) in enumerate(results):
         if i == winner_idx:
             continue
         for k, v in fields.items():
@@ -1153,7 +1245,8 @@ def _merge_field_results(*results: tuple[dict[str, Decimal], int, list[str]]) ->
         for w in ws:
             if w not in warnings:
                 warnings.append(w)
-    return merged, children, warnings
+        echo_guarded |= eg
+    return merged, children, warnings, echo_guarded
 
 
 def import_pdf(path: Path) -> Imported:
@@ -1212,7 +1305,7 @@ def import_pdf(path: Path) -> Imported:
     # splits across non-adjacent lines will still be recovered from another.
     default_result = _extract_fields(default_form_pages, tax_year=tax_year)
     layout_results = [_extract_fields(stream, tax_year=tax_year) for stream in layout_form_streams]
-    fields, children, fwarnings = _merge_field_results(default_result, *layout_results)
+    fields, children, fwarnings, echo_guarded_fields = _merge_field_results(default_result, *layout_results)
     warnings = list(fwarnings)
 
     # ── Per-field provenance tracking ──────────────────────────────
@@ -1261,6 +1354,13 @@ def import_pdf(path: Path) -> Imported:
             if fname in default_values:
                 continue
             if fname not in default_labels:
+                continue
+            # Exempt fields whose default-stream same-line scan refused
+            # a bare 1-2 digit line-number echo as the value. In that
+            # case the label IS present in default text but the value
+            # column is on the next line — exactly the layout stream's
+            # strength — so layout's value is genuine, not phantom.
+            if fname in echo_guarded_fields:
                 continue
             layout_phantom[fname] = fields.pop(fname)
             field_sources.pop(fname, None)

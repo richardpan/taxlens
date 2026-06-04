@@ -56,5 +56,5 @@ Form 8995 Qualified Business Income Deduction Simplified Computation 2024
 6 Qualified REIT dividends and publicly traded partnership (PTP) income or (loss)
 (see instructions) . . . . . . . . . . . . . . . . . . . . 6 125.
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("qualified_reit_ptp_dividends") == Decimal("125")

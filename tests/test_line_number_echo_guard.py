@@ -21,7 +21,7 @@ def test_empty_value_column_with_line_number_echo_yields_zero():
 Form 8889 Health Savings Accounts (HSAs)
 13 HSA deduction (see instructions). . . . . . . . . . . . . . . . . . . . . . . . 13
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("hsa_deduction") in (None, Decimal(0)), (
         f"trailing '13' is a line-number echo, not a value; got {fields.get('hsa_deduction')}"
     )
@@ -32,7 +32,7 @@ def test_real_value_still_extracted_when_present():
 Form 8889 Health Savings Accounts (HSAs)
 13 HSA deduction (see instructions). . . . . . . 13 1,500.
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("hsa_deduction") == Decimal("1500")
 
 
@@ -43,5 +43,5 @@ def test_line_number_echo_only_skipped_when_at_end_of_line():
     # Loose phrasing where the value happens to be a small integer that
     # doesn't equal the leading line number.
     text = "Health savings account deduction . . . . . . . . . 99"
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("hsa_deduction") == Decimal("99")

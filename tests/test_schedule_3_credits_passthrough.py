@@ -100,5 +100,5 @@ def test_extract_line_20_schedule_3_credits():
 20 Amount from Schedule 3, line 8 . . . . . . . . . . . . . . . . . . . . . . . 20 2,005
 21 Add lines 19 and 20 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 4,005
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("schedule_3_line_8_reported") == Decimal("2005")

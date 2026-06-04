@@ -78,7 +78,7 @@ def test_extract_line_23_other_taxes_2020_phrasing():
 23 Other taxes, including self-employment tax, from Schedule 2, line 10 . . . . . . . . . . . . . . . . 23 720
 24 Add lines 22 and 23. This is your total tax . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 39,506
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("schedule_2_other_taxes_reported") == Decimal("720")
 
 
@@ -88,5 +88,5 @@ def test_extract_line_23_other_taxes_post_2021_phrasing():
 1040 (2024)
 23 Other taxes, including self-employment tax, from Schedule 2, line 21 . . . . . . . . . . . . . . . 23 1,234
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("schedule_2_other_taxes_reported") == Decimal("1234")

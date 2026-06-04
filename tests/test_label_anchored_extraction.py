@@ -140,10 +140,15 @@ CASES = [
         "qualified_dividends": Decimal("1200.00"),
         "ordinary_dividends": Decimal("2500.00"),
         "agi_reported": Decimal("90900.00"),
-        "deduction_reported": Decimal("10400.00"),
         "taxable_income_reported": Decimal("76450.00"),
         "total_tax_reported": Decimal("14300.00"),
         "federal_withholding": Decimal("16000.00"),
+        # NOTE: ``deduction_reported`` is intentionally left unextracted
+        # for pre-TCJA returns — extracting it without also extracting
+        # the dependents count from line 6d causes the engine to
+        # over-deduct (max() picks itemized while exemption count stays
+        # at the conservative default), widening reconciliation deltas.
+        # See ``LINE_PATTERNS_PRE_2020`` comment in ``pdf.py``.
     }),
 ]
 
@@ -151,7 +156,7 @@ CASES = [
 @pytest.mark.parametrize("name,text,expected", CASES, ids=[c[0] for c in CASES])
 def test_label_anchored_extraction_pre_2020(name: str, text: str, expected: dict) -> None:
     year = int(name.replace("TY", ""))
-    fields, _children, _warnings = _extract_fields([text], tax_year=year)
+    fields, _children, _warnings, _echo = _extract_fields([text], tax_year=year)
     misses = [k for k in expected if k not in fields]
     wrongs = [(k, expected[k], fields[k]) for k in expected
               if k in fields and fields[k] != expected[k]]
@@ -170,7 +175,7 @@ def test_pre2020_supplement_not_applied_for_modern_years() -> None:
     here by running a TY2019 layout under year=2023 and confirming
     the supplement does not contribute any of its fields.
     """
-    fields, _ch, _ws = _extract_fields([TY2019_TEXT], tax_year=2023)
+    fields, _ch, _ws, _echo = _extract_fields([TY2019_TEXT], tax_year=2023)
     # The TY2019 layout has 'deduction' / 'CTC' / 'other taxes' on
     # lines that the legacy patterns don't anchor — those fields
     # should be ABSENT under year=2023, demonstrating the supplement

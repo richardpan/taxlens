@@ -23,7 +23,7 @@ Part I Additional Medicare Tax on Medicare Wages
 Form W-2, enter the total of the amounts from box 5 . . . . . . . . 1 243,647.
 4 Add lines 1 through 3 . . . . . . . . . . . . . . . . . . . 4 243,647.
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("wages") == Decimal("220647"), (
         f"expected 1040 line 1a Box-1 wages ($220,647), got {fields.get('wages')} "
         "(Form 8959 line 1 Box-5 Medicare wages must not preempt 1040 line 1a)"
@@ -38,7 +38,7 @@ def test_form_8959_only_no_1040_line_does_not_match_loose_wages_pattern():
 Form 8959 Additional Medicare Tax 2024
 1 Medicare wages and tips from Form W-2, box 5 . . . . . . . . 1 243,647.
 """
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("wages") is None, (
         f"Form 8959 Medicare wages must not be picked as wages, got {fields.get('wages')}"
     )
@@ -48,5 +48,5 @@ def test_loose_wages_pattern_still_matches_summary_phrasing():
     """Sanity: vendor summary `Wages, salaries, tips` phrasing still
     works after we tightened the loose `\\b1\\b...Wages` pattern."""
     text = "Wages, salaries, tips ........... 100,000"
-    fields, _children, _warnings = _extract_fields([text])
+    fields, _children, _warnings, _echo = _extract_fields([text])
     assert fields.get("wages") == Decimal("100000")
