@@ -126,6 +126,27 @@ def _money_matches_in(tail: str) -> list:
     return [m for m in money_pat.finditer(tail) if not _is_form_id_digit(tail, m.start())]
 
 
+def _nearby_doubled_echo(lines: list[str], i: int, digit: str) -> bool:
+    """True when a line within ±2 of ``i`` matches ``N N`` where N is a
+    1-2 digit line-number echo (e.g. ``21 21``, ``27 27``). Used to
+    confirm that a trailing bare 1-2 digit at the END of a label line
+    is the line-number echo column — not a real value — when the
+    standard echo guards can't fire (no leading line-number, no
+    next-line money). The doubled-echo pattern is unique to pre-TCJA
+    1040 layouts that print the line-number column on rows that have
+    no value, so its presence nearby is strong evidence we're in a
+    section whose echo column is rendering without a value column.
+    """
+    pat = re.compile(r"^\s*(\d{1,2})[a-z]?\s+(\d{1,2})[a-z]?\s*$")
+    for j in range(max(0, i - 2), min(i + 3, len(lines))):
+        if j == i:
+            continue
+        m = pat.match(lines[j])
+        if m and m.group(1) == m.group(2):
+            return True
+    return False
+
+
 def _next_line_has_money(lines: list[str], i: int) -> bool:
     """Quick lookahead: does the next non-empty, non-noise line within a
     short window contain a *real* money value (≥ 3 digits or a decimal)?
@@ -316,6 +337,18 @@ def _first_money_after(label_re: str, text: str, *,
                                 is_echo = True
                                 if echo_guarded is not None and label_key:
                                     echo_guarded.append(label_key)
+                            else:
+                                # Even without next-line money, recognize
+                                # the trailing digit as an echo when it
+                                # appears as a doubled echo (``N N``) on
+                                # a nearby line — strong evidence the
+                                # form is rendering line-number echo
+                                # columns without real value columns,
+                                # not a sub-$100 whole-dollar value.
+                                if _nearby_doubled_echo(lines, i, picked_str):
+                                    is_echo = True
+                                    if echo_guarded is not None and label_key:
+                                        echo_guarded.append(label_key)
                 if not is_echo:
                     try:
                         return _money(picked.group(0))
@@ -438,10 +471,20 @@ def _first_money_after(label_re: str, text: str, *,
             # is rendered on its own row by vendor exports. Strict_money_pat
             # rejects bare 1-2 digit integers; allow them here because the
             # line-number echo gives us confidence this IS the value column.
-            m_echo = re.match(r"^\s*\d{1,2}[a-z]?\s+(-?\d{1,6})\s*$", nxt_raw)
+            m_echo = re.match(r"^\s*(\d{1,2})[a-z]?\s+(-?\d{1,6})\s*$", nxt_raw)
             if m_echo:
+                # Reject pure "doubled echo" rows like "21 21" or "27 27"
+                # — these are line-number-echo columns with NO value
+                # column rendered, common in pre-TCJA vendor exports
+                # for empty-value rows. The two integers being equal
+                # AND both ≤ 99 (so the value, if real, would have to
+                # be a sub-$100 whole-dollar amount — never the case
+                # on a real 1040) is a strong signature.
+                lead_int, val_int = m_echo.group(1), m_echo.group(2)
+                if lead_int == val_int and len(val_int) <= 2:
+                    break
                 try:
-                    return _money(m_echo.group(1))
+                    return _money(m_echo.group(2))
                 except InvalidOperation:
                     pass
             # End-of-line variant: the value column is at the END of a
