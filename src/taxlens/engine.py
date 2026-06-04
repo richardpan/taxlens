@@ -1525,6 +1525,17 @@ def _compute_income_tax(
     # form's reconciliation arithmetic.
     if qd_ltcg > 0:
         qual_tax = qual_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    # Form 1040 line 16 ("Tax") is reported as a whole-dollar value on
+    # every return — whether computed via Tax Tables (already whole),
+    # the Tax Computation Worksheet (TI ≥ $100K, rounds at final step),
+    # or QDCGTW (whole-dollar at every step). Round each component to
+    # whole dollars so accumulated cents don't bleed into total_tax.
+    # Sub-$100K Tax-Tables results above are already whole.
+    ord_tax = ord_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if coll_tax > 0:
+        coll_tax = coll_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if unrec_tax > 0:
+        unrec_tax = unrec_tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return (
         _money(ord_tax),
         _money(qual_tax),
@@ -1788,6 +1799,10 @@ def _compute_niit(ret: Return, agi: Decimal, rules: Rules, rec: _StepRecorder) -
     magi_excess = max(ZERO, agi - threshold)
     niit_base = min(investment_income, magi_excess)
     tax = niit_base * rate
+    # Form 8960 line 17 reports NIIT as a whole-dollar value; matching
+    # the form rounding here keeps total_tax additions on the form
+    # line-by-line whole-dollar boundary.
+    tax = tax.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     rec.add(
         "Net Investment Income Tax (Form 8960)",
         f"min(investment_income, max(0, agi − {threshold})) × {rate}",

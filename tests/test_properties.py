@@ -103,5 +103,8 @@ def test_collectibles_never_exceed_28_percent(wages, coll):
     )
     r = compute(ret)
     if coll > 0:
-        # Effective rate on the collectibles bucket can't exceed 28% (+ cent rounding).
-        assert r.collectibles_tax <= coll * Decimal("0.28") + CENT
+        # Effective rate on the collectibles bucket can't exceed 28%
+        # (+ whole-dollar rounding tolerance — the engine rounds each
+        # form-line component to whole dollars matching IRS Pub 17,
+        # so a $0.99 raw value can land on $1).
+        assert r.collectibles_tax <= coll * Decimal("0.28") + Decimal("0.50")
