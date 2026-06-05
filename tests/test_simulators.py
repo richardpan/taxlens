@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from taxlens.engine import compute
 from taxlens.models import FilingStatus, Return
 from taxlens.simulators import simulate_roth_conversion, simulate_tax_loss_harvest
 
@@ -48,21 +47,3 @@ def test_tlh_caps_at_3000_against_ordinary():
     # Allow a small tolerance for the LTCG-vs-ordinary rate differential on the
     # first $2k of offset gains.
     assert abs(delta_small - delta_big) < Decimal("500")
-
-
-def test_wa_cap_gains_excise_above_threshold():
-    # WA: 7% on LT gains > $262k (2024)
-    base = _ret(state="WA", wages=Decimal("100000"),
-                long_term_capital_gains=Decimal("500000"))
-    res = compute(base)
-    assert res.state_result is not None
-    # (500000 - 262000) * 0.07 = 16660
-    assert Decimal("16000") < res.state_result.state_tax < Decimal("17000")
-
-
-def test_wa_cap_gains_zero_below_threshold():
-    base = _ret(state="WA", wages=Decimal("100000"),
-                long_term_capital_gains=Decimal("200000"))
-    res = compute(base)
-    assert res.state_result is not None
-    assert res.state_result.state_tax == Decimal("0")

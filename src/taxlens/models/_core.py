@@ -307,11 +307,6 @@ class Return(BaseModel):
     amt_preferences: Decimal = Decimal(0)        # e.g. private activity bond interest
     amt_adjustments: Decimal = Decimal(0)        # e.g. ISO bargain element
 
-    # State (optional). When set, the engine also produces a `state_result` slot.
-    state: str | None = None                     # ISO-3166-2 subdivision, e.g. "CA"
-    # Optional sub-state locality (currently: NYC, YONKERS). Layered on top of state.
-    locality: str | None = None
-
     # Withholding & estimated payments (for refund/owed calc)
     federal_withholding: Decimal = Decimal(0)
     estimated_payments: Decimal = Decimal(0)
@@ -524,9 +519,6 @@ class TaxResult(BaseModel):
     qualified_bracket_fills: list[BracketFill]
     steps: list[ComputationStep]
 
-    # Optional state computation (populated when Return.state is set).
-    state_result: "StateResult | None" = None
-
     # Reconciliation
     reported_total_tax: Decimal | None = None
     reconciliation_delta: Decimal | None = None  # computed − reported
@@ -631,40 +623,3 @@ class Rules(BaseModel):
     #      rate: 0.30,                            # cap reduces by rate × excess
     #      floor: {single, mfj, ...}}}            # post-phaseout minimum
     salt_cap: dict[str, Any] | None = None
-
-
-class StateResult(BaseModel):
-    """Output of a state-level tax computation."""
-    model_config = ConfigDict(frozen=True)
-
-    state: str
-    state_agi: Decimal
-    state_taxable_income: Decimal
-    state_tax: Decimal
-    state_bracket_fills: list[BracketFill]
-    steps: list[ComputationStep]
-    # Optional locality (NYC, Yonkers) on top of state tax.
-    locality: str | None = None
-    locality_tax: Decimal = Decimal(0)
-
-
-class StateRules(BaseModel):
-    """Parsed contents of a `tax_rules/state/{xx}/{year}.yaml` file."""
-    model_config = ConfigDict(frozen=True)
-
-    state: str
-    year: int
-    standard_deduction: dict[str, Decimal]
-    ordinary_brackets: dict[str, list[tuple[Decimal, Decimal]]]
-    # CA-style: capital gains taxed as ordinary income. Override per-state when needed.
-    qualified_brackets: dict[str, list[tuple[Decimal, Decimal]]] | None = None
-    # Optional state surcharges (e.g. CA Mental Health Services Tax).
-    mental_health_services_tax: dict[str, Any] | None = None
-    # Optional state-level long-term capital-gains excise tax (e.g. WA 7% over $262k).
-    # Shape: {rate, threshold_by_status: {single, mfj, ...}, standard_deduction_by_status?}
-    capital_gains_excise_tax: dict[str, Any] | None = None
-    notes: str | None = None
-
-
-# Forward-reference rebuild now that StateResult exists.
-TaxResult.model_rebuild()

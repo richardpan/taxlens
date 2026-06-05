@@ -1,7 +1,6 @@
 """Tests for AMT, Schedule D worksheet, and CA state computation."""
 from decimal import Decimal
 
-import pytest
 
 from taxlens import compute
 from taxlens.models import FilingStatus, Return
@@ -81,50 +80,3 @@ def test_collectibles_below_cap_uses_lower_marginal():
     # of 400, still all in the 10% bracket. Capped rate min(28%, 10%) = 10%.
     assert r.collectibles_tax == Decimal("500.00")
 
-
-# ─── CA state computation ─────────────────────────────────────────────────
-
-def test_ca_state_basic_mfj_2024():
-    ret = Return(
-        tax_year=2024, filing_status=FilingStatus.MFJ,
-        wages=Decimal(240000), interest_income=Decimal(6000),
-        state="CA",
-    )
-    r = compute(ret)
-    assert r.state_result is not None
-    sr = r.state_result
-    assert sr.state == "CA"
-    # CA AGI = federal AGI (no SE here, no HSA)
-    assert sr.state_agi == Decimal("246000.00")
-    # CA taxable = 246000 − 11080 = 234920
-    assert sr.state_taxable_income == Decimal("234920.00")
-    # Hand-checked CA tax (2024 MFJ schedule, taxable = 234920):
-    #   1% on 21512        =   215.12
-    #   2% on 29486        =   589.72   (running to 50998)
-    #   4% on 29492        =  1179.68   (to 80490)
-    #   6% on 31242        =  1874.52   (to 111732)
-    #   8% on 29480        =  2358.40   (to 141212)
-    #   9.3% on (234920-141212)=93708 → 8714.84
-    #   total              = 14932.28
-    assert sr.state_tax == Decimal("14932.28")
-
-
-def test_ca_state_taxes_ltcg_as_ordinary():
-    """CA quirk: long-term gains do NOT get preferential rates."""
-    ret = Return(
-        tax_year=2024, filing_status=FilingStatus.MFJ,
-        wages=Decimal(0), long_term_capital_gains=Decimal(100_000),
-        state="CA",
-    )
-    r = compute(ret)
-    # Federal LTCG tax is 0% on the first 94,050 → very low.
-    assert r.qualified_tax < Decimal(1000)
-    # CA still taxes the full $100k as ordinary income.
-    assert r.state_result.state_tax > Decimal(1500)
-
-
-def test_unknown_state_raises():
-    ret = Return(tax_year=2024, filing_status=FilingStatus.SINGLE,
-                 wages=Decimal(50000), state="XX")
-    with pytest.raises(FileNotFoundError, match="XX"):
-        compute(ret)

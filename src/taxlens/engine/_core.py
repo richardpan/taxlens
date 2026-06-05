@@ -20,11 +20,9 @@ from taxlens.models import (
     FilingStatus,
     Return,
     Rules,
-    StateResult,
-    StateRules,
     TaxResult,
 )
-from taxlens.rules import load_rules, load_state_rules, load_locality_rules
+from taxlens.rules import load_rules
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
@@ -1684,118 +1682,6 @@ def _compute_amt(
     return _money(amt_owed)
 
 
-def _compute_state(ret: Return, agi: Decimal, rules: Rules) -> StateResult | None:
-    """Optional state computation. Currently shipped: CA."""
-    if not ret.state:
-        return None
-    srules = load_state_rules(ret.state, ret.tax_year)
-    return _compute_state_with(ret, agi, srules)
-
-
-def _compute_state_with(ret: Return, agi: Decimal, srules: StateRules) -> StateResult:
-    """Pure state computation given pre-loaded rules. Most states follow the
-    federal AGI starting point and add their own std deduction + brackets.
-    CA in particular taxes long-term capital gains as ordinary income."""
-    rec = _StepRecorder()
-    status = ret.filing_status.value
-
-    state_agi = rec.add("State AGI starting point", "= federal AGI", {"federal_agi": agi}, agi)
-    deduction = srules.standard_deduction.get(status, srules.standard_deduction.get("single", ZERO))
-    rec.add(f"{srules.state} standard deduction",
-            f"({status}, {srules.year})", {"amount": deduction}, deduction)
-    taxable = max(ZERO, state_agi - deduction)
-    rec.add("State taxable income", "max(0, agi − deduction)",
-            {"agi": state_agi, "deduction": deduction}, taxable)
-
-    brackets = srules.ordinary_brackets[status]
-    # If the state has its own qualified-income brackets (rare; not CA), apply them.
-    qual = ret.qualified_dividends + ret.long_term_capital_gains
-    if srules.qualified_brackets and qual > 0:
-        qual_brackets = srules.qualified_brackets[status]
-        ord_taxable = max(ZERO, taxable - qual)
-        ord_tax, ord_fills = walk_brackets(ord_taxable, brackets)
-        qual_tax, qual_fills = walk_brackets(qual, qual_brackets, stack_above=ord_taxable)
-        rec.add("State ordinary tax", "bracket walk", {"ord_taxable": ord_taxable}, ord_tax)
-        rec.add("State qualified tax", "bracket walk", {"qual_income": qual}, qual_tax)
-        tax = ord_tax + qual_tax
-        fills = ord_fills + qual_fills
-    else:
-        # CA-style: gains taxed as ordinary income.
-        tax, fills = walk_brackets(taxable, brackets)
-        rec.add("State tax (gains taxed as ordinary)",
-                "bracket walk on full taxable income",
-                {"taxable": taxable, "brackets": len(fills)}, tax)
-
-    # Optional surcharges (e.g. CA Mental Health Services Tax — 1% over $1M).
-    if srules.mental_health_services_tax:
-        s = srules.mental_health_services_tax
-        thr = Decimal(s["threshold"])
-        rate = Decimal(s["rate"])
-        if taxable > thr:
-            surcharge = (taxable - thr) * rate
-            tax = tax + surcharge
-            rec.add(
-                f"{srules.state} Mental Health Services Tax",
-                f"({taxable} − {thr}) × {rate}",
-                {"taxable": taxable, "threshold": thr, "rate": rate},
-                surcharge,
-            )
-
-    # Optional state-level long-term capital-gains excise tax
-    # (e.g. WA 7% on LT gains over the per-status threshold, RCW 82.87).
-    if srules.capital_gains_excise_tax:
-        c = srules.capital_gains_excise_tax
-        thresholds = c.get("threshold_by_status", {})
-        thr = Decimal(thresholds.get(status, thresholds.get("single", 0)))
-        rate = Decimal(c["rate"])
-        lt_gains = ret.long_term_capital_gains or ZERO
-        if lt_gains > thr:
-            cg_tax = (lt_gains - thr) * rate
-            tax = tax + cg_tax
-            rec.add(
-                f"{srules.state} capital-gains excise tax",
-                f"({lt_gains} − {thr}) × {rate}",
-                {"lt_gains": lt_gains, "threshold": thr, "rate": rate},
-                cg_tax,
-            )
-
-    # Optional locality (NYC, Yonkers) layered on top of state tax.
-    locality_tax = ZERO
-    locality_name: str | None = None
-    if ret.locality:
-        loc = load_locality_rules(ret.locality, ret.tax_year)
-        locality_name = str(loc.get("locality", ret.locality)).upper()
-        if loc.get("surcharge_of_state_tax"):
-            rate = Decimal(loc["surcharge_of_state_tax"])
-            locality_tax = tax * rate
-            rec.add(
-                f"{locality_name} surcharge",
-                f"state_tax × {rate}",
-                {"state_tax": tax, "rate": rate},
-                locality_tax,
-            )
-        elif loc.get("ordinary_brackets"):
-            loc_brackets = loc["ordinary_brackets"][status]
-            locality_tax, loc_fills = walk_brackets(taxable, loc_brackets)
-            rec.add(
-                f"{locality_name} income tax",
-                "bracket walk on state taxable income",
-                {"taxable": taxable, "brackets": len(loc_fills)},
-                locality_tax,
-            )
-        tax = tax + locality_tax
-
-    return StateResult(
-        state=srules.state,
-        state_agi=_money(state_agi),
-        state_taxable_income=_money(taxable),
-        state_tax=_money(tax),
-        state_bracket_fills=fills,
-        steps=rec.steps,
-        locality=locality_name,
-        locality_tax=_money(locality_tax),
-    )
-
 
 def _compute_additional_medicare(ret: Return, rules: Rules, rec: _StepRecorder) -> Decimal:
     cfg = rules.additional_medicare
@@ -2541,15 +2427,6 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         refund,
     )
 
-    state_result = _compute_state(ret, agi, rules)
-    if state_result is not None:
-        rec.add(
-            f"{state_result.state} state tax (separate computation)",
-            "see state_result for full audit trail",
-            {"state": state_result.state, "state_tax": state_result.state_tax},
-            state_result.state_tax,
-        )
-
     delta = None
     if ret.reported_total_tax is not None:
         # Reconcile against the IRS-form-equivalent (whole-dollar)
@@ -2578,7 +2455,6 @@ def compute(ret: Return, rules: Rules | None = None) -> TaxResult:
         ordinary_bracket_fills=ord_fills,
         qualified_bracket_fills=qual_fills,
         steps=rec.steps,
-        state_result=state_result,
         qbi_deduction=qbi_ded,
         schedule_e_income=_money(sch_e_net),
         passive_loss_disallowed=pal_carry,

@@ -121,13 +121,13 @@
         <canvas id="rateLine" height="180"></canvas>
       </div>
       <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="font-semibold mb-3" data-help="Year-by-year share of every dollar of tax owed, broken down by category. Each row is a tax category; each column is a tax year. Cells show the percentage of that year's total tax that came from the category. Categories: ordinary income tax (regular bracket-walk on wages, interest, non-qualified dividends, STCG); capital-gains tax (preferential 0/15/20% rates on LTCG and qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net self-employment earnings, paid in lieu of payroll tax); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k single / $250k MFJ MAGI); Additional Medicare (0.9% on Medicare wages above $200k single / $250k MFJ); and state. Rows are sorted by the most-recent year's share. Hover a percentage to see the underlying dollar amount.">Tax composition share by year</div>
+        <div class="font-semibold mb-3" data-help="Year-by-year share of every dollar of tax owed, broken down by category. Each row is a tax category; each column is a tax year. Cells show the percentage of that year's total tax that came from the category. Categories: ordinary income tax (regular bracket-walk on wages, interest, non-qualified dividends, STCG); capital-gains tax (preferential 0/15/20% rates on LTCG and qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net self-employment earnings, paid in lieu of payroll tax); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k single / $250k MFJ MAGI); and Additional Medicare (0.9% on Medicare wages above $200k single / $250k MFJ). Rows are sorted by the most-recent year's share. Hover a percentage to see the underlying dollar amount.">Tax composition share by year</div>
         <div id="taxCompositionTable" class="overflow-x-auto text-xs"></div>
       </div>
       <div class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="font-semibold" data-help="Stacked bars showing every dollar of federal + state liability split by tax type, year over year. Categories: ordinary (regular bracket tax on wages/interest/STCG); capital gains (preferential 0/15/20% rates on LTCG and qualified dividends); SE (Self-Employment tax — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Add'l Medicare (0.9% on Medicare wages above $200k/$250k); state. Use to see which tax category drives the most of your bill.">Tax composition by year</div>
-          <div class="text-xs text-slate-500">Stacked: every dollar of federal + state liability, year over year</div>
+          <div class="font-semibold" data-help="Stacked bars showing every dollar of federal liability split by tax type, year over year. Categories: ordinary (regular bracket tax on wages/interest/STCG); capital gains (preferential 0/15/20% rates on LTCG and qualified dividends); SE (Self-Employment tax — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Add'l Medicare (0.9% on Medicare wages above $200k/$250k). Use to see which tax category drives the most of your bill.">Tax composition by year</div>
+          <div class="text-xs text-slate-500">Stacked: every dollar of federal liability, year over year</div>
         </div>
         <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
@@ -160,7 +160,7 @@
   <p class="text-slate-500 mb-6">Income flow + how the federal brackets were filled.</p>
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3" data-help="Bar waterfall from gross income down to take-home pay: each step deducts a category (pre-tax retirement, HSA, federal tax, state tax, FICA) so you can see exactly where each dollar went.">Income → take-home waterfall</div>
+      <div class="font-semibold mb-3" data-help="Bar waterfall from gross income down to take-home pay: each step deducts a category (pre-tax retirement, HSA, federal tax, FICA) so you can see exactly where each dollar went.">Income → take-home waterfall</div>
       <canvas id="waterfall" height="180"></canvas>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-5">
@@ -180,7 +180,7 @@
       <svg id="deductionWaterfall" viewBox="0 0 800 280" class="w-full" style="max-height:340px"></svg>
     </div>
     <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
-      <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax. Categories: ordinary income tax (bracket-walk on wages/interest/STCG); capital-gains tax (preferential 0/15/20% rates on LTCG + qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Additional Medicare (0.9% on Medicare wages above $200k/$250k); state; and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
+      <div class="font-semibold mb-3" data-help="Per-category breakdown of total tax. Categories: ordinary income tax (bracket-walk on wages/interest/STCG); capital-gains tax (preferential 0/15/20% rates on LTCG + qualified dividends); SE tax (Self-Employment — 15.3% Social Security + Medicare on net SE earnings); NIIT (Net Investment Income Tax — 3.8% on investment income above $200k/$250k MAGI); Additional Medicare (0.9% on Medicare wages above $200k/$250k); and credits applied. Use to spot the single biggest line item in your bill.">Tax breakdown</div>
       <div id="taxBreakdown" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"></div>
     </div>
     <div id="importedFieldsPanel" class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 hidden">
@@ -352,7 +352,7 @@
   <div class="grid md:grid-cols-2 gap-6">
     <div class="bg-white border border-slate-200 rounded-2xl p-5">
       <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
-        <div class="font-semibold" data-help="Two lines per year: Adjusted Gross Income (top, money you earned) and total federal + state tax (bottom). Use to spot when tax rose faster than income.">AGI &amp; Total Tax</div>
+        <div class="font-semibold" data-help="Two lines per year: Adjusted Gross Income (top, money you earned) and total federal tax (bottom). Use to spot when tax rose faster than income.">AGI &amp; Total Tax</div>
         <div id="trendsAgiTaxLegend" class="flex flex-wrap gap-3 text-xs"></div>
       </div>
       <svg id="trendsAgiTax" viewBox="0 0 600 280" class="w-full h-64"></svg>

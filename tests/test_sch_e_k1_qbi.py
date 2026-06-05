@@ -90,18 +90,3 @@ def test_iso_bargain_element_triggers_amt():
     r = compute(ret)
     assert r.amt > 0
 
-
-def test_ca_mhst_kicks_in_over_1m():
-    # MFJ, $1.2M wages → CA taxable comfortably > $1M, MHST applies on the excess.
-    ret = Return(
-        tax_year=2024, filing_status=FilingStatus.MFJ,
-        wages=Decimal(1_200_000),
-        state="CA",
-    )
-    r = compute(ret)
-    sr = r.state_result
-    # State taxable ≈ 1_188_920. MHST = 188_920 × 1% ≈ 1889.20.
-    # Verify MHST step exists in the audit trail.
-    assert any("Mental Health" in s.label for s in sr.steps)
-    # Without MHST, top-bracket CA tax on 1.2M would be ~111k; MHST adds another ~1.9k.
-    assert sr.state_tax > Decimal(100_000)

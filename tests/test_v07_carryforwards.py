@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from taxlens.engine import compute
 from taxlens.models import FilingStatus, Return
@@ -91,19 +90,3 @@ def test_charitable_carryover_used_when_itemizing():
     # The carryover should reduce taxable income (and thus tax).
     assert r1.total_tax < r0.total_tax
 
-
-# ---------- MD county piggyback ------------------------------------------
-
-@pytest.mark.parametrize("locality,rate", [
-    ("MD_MONTGOMERY", Decimal("0.0320")),
-    ("MD_ANNE_ARUNDEL", Decimal("0.0270")),
-])
-def test_md_county_piggyback(locality, rate):
-    base = Return(tax_year=2024, filing_status=FilingStatus.SINGLE,
-                   state="MD", wages=Decimal("100000"))
-    r_no = compute(base)
-    r_yes = compute(base.model_copy(update={"locality": locality}))
-    assert r_yes.state_result.locality == locality
-    # Locality tax = rate × MD taxable income (~ $97,450 single).
-    expected = (r_no.state_result.state_taxable_income * rate).quantize(Decimal("1"))
-    assert abs(r_yes.state_result.locality_tax - expected) <= Decimal("2.00")

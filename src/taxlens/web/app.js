@@ -439,7 +439,6 @@ function drawTaxCompositionTable(fulls) {
   }
   const years = fulls.map(f => f.tax_year);
   const pull = (f, k) => Number(f.result[k] || 0);
-  const stateOf = (f) => Number(f.result.state_result ? f.result.state_result.state_tax : 0);
   // Categories mirror the donut's old layout. Keep order stable so the
   // first column = "Category" with consistent labels across years.
   const CATS = [
@@ -452,7 +451,6 @@ function drawTaxCompositionTable(fulls) {
     ["Add'l Medicare",      f => pull(f, 'additional_medicare_tax')],
     ['NIIT',                f => pull(f, 'niit')],
     ['Early-wd penalty',    f => pull(f, 'early_withdrawal_penalty')],
-    ['State tax',           stateOf],
   ];
   // Build raw $ matrix + per-year totals so percentages are computed
   // against the actual sum of categories shown (so each column sums
@@ -527,7 +525,6 @@ function drawTaxCompositionTable(fulls) {
 function drawTaxStack(fulls) {
   const years = fulls.map(f => f.tax_year);
   const pull = (f, k) => Number(f.result[k] || 0);
-  const stateOf = (f) => Number(f.result.state_result ? f.result.state_result.state_tax : 0);
   const credits = (f) => Number(f.result.credits || 0)
                        + Number(f.result.eitc || 0)
                        + Number(f.result.actc || 0)
@@ -541,7 +538,6 @@ function drawTaxStack(fulls) {
     "Add'l Medicare":  fulls.map(f => pull(f, 'additional_medicare_tax')),
     'NIIT':            fulls.map(f => pull(f, 'niit')),
     'Early-wd pen.':   fulls.map(f => pull(f, 'early_withdrawal_penalty')),
-    'State tax':       fulls.map(stateOf),
     'Credits':         fulls.map(f => -credits(f)),
   };
   for (const k of Object.keys(series)) {
@@ -555,7 +551,6 @@ function drawTaxStack(fulls) {
     "Add'l Medicare": '#fbbf24',
     'NIIT':           '#a78bfa',
     'Early-wd pen.':  '#fb923c',
-    'State tax':      '#14b8a6',
     'Credits':        '#10b981',
   };
   const datasets = Object.entries(series).map(([label, data]) => ({
@@ -979,9 +974,6 @@ async function renderYearDetail() {
         ? [['NOL expired (pre-TCJA >20y, §172)', r.nol_expired_this_year]] : []),
     ...(Number(r.roth_contribution_disallowed || 0) > 0
         ? [['Roth contribution disallowed (MAGI phaseout, §408A(c)(3))', r.roth_contribution_disallowed]] : []),
-    ...(r.state_result ? [[`${r.state_result.state} state tax`, r.state_result.state_tax]] : []),
-    ...(r.state_result && r.state_result.locality
-        ? [[`${r.state_result.locality} locality tax`, r.state_result.locality_tax]] : []),
     ['Withholding + estimated', String(Number(ret.federal_withholding) + Number(ret.estimated_payments))],
     ['Refund/owed', r.refund_or_owed],
   ].map(([k,v]) => {
@@ -1192,7 +1184,6 @@ function drawSankey(full) {
   const seTax   = num(r.se_tax);
   const medTax  = num(r.additional_medicare_tax);
   const niitTax = num(r.niit);
-  const stateTax = num(r.state_result ? r.state_result.state_tax : 0);
   const gross   = SRC.reduce((s, x) => s + x[1], 0);
 
   // Per-pool denominator: sum of (source.val × source's pool weight).
@@ -1216,11 +1207,8 @@ function drawSankey(full) {
       se:    flowFor(val, w.se,   seTax,   denomSe),
       med:   flowFor(val, w.med,  medTax,  denomMed),
       niit:  flowFor(val, w.niit, niitTax, denomNiit),
-      // State tax distributes proportionally over total income (close
-      // enough — most states piggyback on AGI not on per-source tax).
-      state: gross > 0 ? val * (stateTax / gross) : 0,
     };
-    f.totalTax = f.ord + f.qual + f.se + f.med + f.niit + f.state;
+    f.totalTax = f.ord + f.qual + f.se + f.med + f.niit;
     f.takeHome = Math.max(0, val - f.totalTax);
     return { label, val, color, f };
   });
@@ -1233,7 +1221,6 @@ function drawSankey(full) {
     { key: 'se',       label: 'SE tax',           val: seTax,         color: '#7e22ce' },
     { key: 'med',      label: "Add'l Medicare",   val: medTax,        color: '#9333ea' },
     { key: 'niit',     label: 'NIIT',             val: niitTax,       color: '#475569' },
-    { key: 'state',    label: 'State tax',        val: stateTax,      color: '#14b8a6' },
     { key: 'takeHome', label: 'Take-home',        val: totalTakeHome, color: '#10b981' },
   ].filter(b => b.val > 0.5);
 

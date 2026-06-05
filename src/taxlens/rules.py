@@ -4,14 +4,11 @@ from __future__ import annotations
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
 from taxlens.models import Rules
-
-if TYPE_CHECKING:
-    from taxlens.models import StateRules
 
 # Locate the tax_rules directory INSIDE the package so it ships with the wheel
 # (and works when installed via pip, in an Electron app, or any other packaged
@@ -55,53 +52,3 @@ def load_rules(year: int, rules_dir: Path | None = None) -> Rules:
             for status, brackets in raw[key].items()
         }
     return Rules(**raw)
-
-
-STATE_RULES_DIR = _PKG_DIR / "tax_rules" / "state"
-
-
-@lru_cache(maxsize=None)
-def load_state_rules(state: str, year: int, rules_dir: Path | None = None) -> "StateRules":
-    """Load `tax_rules/state/{state}/{year}.yaml` (case-insensitive state)."""
-    from taxlens.models import StateRules  # local import to avoid cycles
-    base = rules_dir or STATE_RULES_DIR
-    path = base / state.lower() / f"{year}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"No {state} rules for tax year {year} (looked at {path}). "
-            f"Add tax_rules/state/{state.lower()}/{year}.yaml."
-        )
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    raw = _to_decimal(raw)
-    for key in ("ordinary_brackets", "qualified_brackets"):
-        if key in raw and raw[key]:
-            raw[key] = {
-                status: [(Decimal(low), Decimal(rate)) for low, rate in brackets]
-                for status, brackets in raw[key].items()
-            }
-    return StateRules(**raw)
-
-
-LOCALITY_RULES_DIR = _PKG_DIR / "tax_rules" / "locality"
-
-
-@lru_cache(maxsize=None)
-def load_locality_rules(locality: str, year: int, rules_dir: Path | None = None) -> dict:
-    """Load `tax_rules/locality/{locality}/{year}.yaml`. Returns a raw dict
-    (locality rules vary widely; no shared Pydantic model yet)."""
-    base = rules_dir or LOCALITY_RULES_DIR
-    path = base / locality.lower() / f"{year}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"No {locality} locality rules for {year} (looked at {path})."
-        )
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    raw = _to_decimal(raw)
-    if "ordinary_brackets" in raw and raw["ordinary_brackets"]:
-        raw["ordinary_brackets"] = {
-            status: [(Decimal(low), Decimal(rate)) for low, rate in brackets]
-            for status, brackets in raw["ordinary_brackets"].items()
-        }
-    return raw

@@ -1,4 +1,4 @@
-"""Smoke tests for the recently-added state YAMLs and the 1099-B CSV importer."""
+"""Smoke tests for the 1099-B CSV importer."""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -6,49 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from taxlens.engine import compute
 from taxlens.importers.broker_csv import import_csv
-from taxlens.models import FilingStatus, Return
 
-
-def _base_return(state: str, wages: Decimal, *, status: FilingStatus = FilingStatus.SINGLE,
-                 tax_year: int = 2024) -> Return:
-    return Return(
-        tax_year=tax_year,
-        filing_status=status,
-        state=state,
-        wages=wages,
-    )
-
-
-# ---------- state YAMLs --------------------------------------------------
-
-def _state_tax(res) -> Decimal:
-    sr = res.state_result
-    assert sr is not None, "expected a StateResult"
-    return sr.state_tax
-
-
-def test_ny_single_2024_has_state_tax():
-    r = _base_return("NY", Decimal("100000"))
-    res = compute(r)
-    assert _state_tax(res) > Decimal("3000")
-
-
-def test_il_flat_rate_4_95_percent():
-    r = _base_return("IL", Decimal("100000"))
-    res = compute(r)
-    assert Decimal("4000") < _state_tax(res) < Decimal("5500")
-
-
-@pytest.mark.parametrize("state", ["TX", "FL", "WA"])
-def test_no_income_tax_states(state):
-    r = _base_return(state, Decimal("200000"))
-    res = compute(r)
-    assert _state_tax(res) == Decimal("0")
-
-
-# ---------- broker CSV importer -----------------------------------------
 
 CSV_BASIC = """Symbol,Quantity,Date Acquired,Date Sold,Proceeds,Cost Basis
 AAPL,100,2020-03-15,2024-06-10,18000.00,9000.00
