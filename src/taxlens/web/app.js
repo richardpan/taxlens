@@ -974,6 +974,9 @@ async function renderYearDetail() {
         ? [['NOL expired (pre-TCJA >20y, §172)', r.nol_expired_this_year]] : []),
     ...(Number(r.roth_contribution_disallowed || 0) > 0
         ? [['Roth contribution disallowed (MAGI phaseout, §408A(c)(3))', r.roth_contribution_disallowed]] : []),
+    ...((Number(ret.traditional_401k_contributions || 0) + Number(ret.roth_401k_contributions || 0)) > 0
+        ? [['401(k) deferred (W-2 Box 12 D + AA)',
+            String(Number(ret.traditional_401k_contributions) + Number(ret.roth_401k_contributions))]] : []),
     ['Withholding + estimated', String(Number(ret.federal_withholding) + Number(ret.estimated_payments))],
     ['Refund/owed', r.refund_or_owed],
   ].map(([k,v]) => {
@@ -1037,9 +1040,14 @@ function drawImportedFields(full) {
 function drawDeductionWaterfall(full) {
   const r = full.result, ret = full.return;
   const num = (v) => Number(v || 0);
-  // Gross income = sum of the same buckets the Sankey shows. We use
-  // result.agi + the pre-AGI adjustments to back into a consistent gross.
+  // True gross compensation includes traditional 401(k) deferrals (which
+  // are already excluded from W-2 box 1 wages, and so from the 1040 AGI).
+  // Roth 401(k) deferrals are AFTER-tax and already in box 1 wages — we
+  // don't add them back here, but the tax-breakdown surfaces them so
+  // users can still see the savings effort.
+  const trad401k = num(ret.traditional_401k_contributions);
   const adjustments = [
+    ...(trad401k > 0 ? [['401(k) pre-tax (Box 12 D)', trad401k]] : []),
     ['HSA deduction',           num(ret.hsa_deduction)],
     ['Trad. IRA',               num(ret.traditional_ira_contributions)],
     ['½ SE tax',                num(r.se_tax) / 2],
