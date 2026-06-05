@@ -491,6 +491,16 @@ class TaxLensService:
             s.commit()
             return True
 
+    def clear_all_returns(self) -> int:
+        """Delete every imported return. Returns count removed."""
+        with self.sessionmaker_() as s:
+            rows = s.query(StoredReturn).all()
+            n = len(rows)
+            for row in rows:
+                s.delete(row)
+            s.commit()
+            return n
+
     # ── what-if ──────────────────────────────────────────────────────────────
 
     def whatif(self, return_id: int, edits: dict[str, Any]) -> dict[str, Any] | None:

@@ -95,6 +95,13 @@ def delete_return(return_id: int) -> dict[str, bool]:
     return {"deleted": True}
 
 
+@app.delete("/api/returns")
+def clear_all_returns() -> dict[str, int]:
+    """Delete all imported returns. Used by the Import-page Clear button."""
+    n = service.clear_all_returns()
+    return {"deleted": n}
+
+
 @app.get("/api/diff")
 def diff_returns(left: int, right: int) -> dict[str, Any]:
     out = service.diff_returns(left, right)

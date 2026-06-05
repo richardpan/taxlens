@@ -156,6 +156,12 @@ class Return(BaseModel):
     #     (Schedule 2 line 8 → Form 5329).
     pension_distributions_taxable: Decimal = Decimal(0)
     ira_distributions_taxable: Decimal = Decimal(0)
+    # 1040 line 4a — TOTAL IRA distributions, including non-taxable basis
+    # recovery and Roth conversions. The gap between line 4a and line 4b
+    # is the strongest single-year signal that the filer is executing a
+    # backdoor Roth (nondeductible Trad IRA contribution + same-year
+    # conversion produces line 4a ≈ 7,000 / line 4b ≈ 0).
+    ira_distributions_total: Decimal = Decimal(0)
     social_security_benefits: Decimal = Decimal(0)
     tax_exempt_interest: Decimal = Decimal(0)
     early_withdrawal_subject_to_penalty: Decimal = Decimal(0)

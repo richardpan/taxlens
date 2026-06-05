@@ -94,9 +94,12 @@
     <div class="text-slate-500 text-sm mt-1">or <span class="text-emerald-600 underline">browse</span> · PDF · TXF · JSON · YAML · 1099-B CSV</div>
     <input id="fileInput" type="file" class="hidden" multiple accept=".pdf,.txf,.json,.yaml,.yml,.csv" />
   </div>
-  <div class="mt-4 text-center">
+  <div class="mt-4 text-center flex items-center justify-center gap-3">
     <button id="loadDemoBtn" class="text-sm px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
       ✨ Try demo with 3 sample returns
+    </button>
+    <button id="clearAllBtn" class="text-sm px-4 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 hidden">
+      🗑 Clear all imported returns
     </button>
   </div>
   <div id="importList" class="mt-6 bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 hidden"></div>

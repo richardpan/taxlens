@@ -92,6 +92,34 @@ def test_advise_backdoor_roth_suggested_when_income_high_no_contribution():
     assert "backdoor-roth" in ids
 
 
+def test_advise_backdoor_roth_suppressed_when_filer_already_executed_conversion():
+    """1040 line 4a (total IRA distributions) materially exceeding line 4b
+    (taxable portion) is the textbook backdoor-Roth fingerprint: filer
+    contributed nondeductibly to a Trad IRA, then converted to Roth in the
+    same year — the basis offsets the conversion so 4b is ~$0 while 4a
+    shows the gross distribution. Don't nag them to do what they did."""
+    ret = Return(
+        tax_year=2024, filing_status=FilingStatus.MFJ,
+        wages=Decimal(400_000),
+        ira_distributions_total=Decimal(7_000),
+        ira_distributions_taxable=Decimal(0),
+    )
+    ids = _all_ids(advise(ret, compute(ret)))
+    assert "backdoor-roth" not in ids
+
+
+def test_advise_backdoor_roth_suppressed_when_form_8606_basis_carried_in():
+    """Carry-in nondeductible IRA basis means the filer is tracking Form
+    8606 across years — they're already running the backdoor strategy."""
+    ret = Return(
+        tax_year=2024, filing_status=FilingStatus.MFJ,
+        wages=Decimal(400_000),
+        ira_basis_in=Decimal(7_000),
+    )
+    ids = _all_ids(advise(ret, compute(ret)))
+    assert "backdoor-roth" not in ids
+
+
 def test_advise_amt_planning_appears_when_amt_owed():
     ret = Return(
         tax_year=2024, filing_status=FilingStatus.MFJ,

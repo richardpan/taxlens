@@ -132,3 +132,28 @@ def test_delete_return_via_api(client) -> None:
 
     # Re-delete should 404.
     assert client.delete(f"/api/returns/{rid}").status_code == 404
+
+
+def test_clear_all_returns_via_api(client) -> None:
+    """Bulk-clear: DELETE /api/returns wipes every imported return."""
+    yaml_path = _fixture_yaml()
+    with yaml_path.open("rb") as f:
+        r = client.post(
+            "/api/returns/import",
+            files={"file": ("mfj_2024_basic.yaml", f, "application/yaml")},
+        )
+    assert r.status_code == 200
+
+    assert len(client.get("/api/returns").json()) >= 1
+
+    r = client.delete("/api/returns")
+    assert r.status_code == 200
+    assert r.json()["deleted"] >= 1
+
+    assert client.get("/api/returns").json() == []
+
+    # Re-clear when empty is a no-op (returns 0).
+    r = client.delete("/api/returns")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": 0}
+

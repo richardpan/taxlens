@@ -213,6 +213,16 @@ def rule_backdoor_roth(ret: Return, result: TaxResult, rules: Rules) -> Optional
             est_annual_savings=_dollars(ret.roth_ira_contributions * Decimal("0.06")),
             references=["Form 8606", "IRC §408A(c)(3)"],
         )
+    # Suppress the suggestion if the return already shows evidence of
+    # backdoor-Roth activity. Strongest single-year signal: 1040 line 4a
+    # (total IRA distributions) materially exceeds line 4b (taxable
+    # portion) — the classic conversion-of-nondeductible-basis pattern.
+    # Also suppress when Form 8606 carry-in basis exists (the filer is
+    # tracking nondeductible IRA basis across years, which is what the
+    # backdoor strategy requires).
+    backdoor_gap = ret.ira_distributions_total - ret.ira_distributions_taxable
+    if backdoor_gap >= Decimal(500) or ret.ira_basis_in > 0:
+        return None
     return Recommendation(
         id="backdoor-roth",
         title="Backdoor Roth opportunity — your income exceeds the direct-Roth limit",

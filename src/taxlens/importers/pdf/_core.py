@@ -692,6 +692,13 @@ LINE_PATTERNS: dict[str, list[str]] = {
                                 r"\bIRA\s+distributions\b[^\n]{0,40}?taxable",
                                 # IRS line 4b tooltip
                                 r"IRA\s+distributions[^\n]{0,40}?Taxable\s+amount"],
+    "ira_distributions_total": [
+                                # 1040 line 4a — total IRA distributions (the gross
+                                # amount; line 4b carries the taxable portion). The
+                                # gap between 4a and 4b reveals backdoor Roth
+                                # conversions and basis-recovery distributions.
+                                r"\b4\s*a\b\s+IRA\s+distributions\b",
+                                r"\bIRA\s+distributions\b\s+4\s*a\b"],
     "social_security_benefits":[
                                 # Prefer line 6b (TAXABLE amount), not line 6a
                                 # (gross benefits). Packed-row format puts both

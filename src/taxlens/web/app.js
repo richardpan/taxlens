@@ -100,6 +100,8 @@ async function refreshAll() {
   $('#returnCount').textContent = RETURNS.length;
   renderReturnsMenu();
   populateYearPickers();
+  const clearBtn = document.getElementById('clearAllBtn');
+  if (clearBtn) clearBtn.classList.toggle('hidden', RETURNS.length === 0);
   // re-render whichever tab is active
   const active = $$('.tab').find(b => b.classList.contains('active'));
   if (active) showTab(active.dataset.tab);
@@ -1694,6 +1696,33 @@ function recCard(r) {
     '  </div>',
     '</div>',
   ].join('');
+}
+
+// --- clear-all returns ---------------------------------------------------
+const clearAllBtn = document.getElementById('clearAllBtn');
+if (clearAllBtn) {
+  clearAllBtn.addEventListener('click', async () => {
+    const n = RETURNS.length;
+    if (n === 0) return;
+    const msg = `Delete all ${n} imported return${n === 1 ? '' : 's'}? This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    clearAllBtn.disabled = true;
+    const prev = clearAllBtn.textContent;
+    clearAllBtn.textContent = 'Clearing…';
+    try {
+      await api('/api/returns', { method: 'DELETE' });
+      // Also clear the import-list UI on the page.
+      const list = document.getElementById('importList');
+      if (list) { list.innerHTML = ''; list.classList.add('hidden'); }
+      await refreshAll();
+      clearAllBtn.textContent = '✓ Cleared';
+      setTimeout(() => { clearAllBtn.textContent = prev; clearAllBtn.disabled = false; }, 1200);
+    } catch (e) {
+      clearAllBtn.disabled = false;
+      clearAllBtn.textContent = '❌ Clear failed — see console';
+      console.error(e);
+    }
+  });
 }
 
 // --- demo loader ---------------------------------------------------------
