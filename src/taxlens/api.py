@@ -20,13 +20,25 @@ from taxlens.service import TaxLensService
 WEB_DIR = Path(__file__).parent / "web"
 
 def _read_version() -> str:
-    """Resolve the package version.
+    """Resolve the running TaxLens version.
 
-    Prefer installed-package metadata; fall back to parsing
-    ``pyproject.toml`` next to the source tree so source/editable
-    runs (where the dist-info may be missing or stale) still surface
-    the real version in the UI footer instead of the literal "dev".
+    Resolution order:
+      1. ``taxlens._version.__version__`` — baked at build time by the
+         PyInstaller script. This is the only source that survives into a
+         packaged binary (no ``pyproject.toml`` and no installed-package
+         metadata is present in the bundle).
+      2. ``importlib.metadata.version("taxlens")`` — covers ``pip install``
+         (editable or wheel) into a real Python environment.
+      3. ``pyproject.toml`` walk — covers running directly out of the
+         source tree without installing.
+      4. ``"dev"`` — last-resort fallback so the UI footer still renders.
     """
+    try:
+        from taxlens._version import __version__ as _baked
+        if _baked and _baked != "dev":
+            return _baked
+    except Exception:
+        pass
     try:
         return _pkg_version("taxlens")
     except PackageNotFoundError:

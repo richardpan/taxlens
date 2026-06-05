@@ -20,8 +20,37 @@ OUT_DIR = REPO / "desktop" / "bin"
 SEP = ";" if os.name == "nt" else ":"
 
 
+def _bake_version() -> str:
+    """Write ``src/taxlens/_version.py`` with the current project version
+    pulled from ``pyproject.toml``. The PyInstaller bundle has no
+    ``pyproject.toml`` and no installed-package metadata at runtime, so
+    without this step ``/api/health`` and the UI footer fall back to the
+    literal string ``"dev"``."""
+    try:
+        import tomllib  # py311+
+    except ModuleNotFoundError:  # pragma: no cover
+        import tomli as tomllib  # type: ignore[no-redef]
+    data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    version = data["project"]["version"]
+    target = REPO / "src" / "taxlens" / "_version.py"
+    target.write_text(
+        '"""Build-time generated version string.\n\n'
+        "This file is overwritten by ``desktop/scripts/build_backend.py`` "
+        "before\nPyInstaller packaging so the bundled binary reports the "
+        "correct version\nin the UI footer and ``/api/health``. The committed "
+        "value here is the\nlast-known release; it is what runs when "
+        "developers execute the source\ntree directly (no install, no "
+        'PyInstaller).\n"""\n'
+        f'__version__ = "{version}"\n',
+        encoding="utf-8",
+    )
+    print(f"-> baked version {version} into {target.relative_to(REPO)}")
+    return version
+
+
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    _bake_version()
 
     # Ensure PyInstaller is available (assumes the active interpreter is the
     # project venv — CI workflow does this with `pip install pyinstaller`).

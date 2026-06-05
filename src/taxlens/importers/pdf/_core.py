@@ -16,11 +16,15 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pdfplumber
 
 from taxlens.importers import Imported, sha256_file
 from taxlens.models import FilingStatus, Return
+
+if TYPE_CHECKING:
+    from taxlens.importers.pdf.text_sources import TextSources
 
 _MONEY = r"\$?\s*-?[0-9][0-9,]*(?:\.[0-9]{1,2})?"
 # Parens-negative: `(1,500)` and `(1,500.00)` → -1500
@@ -1752,20 +1756,10 @@ _W2_COPY_DELIMITER = re.compile(
 )
 
 
-def _extract_w2_text_via_pypdf(path: Path) -> list[str]:
-    """Return per-page text via pypdf. Many vendor-rendered W-2 PDFs
-    (notably ADP) cluster Box 12 codes against unrelated text columns
-    in pdfplumber's output, but pypdf walks the content stream in
-    natural order and produces clean `D 23500.00` lines per copy."""
-    try:
-        from pypdf import PdfReader
-    except Exception:
-        return []
-    try:
-        reader = PdfReader(str(path))
-        return [(p.extract_text() or "") for p in reader.pages]
-    except Exception:
-        return []
+# Source ordering preferred by W-2 parsing: pypdf first because it walks
+# the content stream in document order and preserves per-copy structure;
+# fall through to pdfplumber streams if pypdf is unavailable or empty.
+_W2_SOURCE_ORDER = ("pypdf", "default", "layout-tight", "layout-loose")
 
 
 # Within a known W-2 region we don't need a "Box 12" marker — every Box 12
@@ -1841,7 +1835,7 @@ def _extract_w2_box12_dedup(text: str) -> dict[str, Decimal]:
     return totals
 
 
-def _is_w2_only_pdf(pages: list[str], path: Path | None = None) -> bool:
+def _is_w2_only_pdf(sources: "TextSources") -> bool:
     """True iff the PDF text shows W-2 letterhead but no actual Form 1040
     on any page. We detect via three signals (pdfplumber text alone isn't
     reliable: vendor PDFs sometimes break "Wage and Tax\\nStatement"
@@ -1851,25 +1845,13 @@ def _is_w2_only_pdf(pages: list[str], path: Path | None = None) -> bool:
       2. "Wage and Tax Statement" via pdfplumber pages OR pypdf text
       3. AND no OMB No. 1545-0074 (the 1040 OMB number) anywhere
     """
-    joined = "\n".join(pages)
+    pages = sources.default_pages
+    pypdf_pages = sources.pypdf_pages
+    joined = "\n".join(pages) + "\n" + "\n".join(pypdf_pages)
     has_w2_omb = re.search(r"OMB\s*No\.?\s*1545-0029", joined, re.IGNORECASE)
-    has_w2_letterhead = any(_W2_ONLY_MARKER.search(p) for p in pages)
-    # Try pypdf as a backup source for the W-2 letterhead match — pdfplumber
-    # frequently splits the multi-line title. We also look at pypdf text for
-    # the OMB number, which sometimes lives on a different page.
-    if path is not None and not (has_w2_omb and has_w2_letterhead):
-        pypdf_pages = _extract_w2_text_via_pypdf(path)
-        if pypdf_pages:
-            pypdf_joined = "\n".join(pypdf_pages)
-            if not has_w2_omb:
-                has_w2_omb = re.search(
-                    r"OMB\s*No\.?\s*1545-0029", pypdf_joined, re.IGNORECASE
-                )
-            if not has_w2_letterhead:
-                has_w2_letterhead = any(
-                    _W2_ONLY_MARKER.search(p) for p in pypdf_pages
-                )
-            joined = joined + "\n" + pypdf_joined  # for the 1040 check below
+    has_w2_letterhead = any(
+        _W2_ONLY_MARKER.search(p) for p in (*pages, *pypdf_pages)
+    )
     if not (has_w2_omb or has_w2_letterhead):
         return False
     # Negative signal: actual 1040 form present.
@@ -1888,31 +1870,21 @@ def _is_w2_only_pdf(pages: list[str], path: Path | None = None) -> bool:
     return not has_1040
 
 
-def _import_w2_standalone(
-    path: Path, default_pages: list[str], layout_streams: list[list[str]]
-) -> Imported:
+def _import_w2_standalone(sources: "TextSources") -> Imported:
     """Build an `Imported` for a standalone W-2 PDF. The resulting Return
     is a stub with only year + W-2 box-12 buckets populated; the service
     layer merges it into an existing Return for the same tax year."""
-    # pypdf walks the PDF content stream in document order and produces
-    # cleaner per-copy text for vendor-rendered W-2s (notably ADP, where
-    # pdfplumber's column clustering corrupts the Box 12 column). We use
-    # it as the primary source for both year detection and Box 12 parsing,
-    # falling back to the pdfplumber streams if pypdf returned nothing.
-    pypdf_pages = _extract_w2_text_via_pypdf(path)
-
-    # Year: try every available text source. The 1040-flavored detector
+    path = sources.path
+    # Year detection: try every named source. The 1040-flavored detector
     # runs first (matches third-party "Tax Year: 2025" cover pages), then
-    # the W-2-specific detector against the form itself.
-    candidate_sources: list[list[str]] = []
-    if pypdf_pages:
-        candidate_sources.append(pypdf_pages)
-    candidate_sources.append(default_pages)
-    candidate_sources.extend(layout_streams)
-
+    # the W-2-specific detector against the form itself. Empty streams are
+    # skipped naturally by the year detectors.
+    candidate_streams = sources.named_streams(_W2_SOURCE_ORDER)
     tax_year: int | None = None
-    for src in candidate_sources:
-        tax_year = _detect_year(src) or _detect_w2_year(src)
+    for _, pages in candidate_streams:
+        if not pages:
+            continue
+        tax_year = _detect_year(pages) or _detect_w2_year(pages)
         if tax_year is not None:
             break
     if tax_year is None:
@@ -1925,8 +1897,10 @@ def _import_w2_standalone(
     # non-empty results wins. The dedup parser handles ADP-style 4-copy
     # PDFs by fingerprinting per-region box-12 sets.
     box12: dict[str, Decimal] = {}
-    for src in candidate_sources:
-        joined = "\n".join(src)
+    for _, pages in candidate_streams:
+        if not pages:
+            continue
+        joined = "\n".join(pages)
         box12 = _extract_w2_box12_dedup(joined)
         if box12:
             break
@@ -1979,18 +1953,20 @@ def import_pdf(path: Path) -> Imported:
     acroform_fields, acroform_warnings = extract_acroform_fields(path, logger=logger)
     acroform_meta = extract_acroform_meta(path) if acroform_fields else {}
 
-    default_pages, layout_streams, ocr_used = _extract_text_per_page(path)
+    # Build the lazy text-source facade. The pdfplumber pass is computed
+    # eagerly because both the W-2 fast path and the 1040 path consume it;
+    # pypdf is lazy and only triggered by the W-2 detector + parser.
+    from taxlens.importers.pdf.text_sources import TextSources
+    sources = TextSources(path=path)
+    default_pages = sources.default_pages
+    layout_streams = sources.layout_streams
+    ocr_used = sources.ocr_used  # noqa: F841 (reserved for future logging)
 
     # ── Standalone W-2 fast path ────────────────────────────────────────
     # If the PDF shows W-2 letterhead but no Form 1040 marker on any page,
-    # treat it as a standalone W-2 attachment. Run the check against the
-    # default text AND every layout stream so spacing differences in one
-    # stream don't cause a misclassification.
-    all_streams_text = list(default_pages)
-    for stream in layout_streams:
-        all_streams_text.extend(stream)
-    if _is_w2_only_pdf(all_streams_text, path=path):
-        return _import_w2_standalone(path, default_pages, layout_streams)
+    # treat it as a standalone W-2 attachment.
+    if _is_w2_only_pdf(sources):
+        return _import_w2_standalone(sources)
 
     # A page qualifies as a real IRS form page if EITHER its default text or
     # any of its layout-reconstructed texts shows IRS-form markers, and no

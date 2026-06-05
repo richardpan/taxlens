@@ -12,8 +12,13 @@ import pytest
 
 from taxlens.importers import Imported
 from taxlens.importers.pdf._core import _is_w2_only_pdf
+from taxlens.importers.pdf.text_sources import TextSources
 from taxlens.models import FilingStatus, Return
 from taxlens.service import TaxLensService
+
+
+def _sources(pages: list[str]) -> TextSources:
+    return TextSources.from_pages(pages, pypdf_pages=[])
 
 
 # ─── detection ──────────────────────────────────────────────────────────────
@@ -26,7 +31,7 @@ def test_w2_only_pdf_detected_from_letterhead():
         "Box 12a D 23,000.00\n"
         "Box 12b W 4,150.00\n"
     ]
-    assert _is_w2_only_pdf(pages) is True
+    assert _is_w2_only_pdf(_sources(pages)) is True
 
 
 def test_bundled_1040_with_w2_not_classified_as_standalone():
@@ -36,12 +41,12 @@ def test_bundled_1040_with_w2_not_classified_as_standalone():
         "Adjusted gross income .... 11  78,000\n",
         "Wage and Tax Statement\nBox 12a D 23,000.00\n",
     ]
-    assert _is_w2_only_pdf(pages) is False
+    assert _is_w2_only_pdf(_sources(pages)) is False
 
 
 def test_no_w2_marker_not_classified():
     pages = ["Form 1040 (2024)\nWages 80,000\n"]
-    assert _is_w2_only_pdf(pages) is False
+    assert _is_w2_only_pdf(_sources(pages)) is False
 
 
 def test_w2_with_omb_overrides_narrative_form_1040_mentions():
@@ -55,7 +60,7 @@ def test_w2_with_omb_overrides_narrative_form_1040_mentions():
         "line of your tax return.\nSee the Form 1040 instructions to "
         "determine if you are required to complete Form 8959.\n",
     ]
-    assert _is_w2_only_pdf(pages) is True
+    assert _is_w2_only_pdf(_sources(pages)) is True
 
 
 # ─── ADP-style multi-copy dedup ─────────────────────────────────────────────
