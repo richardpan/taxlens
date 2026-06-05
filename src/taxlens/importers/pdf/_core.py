@@ -1721,15 +1721,23 @@ _W2_ONLY_MARKER = re.compile(r"Wage\s+and\s+Tax\s+Statement", re.IGNORECASE)
 
 # W-2-specific year detection. The 1040-flavored YEAR_PATTERNS don't fire on
 # standalone W-2s because they look for "Form 1040" / "U.S. Individual" /
-# OMB 1545-0074 anchors. W-2s use OMB 1545-0029 and "Wage and Tax Statement"
-# instead, and most vendor formats (ADP, Paychex, Intuit) print the year
-# alongside the form name in a few predictable ways.
+# OMB 1545-0074 anchors. W-2s use OMB 1545-0008 (and sometimes 1545-0029 in
+# vendor-rendered variants — strictly Form 941's OMB but it shows up in
+# certain ADP W-2 outputs) plus "Wage and Tax Statement", and most vendor
+# formats (ADP, Paychex, Intuit) print the year alongside the form name in
+# a few predictable ways.
+_W2_OMB_RE = re.compile(
+    r"OMB\s*No\.?\s*1545-(?:0008|0029)", re.IGNORECASE
+)
 _W2_YEAR_PATTERNS = [
     re.compile(r"\b(20\d{2})\s+W-?2\b", re.IGNORECASE),
     re.compile(r"Statement\s+(20\d{2})\b", re.IGNORECASE),
     re.compile(r"Wage\s+and\s+Tax[^\n]{0,80}?\b(20\d{2})\b", re.IGNORECASE),
     re.compile(r"\b(20\d{2})\b[^\n]{0,80}?Wage\s+and\s+Tax", re.IGNORECASE),
-    re.compile(r"OMB\s*No\.?\s*1545-0029[\s\S]{0,200}?\b(20\d{2})\b", re.IGNORECASE),
+    re.compile(
+        r"OMB\s*No\.?\s*1545-(?:0008|0029)[\s\S]{0,200}?\b(20\d{2})\b",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -1841,14 +1849,15 @@ def _is_w2_only_pdf(sources: "TextSources") -> bool:
     reliable: vendor PDFs sometimes break "Wage and Tax\\nStatement"
     across newlines, and the W-2 instructions page narratively references
     "Form 1040" without containing one):
-      1. OMB No. 1545-0029 anywhere → W-2 OMB number, definitive
+      1. OMB No. 1545-0008 anywhere → W-2 OMB number, definitive
+         (also accept 1545-0029 which some ADP variants emit)
       2. "Wage and Tax Statement" via pdfplumber pages OR pypdf text
       3. AND no OMB No. 1545-0074 (the 1040 OMB number) anywhere
     """
     pages = sources.default_pages
     pypdf_pages = sources.pypdf_pages
     joined = "\n".join(pages) + "\n" + "\n".join(pypdf_pages)
-    has_w2_omb = re.search(r"OMB\s*No\.?\s*1545-0029", joined, re.IGNORECASE)
+    has_w2_omb = _W2_OMB_RE.search(joined)
     has_w2_letterhead = any(
         _W2_ONLY_MARKER.search(p) for p in (*pages, *pypdf_pages)
     )

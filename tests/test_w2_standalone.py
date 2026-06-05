@@ -51,16 +51,20 @@ def test_no_w2_marker_not_classified():
 
 def test_w2_with_omb_overrides_narrative_form_1040_mentions():
     """ADP-style W-2 PDFs include an instructions page that narratively
-    references 'Form 1040' multiple times. The W-2 OMB number (1545-0029)
-    is a strong positive signal that should override prose mentions."""
-    pages = [
-        "W-2 Wage and Tax Statement 2025\nOMB No. 1545-0029\n"
-        "MICROSOFT CORPORATION\nD 23500.00\nW 8550.00\n",
-        "Instructions for Employee\nBox 1. Enter this amount on the wages "
-        "line of your tax return.\nSee the Form 1040 instructions to "
-        "determine if you are required to complete Form 8959.\n",
-    ]
-    assert _is_w2_only_pdf(_sources(pages)) is True
+    references 'Form 1040' multiple times. The W-2 OMB number (1545-0008,
+    or vendor-variant 1545-0029) is a strong positive signal that should
+    override prose mentions."""
+    for omb in ("1545-0008", "1545-0029"):
+        pages = [
+            f"W-2 Wage and Tax Statement 2025\nOMB No. {omb}\n"
+            "MICROSOFT CORPORATION\nD 23500.00\nW 8550.00\n",
+            "Instructions for Employee\nBox 1. Enter this amount on the wages "
+            "line of your tax return.\nSee the Form 1040 instructions to "
+            "determine if you are required to complete Form 8959.\n",
+        ]
+        assert _is_w2_only_pdf(_sources(pages)) is True, (
+            f"Expected W-2 with OMB {omb} to override narrative Form 1040"
+        )
 
 
 # ─── ADP-style multi-copy dedup ─────────────────────────────────────────────

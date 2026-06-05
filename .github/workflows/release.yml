@@ -154,29 +154,81 @@ jobs:
         shell: bash
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
-          # Extract the matching CHANGELOG.md section for this tag into notes.md.
-          # Falls back to "Automated build." if the section isn't found.
+          # Pick release notes in this priority order:
+          #   1. Matching CHANGELOG.md section for the tag (rich, hand-written).
+          #   2. The annotated/lightweight tag's message, if non-empty.
+          #   3. The tagged commit's message body — for our workflow this is
+          #      the detailed "vX.Y.Z: ..." commit we always write.
+          # Only if all three are empty do we leave notes.md unset and let
+          # `gh release create --generate-notes` autogenerate from the commit
+          # log between the previous release and this tag.
           python - <<PY
-          import re, sys, pathlib
-          tag = "${tag#v}"
-          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
-          # Match: '## [x.y.z]' line, capture until the next '## [' or EOF.
-          pat = re.compile(
-              rf"^##\s*\[{re.escape(tag)}\][^\n]*\n(.*?)(?=^##\s*\[|\Z)",
-              re.DOTALL | re.MULTILINE,
-          )
-          m = pat.search(text)
-          body = m.group(1).strip() if m else "Automated build."
-          pathlib.Path("notes.md").write_text(body, encoding="utf-8")
+          import re, subprocess, pathlib
+          tag_v = "${tag}"
+          tag_bare = tag_v.lstrip("v")
+          notes = ""
+          changelog = pathlib.Path("CHANGELOG.md")
+          if changelog.is_file():
+              text = changelog.read_text(encoding="utf-8")
+              pat = re.compile(
+                  rf"^##\s*\[{re.escape(tag_bare)}\][^\n]*\n(.*?)(?=^##\s*\[|\Z)",
+                  re.DOTALL | re.MULTILINE,
+              )
+              m = pat.search(text)
+              if m:
+                  notes = m.group(1).strip()
+          if not notes:
+              # Tag message (annotated-tag case). %(contents) is empty for
+              # lightweight tags, so this naturally falls through.
+              try:
+                  tag_msg = subprocess.check_output(
+                      ["git", "for-each-ref", f"refs/tags/{tag_v}",
+                       "--format=%(contents)"],
+                      text=True,
+                  ).strip()
+                  # Strip the trailing PGP signature block if present.
+                  tag_msg = re.split(r"-----BEGIN PGP", tag_msg)[0].strip()
+                  if tag_msg:
+                      notes = tag_msg
+              except subprocess.CalledProcessError:
+                  pass
+          if not notes:
+              # Commit body of the tagged commit. Our version-bump commits
+              # always carry full release notes here.
+              try:
+                  commit_msg = subprocess.check_output(
+                      ["git", "log", "-1", "--format=%B", tag_v],
+                      text=True,
+                  ).strip()
+                  # Drop the trailing Co-authored-by trailer for cleanliness.
+                  commit_msg = re.sub(
+                      r"\n+Co-authored-by:.*$", "", commit_msg, flags=re.DOTALL
+                  ).strip()
+                  if commit_msg:
+                      notes = commit_msg
+              except subprocess.CalledProcessError:
+                  pass
+          pathlib.Path("notes.md").write_text(notes, encoding="utf-8")
           PY
           # Create release if missing — first matrix job wins, others fall through.
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --title "$tag" --notes-file notes.md
+            if [ -s notes.md ]; then
+              gh release create "$tag" --title "$tag" --notes-file notes.md
+            else
+              # Last resort: let GitHub auto-generate notes from the commit
+              # log between this tag and the previous release.
+              gh release create "$tag" --title "$tag" --generate-notes
+            fi
           else
-            # Backfill notes if the existing release still has the placeholder.
+            # Backfill notes if the existing release still has the legacy
+            # "Automated build." placeholder or is empty.
             current=$(gh release view "$tag" --json body --jq .body)
             if [ "$current" = "Automated build." ] || [ -z "$current" ]; then
-              gh release edit "$tag" --notes-file notes.md
+              if [ -s notes.md ]; then
+                gh release edit "$tag" --notes-file notes.md
+              else
+                gh release edit "$tag" --generate-notes
+              fi
             fi
           fi
           shopt -s nullglob
