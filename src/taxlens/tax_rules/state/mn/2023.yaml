@@ -1,0 +1,44 @@
+# Minnesota individual income tax — TY 2023.
+# Source: M1 instructions for 2023, Minn. Stat. §290.06.
+# Graduated brackets to 9.85%. LTCG taxed as ordinary income.
+# Standard deduction follows federal: single $13,825 / MFJ $27,650 / HOH $18,650
+# for 2023.
+# Note: MN's net-investment-income surtax over $1M starts in TY 2024 (SF 3269),
+# so it is not modeled here.
+
+state: MN
+year: 2023
+
+standard_deduction:
+  single: 13825
+  mfj:    27650
+  mfs:    13825
+  hoh:    18650
+  qss:    27650
+
+ordinary_brackets:
+  single:
+    - [0,      0.0535]
+    - [30070,  0.068]
+    - [98760,  0.0785]
+    - [183340, 0.0985]
+  mfj:
+    - [0,      0.0535]
+    - [43950,  0.068]
+    - [174610, 0.0785]
+    - [304970, 0.0985]
+  mfs:
+    - [0,      0.0535]
+    - [21975,  0.068]
+    - [87305,  0.0785]
+    - [152485, 0.0985]
+  hoh:
+    - [0,      0.0535]
+    - [33150,  0.068]
+    - [132900, 0.0785]
+    - [220730, 0.0985]
+  qss:
+    - [0,      0.0535]
+    - [43950,  0.068]
+    - [174610, 0.0785]
+    - [304970, 0.0985]
