@@ -1715,14 +1715,176 @@ _FORM_1040_MARKER = re.compile(r"\bForm\s+1040\b", re.IGNORECASE)
 _W2_ONLY_MARKER = re.compile(r"Wage\s+and\s+Tax\s+Statement", re.IGNORECASE)
 
 
-def _is_w2_only_pdf(pages: list[str]) -> bool:
-    """True iff the PDF text shows W-2 letterhead but no Form 1040 marker
-    on any page. We require the W-2 letterhead specifically (not just
-    "Box 12") because a 1040-with-bundled-W-2 also has Box 12 markers."""
-    has_w2 = any(_W2_ONLY_MARKER.search(p) for p in pages)
-    if not has_w2:
+# W-2-specific year detection. The 1040-flavored YEAR_PATTERNS don't fire on
+# standalone W-2s because they look for "Form 1040" / "U.S. Individual" /
+# OMB 1545-0074 anchors. W-2s use OMB 1545-0029 and "Wage and Tax Statement"
+# instead, and most vendor formats (ADP, Paychex, Intuit) print the year
+# alongside the form name in a few predictable ways.
+_W2_YEAR_PATTERNS = [
+    re.compile(r"\b(20\d{2})\s+W-?2\b", re.IGNORECASE),
+    re.compile(r"Statement\s+(20\d{2})\b", re.IGNORECASE),
+    re.compile(r"Wage\s+and\s+Tax[^\n]{0,80}?\b(20\d{2})\b", re.IGNORECASE),
+    re.compile(r"\b(20\d{2})\b[^\n]{0,80}?Wage\s+and\s+Tax", re.IGNORECASE),
+    re.compile(r"OMB\s*No\.?\s*1545-0029[\s\S]{0,200}?\b(20\d{2})\b", re.IGNORECASE),
+]
+
+
+def _detect_w2_year(pages: list[str]) -> int | None:
+    """Year detector tailored to W-2 layouts. Returns the first 4-digit
+    20XX year found alongside any W-2 anchor."""
+    for txt in pages:
+        for pat in _W2_YEAR_PATTERNS:
+            m = pat.search(txt)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+# ADP-style W-2 PDFs print 4 identical copies of the same W-2 on one page
+# (Reference / Federal / State / City). pdfplumber's text extraction also
+# doesn't always cleanly separate the digit-by-digit-rendered Box 12 column
+# from adjacent address text, so we additionally try pypdf's text pass.
+# This regex splits text into per-copy regions; each "Wage and Tax Statement"
+# (or the cover-page "W-2 and EARNINGS SUMMARY") starts a new region.
+_W2_COPY_DELIMITER = re.compile(
+    r"Wage\s+and\s+Tax\s+Statement|W-?2\s+and\s+EARNINGS\s+SUMMARY",
+    re.IGNORECASE,
+)
+
+
+def _extract_w2_text_via_pypdf(path: Path) -> list[str]:
+    """Return per-page text via pypdf. Many vendor-rendered W-2 PDFs
+    (notably ADP) cluster Box 12 codes against unrelated text columns
+    in pdfplumber's output, but pypdf walks the content stream in
+    natural order and produces clean `D 23500.00` lines per copy."""
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return []
+    try:
+        reader = PdfReader(str(path))
+        return [(p.extract_text() or "") for p in reader.pages]
+    except Exception:
+        return []
+
+
+# Within a known W-2 region we don't need a "Box 12" marker — every Box 12
+# code+amount pair has the form "<CODE> <AMOUNT>" on its own line (or with
+# optional 12a-d prefix). The known-code allowlist below filters out
+# capital-letter prose like "RICHARD PAN" or address abbreviations.
+_W2_BOX12_LOOSE = re.compile(
+    r"(?:^|\s)(?:12[a-d]\s+)?([A-Z]{1,2})\s+\$?\s*"
+    r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+\.\d{1,2})\b"
+)
+
+
+def _extract_w2_box12_per_region(region_text: str) -> dict[str, Decimal]:
+    """Pull Box 12 code+amount pairs from a single W-2 region. Each code
+    appears at most once per W-2; if duplicates appear (rare layout
+    artefact), keep the largest. Returns the mapped-field dict
+    (traditional_401k_contributions / roth_401k_contributions /
+    hsa_contributions)."""
+    known = _TRAD_CODES | _ROTH_CODES | _HSA_PAYROLL_CODES
+    seen: dict[str, Decimal] = {}
+    for line in region_text.splitlines():
+        for m in _W2_BOX12_LOOSE.finditer(line):
+            code = m.group(1).upper()
+            if code not in known:
+                continue
+            try:
+                v = _money(m.group(2))
+            except InvalidOperation:
+                continue
+            if v <= 0:
+                continue
+            if v > seen.get(code, Decimal(0)):
+                seen[code] = v
+    out: dict[str, Decimal] = {}
+    trad = sum((v for k, v in seen.items() if k in _TRAD_CODES), Decimal(0))
+    roth = sum((v for k, v in seen.items() if k in _ROTH_CODES), Decimal(0))
+    hsa = sum((v for k, v in seen.items() if k in _HSA_PAYROLL_CODES), Decimal(0))
+    if trad > 0:
+        out["traditional_401k_contributions"] = trad
+    if roth > 0:
+        out["roth_401k_contributions"] = roth
+    if hsa > 0:
+        out["hsa_contributions"] = hsa
+    return out
+
+
+def _extract_w2_box12_dedup(text: str) -> dict[str, Decimal]:
+    """Box 12 extractor for standalone W-2 PDFs. Splits the text into
+    per-copy regions, parses each region, and deduplicates identical
+    copies by fingerprint. Two different W-2s for the same person
+    (multi-job, spouse) will fingerprint differently and sum; four
+    copies of the same W-2 (ADP-style) will fingerprint identically
+    and count once."""
+    if not _W2_FINGERPRINT.search(text):
+        return {}
+    parts = _W2_COPY_DELIMITER.split(text)
+    if len(parts) < 2:
+        # No copy delimiter — fall back to the strict box-12-marker parser.
+        return _extract_w2_box12_deferrals(text)
+    regions = parts[1:]  # drop the prefix before the first W-2 marker
+    seen_fps: set[str] = set()
+    totals: dict[str, Decimal] = {}
+    for region in regions:
+        region_box12 = _extract_w2_box12_per_region(region)
+        if not region_box12:
+            continue
+        fp = "|".join(f"{k}={v}" for k, v in sorted(region_box12.items()))
+        if fp in seen_fps:
+            continue
+        seen_fps.add(fp)
+        for k, v in region_box12.items():
+            totals[k] = totals.get(k, Decimal(0)) + v
+    return totals
+
+
+def _is_w2_only_pdf(pages: list[str], path: Path | None = None) -> bool:
+    """True iff the PDF text shows W-2 letterhead but no actual Form 1040
+    on any page. We detect via three signals (pdfplumber text alone isn't
+    reliable: vendor PDFs sometimes break "Wage and Tax\\nStatement"
+    across newlines, and the W-2 instructions page narratively references
+    "Form 1040" without containing one):
+      1. OMB No. 1545-0029 anywhere → W-2 OMB number, definitive
+      2. "Wage and Tax Statement" via pdfplumber pages OR pypdf text
+      3. AND no OMB No. 1545-0074 (the 1040 OMB number) anywhere
+    """
+    joined = "\n".join(pages)
+    has_w2_omb = re.search(r"OMB\s*No\.?\s*1545-0029", joined, re.IGNORECASE)
+    has_w2_letterhead = any(_W2_ONLY_MARKER.search(p) for p in pages)
+    # Try pypdf as a backup source for the W-2 letterhead match — pdfplumber
+    # frequently splits the multi-line title. We also look at pypdf text for
+    # the OMB number, which sometimes lives on a different page.
+    if path is not None and not (has_w2_omb and has_w2_letterhead):
+        pypdf_pages = _extract_w2_text_via_pypdf(path)
+        if pypdf_pages:
+            pypdf_joined = "\n".join(pypdf_pages)
+            if not has_w2_omb:
+                has_w2_omb = re.search(
+                    r"OMB\s*No\.?\s*1545-0029", pypdf_joined, re.IGNORECASE
+                )
+            if not has_w2_letterhead:
+                has_w2_letterhead = any(
+                    _W2_ONLY_MARKER.search(p) for p in pypdf_pages
+                )
+            joined = joined + "\n" + pypdf_joined  # for the 1040 check below
+    if not (has_w2_omb or has_w2_letterhead):
         return False
-    has_1040 = any(_FORM_1040_MARKER.search(p) for p in pages)
+    # Negative signal: actual 1040 form present.
+    #   * If we have the W-2 OMB number, that's a strong positive — only
+    #     reject on the 1040 OMB number (narrative "Form 1040" references
+    #     in W-2 instruction text don't disqualify).
+    #   * If we only have the letterhead (no OMB-level confirmation), be
+    #     conservative: any "Form 1040" prose disqualifies, mirroring the
+    #     pre-OMB behavior.
+    if has_w2_omb:
+        has_1040_omb = re.search(
+            r"OMB\s*No\.?\s*1545-0074", joined, re.IGNORECASE
+        )
+        return not has_1040_omb
+    has_1040 = bool(_FORM_1040_MARKER.search(joined))
     return not has_1040
 
 
@@ -1732,26 +1894,42 @@ def _import_w2_standalone(
     """Build an `Imported` for a standalone W-2 PDF. The resulting Return
     is a stub with only year + W-2 box-12 buckets populated; the service
     layer merges it into an existing Return for the same tax year."""
-    # Year: try every available text stream so layout/default differences
-    # don't drop the detection.
-    tax_year: int | None = _detect_year(default_pages)
-    if tax_year is None:
-        for stream in layout_streams:
-            tax_year = _detect_year(stream)
-            if tax_year is not None:
-                break
+    # pypdf walks the PDF content stream in document order and produces
+    # cleaner per-copy text for vendor-rendered W-2s (notably ADP, where
+    # pdfplumber's column clustering corrupts the Box 12 column). We use
+    # it as the primary source for both year detection and Box 12 parsing,
+    # falling back to the pdfplumber streams if pypdf returned nothing.
+    pypdf_pages = _extract_w2_text_via_pypdf(path)
+
+    # Year: try every available text source. The 1040-flavored detector
+    # runs first (matches third-party "Tax Year: 2025" cover pages), then
+    # the W-2-specific detector against the form itself.
+    candidate_sources: list[list[str]] = []
+    if pypdf_pages:
+        candidate_sources.append(pypdf_pages)
+    candidate_sources.append(default_pages)
+    candidate_sources.extend(layout_streams)
+
+    tax_year: int | None = None
+    for src in candidate_sources:
+        tax_year = _detect_year(src) or _detect_w2_year(src)
+        if tax_year is not None:
+            break
     if tax_year is None:
         raise ValueError(
             "Could not detect a tax year on this W-2 PDF. The W-2 must "
             "show a 4-digit year (e.g. '2024 Wage and Tax Statement')."
         )
 
-    # Box 12: feed the joined text from every stream so multi-column W-2
-    # layouts that one stream splits awkwardly are still recovered.
-    joined = "\n".join(default_pages)
-    for stream in layout_streams:
-        joined += "\n" + "\n".join(stream)
-    box12 = _extract_w2_box12_deferrals(joined)
+    # Box 12: try each text source in order; first source that yields
+    # non-empty results wins. The dedup parser handles ADP-style 4-copy
+    # PDFs by fingerprinting per-region box-12 sets.
+    box12: dict[str, Decimal] = {}
+    for src in candidate_sources:
+        joined = "\n".join(src)
+        box12 = _extract_w2_box12_dedup(joined)
+        if box12:
+            break
 
     if not box12:
         raise ValueError(
@@ -1811,7 +1989,7 @@ def import_pdf(path: Path) -> Imported:
     all_streams_text = list(default_pages)
     for stream in layout_streams:
         all_streams_text.extend(stream)
-    if _is_w2_only_pdf(all_streams_text):
+    if _is_w2_only_pdf(all_streams_text, path=path):
         return _import_w2_standalone(path, default_pages, layout_streams)
 
     # A page qualifies as a real IRS form page if EITHER its default text or

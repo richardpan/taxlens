@@ -44,6 +44,88 @@ def test_no_w2_marker_not_classified():
     assert _is_w2_only_pdf(pages) is False
 
 
+def test_w2_with_omb_overrides_narrative_form_1040_mentions():
+    """ADP-style W-2 PDFs include an instructions page that narratively
+    references 'Form 1040' multiple times. The W-2 OMB number (1545-0029)
+    is a strong positive signal that should override prose mentions."""
+    pages = [
+        "W-2 Wage and Tax Statement 2025\nOMB No. 1545-0029\n"
+        "MICROSOFT CORPORATION\nD 23500.00\nW 8550.00\n",
+        "Instructions for Employee\nBox 1. Enter this amount on the wages "
+        "line of your tax return.\nSee the Form 1040 instructions to "
+        "determine if you are required to complete Form 8959.\n",
+    ]
+    assert _is_w2_only_pdf(pages) is True
+
+
+# ─── ADP-style multi-copy dedup ─────────────────────────────────────────────
+
+
+def test_box12_dedup_handles_4_identical_copies():
+    """ADP renders 4 identical W-2 copies (Reference / Federal / State /
+    City) on a single page. Naive summing across the joined text would
+    produce 4× the actual values. The dedup parser fingerprints each
+    region and counts identical copies once."""
+    from taxlens.importers.pdf._core import _extract_w2_box12_dedup
+
+    text = "\n".join([
+        "Employee Reference Copy",
+        "W-2 Wage and Tax Statement 2025 OMB No. 1545-0029",
+        "MICROSOFT CORPORATION",
+        "D 23500.00",
+        "W 8550.00",
+        "Federal Filing Copy",
+        "W-2 Wage and Tax Statement 2025 OMB No. 1545-0029",
+        "MICROSOFT CORPORATION",
+        "D 23500.00",
+        "W 8550.00",
+        "State Filing Copy",
+        "W-2 Wage and Tax Statement 2025 OMB No. 1545-0029",
+        "MICROSOFT CORPORATION",
+        "D 23500.00",
+        "W 8550.00",
+        "City or Local Filing Copy",
+        "W-2 Wage and Tax Statement 2025 OMB No. 1545-0029",
+        "MICROSOFT CORPORATION",
+        "D 23500.00",
+        "W 8550.00",
+    ])
+    out = _extract_w2_box12_dedup(text)
+    # 4 identical copies → counted once, not summed to 4× $23,500.
+    assert out["traditional_401k_contributions"] == Decimal("23500.00")
+    assert out["hsa_contributions"] == Decimal("8550.00")
+
+
+def test_box12_dedup_sums_two_distinct_w2s():
+    """Two distinct W-2s for the same person (multiple jobs / spouse)
+    should fingerprint differently and SUM, not dedup."""
+    from taxlens.importers.pdf._core import _extract_w2_box12_dedup
+
+    text = "\n".join([
+        "W-2 Wage and Tax Statement 2024 OMB No. 1545-0029",
+        "ACME CORP",
+        "D 15000.00",
+        "W 3000.00",
+        "W-2 Wage and Tax Statement 2024 OMB No. 1545-0029",
+        "BETA LLC",
+        "D 8000.00",
+        "W 1500.00",
+    ])
+    out = _extract_w2_box12_dedup(text)
+    assert out["traditional_401k_contributions"] == Decimal("23000.00")
+    assert out["hsa_contributions"] == Decimal("4500.00")
+
+
+def test_w2_year_detection_handles_w2_specific_anchors():
+    """W-2 PDFs use 'Wage and Tax Statement YYYY' or 'YYYY W-2' rather
+    than 1040-style anchors; the dedicated detector picks them up."""
+    from taxlens.importers.pdf._core import _detect_w2_year
+
+    assert _detect_w2_year(["W-2 Wage and Tax Statement 2025"]) == 2025
+    assert _detect_w2_year(["2024 W-2 and EARNINGS SUMMARY"]) == 2024
+    assert _detect_w2_year(["OMB No. 1545-0029  Tax Year 2023"]) == 2023
+
+
 # ─── merge path ─────────────────────────────────────────────────────────────
 
 
