@@ -1715,29 +1715,17 @@ def _recover_form_8889(
 # The resulting `Imported` has `source="pdf-w2"`; the service layer
 # special-cases it and merges box-12 contributions into the existing
 # Return for the same tax year (additive, so multiple W-2s sum correctly).
-_FORM_1040_MARKER = re.compile(r"\bForm\s+1040\b", re.IGNORECASE)
-_W2_ONLY_MARKER = re.compile(r"Wage\s+and\s+Tax\s+Statement", re.IGNORECASE)
 
 
 # W-2-specific year detection. The 1040-flavored YEAR_PATTERNS don't fire on
-# standalone W-2s because they look for "Form 1040" / "U.S. Individual" /
-# OMB 1545-0074 anchors. W-2s use OMB 1545-0008 (and sometimes 1545-0029 in
-# vendor-rendered variants — strictly Form 941's OMB but it shows up in
-# certain ADP W-2 outputs) plus "Wage and Tax Statement", and most vendor
-# formats (ADP, Paychex, Intuit) print the year alongside the form name in
-# a few predictable ways.
-_W2_OMB_RE = re.compile(
-    r"OMB\s*No\.?\s*1545-(?:0008|0029)", re.IGNORECASE
-)
+# standalone W-2s because they look for "Form 1040" / "U.S. Individual"
+# anchors. W-2s print the year alongside the form name in a few predictable
+# ways across every vendor format (ADP, Paychex, Intuit, hand-filled IRS).
 _W2_YEAR_PATTERNS = [
     re.compile(r"\b(20\d{2})\s+W-?2\b", re.IGNORECASE),
     re.compile(r"Statement\s+(20\d{2})\b", re.IGNORECASE),
     re.compile(r"Wage\s+and\s+Tax[^\n]{0,80}?\b(20\d{2})\b", re.IGNORECASE),
     re.compile(r"\b(20\d{2})\b[^\n]{0,80}?Wage\s+and\s+Tax", re.IGNORECASE),
-    re.compile(
-        r"OMB\s*No\.?\s*1545-(?:0008|0029)[\s\S]{0,200}?\b(20\d{2})\b",
-        re.IGNORECASE,
-    ),
 ]
 
 
@@ -1843,39 +1831,83 @@ def _extract_w2_box12_dedup(text: str) -> dict[str, Decimal]:
     return totals
 
 
+# ──────────────────── Standalone W-2 detection ────────────────────
+#
+# A "standalone W-2 PDF" is one that contains the W-2 form itself but
+# not a Form 1040. The naive approach (look for "Form 1040" prose) fails
+# because the W-2 instructions page narratively references the 1040
+# several times ("See the Form 1040 instructions..."). The actual form
+# structure is a much more reliable discriminator.
+#
+# We detect based on labels that the IRS / vendor forms themselves print,
+# because those labels are also what we extract data from — the signal
+# and the data live on the same fields:
+#
+#   * W-2 present iff any W-2 form label appears. These labels are the
+#     document subtitle ("Wage and Tax Statement"), the Box 1 label
+#     ("Wages, tips, other comp[ensation]"), or the ADP/Paychex earnings-
+#     summary cover page header.
+#   * 1040 present iff any Form 1040 structural label appears. These are
+#     labels that ONLY the 1040 form itself prints — the document subtitle
+#     ("U.S. Individual Income Tax Return"), the AGI line label, or the
+#     filing-status checkbox cluster.
+#
+# A 1040 instructions page mentions "Form 1040" in prose without printing
+# any of those structural labels. A W-2 instructions page mentions "Form
+# 1040" in prose without printing any of those structural labels either.
+# Standalone W-2 = W-2 present AND 1040 absent.
+_W2_STRUCTURAL_LABELS = [
+    # Form subtitle as the IRS prints it on the W-2.
+    re.compile(r"Wage\s+and\s+Tax\s+Statement", re.IGNORECASE),
+    # Box 1 label — the field we read for wages.
+    re.compile(r"Wages,?\s+tips,?\s+other\s+comp", re.IGNORECASE),
+    # ADP/Paychex cover-page header.
+    re.compile(r"W-?2\s+and\s+EARNINGS\s+SUMMARY", re.IGNORECASE),
+]
+_FORM_1040_STRUCTURAL_LABELS = [
+    # Document subtitle as the IRS prints it on Form 1040 itself. This
+    # phrase doesn't appear anywhere on a W-2 (form or instructions).
+    re.compile(r"U\.?S\.?\s+Individual\s+Income\s+Tax\s+Return", re.IGNORECASE),
+    # Form 1040 line 11 with its line number — the structural label, not
+    # a narrative prose reference. We require the line number prefix
+    # because W-2 instructions use the phrase "adjusted gross income"
+    # mid-sentence (e.g. EITC eligibility blurb).
+    re.compile(
+        r"(?:^|\n)\s*11\b[^\n]{0,40}Adjusted\s+gross\s+income",
+        re.IGNORECASE,
+    ),
+    # 1040 line 12 standard deduction with line number prefix.
+    re.compile(
+        r"(?:^|\n)\s*12\b[^\n]{0,40}Standard\s+deduction",
+        re.IGNORECASE,
+    ),
+    # Form 1040 / 1040-SR variant header text. Plain "Form 1040" alone
+    # appears in W-2 instructions narratively ("See the Form 1040
+    # instructions"); requiring the year-parenthetical or -SR suffix
+    # avoids that false positive.
+    re.compile(r"Form\s+1040(?:-SR|\s*\(20\d{2}\))", re.IGNORECASE),
+]
+
+
 def _is_w2_only_pdf(sources: "TextSources") -> bool:
-    """True iff the PDF text shows W-2 letterhead but no actual Form 1040
-    on any page. We detect via three signals (pdfplumber text alone isn't
-    reliable: vendor PDFs sometimes break "Wage and Tax\\nStatement"
-    across newlines, and the W-2 instructions page narratively references
-    "Form 1040" without containing one):
-      1. OMB No. 1545-0008 anywhere → W-2 OMB number, definitive
-         (also accept 1545-0029 which some ADP variants emit)
-      2. "Wage and Tax Statement" via pdfplumber pages OR pypdf text
-      3. AND no OMB No. 1545-0074 (the 1040 OMB number) anywhere
+    """True iff the PDF contains the W-2 form structure but not Form 1040.
+
+    Detection is based on labels that the form itself prints — the same
+    labels we extract values from. Narrative references to "Form 1040"
+    in the W-2 instructions page don't qualify as a 1040 because they
+    don't include any of the 1040's structural labels.
     """
     pages = sources.default_pages
     pypdf_pages = sources.pypdf_pages
+    # Some pdfplumber outputs break multi-word labels across newlines that
+    # the regex would otherwise match; pypdf usually preserves them. Join
+    # both before searching so a label split in one stream still matches in
+    # the other.
     joined = "\n".join(pages) + "\n" + "\n".join(pypdf_pages)
-    has_w2_omb = _W2_OMB_RE.search(joined)
-    has_w2_letterhead = any(
-        _W2_ONLY_MARKER.search(p) for p in (*pages, *pypdf_pages)
-    )
-    if not (has_w2_omb or has_w2_letterhead):
+    has_w2 = any(p.search(joined) for p in _W2_STRUCTURAL_LABELS)
+    if not has_w2:
         return False
-    # Negative signal: actual 1040 form present.
-    #   * If we have the W-2 OMB number, that's a strong positive — only
-    #     reject on the 1040 OMB number (narrative "Form 1040" references
-    #     in W-2 instruction text don't disqualify).
-    #   * If we only have the letterhead (no OMB-level confirmation), be
-    #     conservative: any "Form 1040" prose disqualifies, mirroring the
-    #     pre-OMB behavior.
-    if has_w2_omb:
-        has_1040_omb = re.search(
-            r"OMB\s*No\.?\s*1545-0074", joined, re.IGNORECASE
-        )
-        return not has_1040_omb
-    has_1040 = bool(_FORM_1040_MARKER.search(joined))
+    has_1040 = any(p.search(joined) for p in _FORM_1040_STRUCTURAL_LABELS)
     return not has_1040
 
 

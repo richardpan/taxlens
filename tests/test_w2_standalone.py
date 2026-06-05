@@ -49,22 +49,38 @@ def test_no_w2_marker_not_classified():
     assert _is_w2_only_pdf(_sources(pages)) is False
 
 
-def test_w2_with_omb_overrides_narrative_form_1040_mentions():
-    """ADP-style W-2 PDFs include an instructions page that narratively
-    references 'Form 1040' multiple times. The W-2 OMB number (1545-0008,
-    or vendor-variant 1545-0029) is a strong positive signal that should
-    override prose mentions."""
-    for omb in ("1545-0008", "1545-0029"):
-        pages = [
-            f"W-2 Wage and Tax Statement 2025\nOMB No. {omb}\n"
-            "MICROSOFT CORPORATION\nD 23500.00\nW 8550.00\n",
-            "Instructions for Employee\nBox 1. Enter this amount on the wages "
-            "line of your tax return.\nSee the Form 1040 instructions to "
-            "determine if you are required to complete Form 8959.\n",
-        ]
-        assert _is_w2_only_pdf(_sources(pages)) is True, (
-            f"Expected W-2 with OMB {omb} to override narrative Form 1040"
-        )
+def test_w2_with_form_structure_overrides_narrative_form_1040_mentions():
+    """W-2 PDFs include an instructions page that narratively references
+    'Form 1040' many times. Detection is based on the form's structural
+    labels, not on narrative references, so the standalone path still
+    fires as long as no actual 1040 structural label is present."""
+    pages = [
+        # Page 1: W-2 form labels — what we actually extract data from.
+        "W-2 Wage and Tax Statement 2025\n"
+        "MICROSOFT CORPORATION\n"
+        "1 Wages, tips, other comp.  2 Federal income tax withheld\n"
+        "D 23500.00\nW 8550.00\n",
+        # Page 2: Instructions — mentions Form 1040 in prose but doesn't
+        # print any structural 1040 labels (no AGI line, no subtitle).
+        "Instructions for Employee\nBox 1. Enter this amount on the wages "
+        "line of your tax return.\nSee the Form 1040 instructions to "
+        "determine if you are required to complete Form 8959.\n",
+    ]
+    assert _is_w2_only_pdf(_sources(pages)) is True
+
+
+def test_pdf_with_1040_structural_label_not_classified_as_w2_only():
+    """If a PDF contains an actual 1040 structural label (subtitle or AGI
+    line), it's a 1040 — possibly with a bundled W-2 — and should NOT
+    take the standalone W-2 fast path even when W-2 labels are present."""
+    pages = [
+        "Form 1040 (2024)\n"
+        "U.S. Individual Income Tax Return\n"  # 1040 subtitle — structural
+        "Wages, salaries, tips ... 1a  80,000\n"
+        "Adjusted gross income .... 11  78,000\n",  # AGI line — structural
+        "Wage and Tax Statement\nBox 12a D 23,000.00\n",
+    ]
+    assert _is_w2_only_pdf(_sources(pages)) is False
 
 
 # ─── ADP-style multi-copy dedup ─────────────────────────────────────────────
@@ -132,7 +148,7 @@ def test_w2_year_detection_handles_w2_specific_anchors():
 
     assert _detect_w2_year(["W-2 Wage and Tax Statement 2025"]) == 2025
     assert _detect_w2_year(["2024 W-2 and EARNINGS SUMMARY"]) == 2024
-    assert _detect_w2_year(["OMB No. 1545-0029  Tax Year 2023"]) == 2023
+    assert _detect_w2_year(["W-2 Wage and Tax Statement\n2023"]) == 2023
 
 
 # ─── merge path ─────────────────────────────────────────────────────────────
