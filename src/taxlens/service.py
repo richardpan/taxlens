@@ -130,6 +130,13 @@ class TaxLensService:
         return self._store(imp)
 
     def _store(self, imp: Imported) -> tuple[StoredReturn, TaxResult, list[str]]:
+        # Standalone W-2 PDFs don't compute a return on their own — they
+        # carry only Box 12 buckets that augment an existing year's return.
+        # Find the matching year and merge additively (multiple W-2s for
+        # the same year sum together: spouse + employee, or two jobs).
+        if imp.source == "pdf-w2":
+            return self._attach_w2(imp)
+
         result = compute(imp.ret)
         with self.sessionmaker_() as s:
             # Replace any existing row with the same hash (idempotent re-import).
@@ -157,6 +164,49 @@ class TaxLensService:
             # After any import, recompute the carryforward chain so the new
             # return inherits prior-year losses (and propagates its own).
             self._reflow_carryforwards()
+            return row, result, imp.warnings
+
+    def _attach_w2(self, imp: Imported) -> tuple[StoredReturn, TaxResult, list[str]]:
+        """Merge a standalone W-2 import into the existing Return for the
+        same tax year. Box-12 buckets (trad/Roth 401k, HSA payroll) sum
+        additively so a user's spouse or second-job W-2 stacks correctly."""
+        with self.sessionmaker_() as s:
+            row = s.execute(
+                select(StoredReturn)
+                .where(StoredReturn.tax_year == imp.ret.tax_year)
+                .order_by(StoredReturn.imported_at.desc())
+            ).scalars().first()
+            if row is None:
+                raise ValueError(
+                    f"No existing return found for tax year {imp.ret.tax_year}. "
+                    f"Import the 1040 PDF for {imp.ret.tax_year} first, then "
+                    f"re-add the W-2."
+                )
+            current = Return(**json.loads(row.return_json))
+            merged = current.model_copy(update={
+                "traditional_401k_contributions": (
+                    current.traditional_401k_contributions
+                    + imp.ret.traditional_401k_contributions
+                ),
+                "roth_401k_contributions": (
+                    current.roth_401k_contributions
+                    + imp.ret.roth_401k_contributions
+                ),
+                "hsa_contributions": (
+                    current.hsa_contributions + imp.ret.hsa_contributions
+                ),
+                "w2_data_present": True,
+            })
+            result = compute(merged)
+            row.return_json = dumps(merged.model_dump(mode="json"))
+            if row.cache is not None:
+                row.cache.result_json = dumps(result.model_dump(mode="json"))
+            else:
+                row.cache = ComputationCache(
+                    result_json=dumps(result.model_dump(mode="json"))
+                )
+            s.commit()
+            s.refresh(row)
             return row, result, imp.warnings
 
     # ── multi-year carryforward chain ────────────────────────────────────────

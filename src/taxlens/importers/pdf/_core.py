@@ -1702,6 +1702,88 @@ def _recover_form_8889(
     return form_8889_present
 
 
+# ─── Standalone W-2 PDF support ─────────────────────────────────────────────
+#
+# Some users have W-2s that aren't bundled into their 1040 PDF (employer
+# digital W-2 issued separately). When the user drops a W-2-only PDF, we
+# detect it BEFORE running the 1040 form-page filter (which would discard
+# every page as non-1040) and route it through `_import_w2_standalone`.
+# The resulting `Imported` has `source="pdf-w2"`; the service layer
+# special-cases it and merges box-12 contributions into the existing
+# Return for the same tax year (additive, so multiple W-2s sum correctly).
+_FORM_1040_MARKER = re.compile(r"\bForm\s+1040\b", re.IGNORECASE)
+_W2_ONLY_MARKER = re.compile(r"Wage\s+and\s+Tax\s+Statement", re.IGNORECASE)
+
+
+def _is_w2_only_pdf(pages: list[str]) -> bool:
+    """True iff the PDF text shows W-2 letterhead but no Form 1040 marker
+    on any page. We require the W-2 letterhead specifically (not just
+    "Box 12") because a 1040-with-bundled-W-2 also has Box 12 markers."""
+    has_w2 = any(_W2_ONLY_MARKER.search(p) for p in pages)
+    if not has_w2:
+        return False
+    has_1040 = any(_FORM_1040_MARKER.search(p) for p in pages)
+    return not has_1040
+
+
+def _import_w2_standalone(
+    path: Path, default_pages: list[str], layout_streams: list[list[str]]
+) -> Imported:
+    """Build an `Imported` for a standalone W-2 PDF. The resulting Return
+    is a stub with only year + W-2 box-12 buckets populated; the service
+    layer merges it into an existing Return for the same tax year."""
+    # Year: try every available text stream so layout/default differences
+    # don't drop the detection.
+    tax_year: int | None = _detect_year(default_pages)
+    if tax_year is None:
+        for stream in layout_streams:
+            tax_year = _detect_year(stream)
+            if tax_year is not None:
+                break
+    if tax_year is None:
+        raise ValueError(
+            "Could not detect a tax year on this W-2 PDF. The W-2 must "
+            "show a 4-digit year (e.g. '2024 Wage and Tax Statement')."
+        )
+
+    # Box 12: feed the joined text from every stream so multi-column W-2
+    # layouts that one stream splits awkwardly are still recovered.
+    joined = "\n".join(default_pages)
+    for stream in layout_streams:
+        joined += "\n" + "\n".join(stream)
+    box12 = _extract_w2_box12_deferrals(joined)
+
+    if not box12:
+        raise ValueError(
+            "Detected a W-2 PDF but couldn't read any Box 12 codes "
+            "(D, AA, W, etc.). Edit 401(k) / HSA payroll values on "
+            "the year's What-if tab instead."
+        )
+
+    stub = Return(
+        tax_year=tax_year,
+        filing_status=FilingStatus.SINGLE,  # placeholder; service merges into existing
+        traditional_401k_contributions=box12.get(
+            "traditional_401k_contributions", Decimal(0)
+        ),
+        roth_401k_contributions=box12.get("roth_401k_contributions", Decimal(0)),
+        hsa_contributions=box12.get("hsa_contributions", Decimal(0)),
+        w2_data_present=True,
+    )
+    summary_parts = [f"{k}=${int(v):,}" for k, v in box12.items()]
+    warnings = [
+        f"Standalone W-2 detected for tax year {tax_year}: "
+        + ", ".join(summary_parts)
+    ]
+    return Imported(
+        ret=stub,
+        source="pdf-w2",
+        source_hash=sha256_file(path),
+        source_filename=path.name,
+        warnings=warnings,
+    )
+
+
 def import_pdf(path: Path) -> Imported:
     from taxlens.importers.import_log import ImportLogger, logging_enabled
     logger: ImportLogger | None = ImportLogger(source_path=path) if logging_enabled() else None
@@ -1720,6 +1802,18 @@ def import_pdf(path: Path) -> Imported:
     acroform_meta = extract_acroform_meta(path) if acroform_fields else {}
 
     default_pages, layout_streams, ocr_used = _extract_text_per_page(path)
+
+    # ── Standalone W-2 fast path ────────────────────────────────────────
+    # If the PDF shows W-2 letterhead but no Form 1040 marker on any page,
+    # treat it as a standalone W-2 attachment. Run the check against the
+    # default text AND every layout stream so spacing differences in one
+    # stream don't cause a misclassification.
+    all_streams_text = list(default_pages)
+    for stream in layout_streams:
+        all_streams_text.extend(stream)
+    if _is_w2_only_pdf(all_streams_text):
+        return _import_w2_standalone(path, default_pages, layout_streams)
+
     # A page qualifies as a real IRS form page if EITHER its default text or
     # any of its layout-reconstructed texts shows IRS-form markers, and no
     # stream shows an explicit summary marker.
