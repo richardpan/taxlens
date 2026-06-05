@@ -1632,6 +1632,7 @@ async function renderAdvisor() {
   // how the rest of the page is organized. Cross-year patterns stay
   // available via an "All years" option for users who want the union.
   const picker = document.getElementById('advisorYearPicker');
+  const pickerWrap = picker ? picker.closest('.flex.items-center') : null;
   if (picker) {
     const years = data.per_year.map(p => p.tax_year).sort((a, b) => b - a);
     const opts = ['<option value="all">All years</option>']
@@ -1639,6 +1640,7 @@ async function renderAdvisor() {
     picker.innerHTML = opts.join('');
     if (years.length) picker.value = String(years[0]);
     picker.onchange = () => _redrawAdvisor(data);
+    if (pickerWrap) pickerWrap.classList.toggle('hidden', years.length === 0);
   }
   _redrawAdvisor(data);
 }

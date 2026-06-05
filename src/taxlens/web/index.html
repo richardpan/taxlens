@@ -284,9 +284,12 @@
 
 <!-- ─── Advisor ─── -->
 <section id="tab-advisor" class="tab-panel hidden">
-  <div class="flex items-baseline justify-between mb-1">
+  <div class="flex items-baseline justify-between mb-1 gap-3 flex-wrap">
     <h2 class="text-2xl font-bold">Tax Savings Advisor ✨</h2>
-    <div class="text-sm text-slate-500">Pattern-matched recommendations from your returns</div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-slate-500" for="advisorYearPicker">Tax year</label>
+      <select id="advisorYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+    </div>
   </div>
   <p class="text-slate-500 mb-6">Each suggestion shows an estimated annual savings. <strong>Not tax advice</strong> — review with a CPA before acting.</p>
 
@@ -294,12 +297,8 @@
 
   <div id="advisorSavingsCard" class="bg-white rounded-2xl border border-slate-200 p-5 mb-8 hidden">
     <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
-      <div class="font-semibold" data-help="Horizontal bar chart of your top advisor recommendations sorted by estimated annual savings. The widest bar is the single highest-value action. Filter by tax year to avoid duplicating the same recommendation across multiple years (e.g. an HSA contribution suggestion will fire for every year that's eligible).">Top opportunities by estimated savings</div>
-      <div class="flex items-center gap-2">
-        <label class="text-xs text-slate-500">Year</label>
-        <select id="advisorYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
-        <span class="text-xs text-slate-500">Hover bars for full rationale</span>
-      </div>
+      <div class="font-semibold" data-help="Horizontal bar chart of your top advisor recommendations sorted by estimated annual savings. The widest bar is the single highest-value action. Use the year picker at the top of the page to filter by tax year and avoid duplicating the same recommendation across multiple years (e.g. an HSA contribution suggestion will fire for every year that's eligible).">Top opportunities by estimated savings</div>
+      <span class="text-xs text-slate-500">Hover bars for full rationale</span>
     </div>
     <svg id="advisorSavingsChart" viewBox="0 0 800 360" class="w-full"></svg>
   </div>
