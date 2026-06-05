@@ -307,6 +307,7 @@ function renderDashboard() {
     drawRateLine(fulls);
     drawTaxCompositionTable(fulls);
     drawTaxStack(fulls);
+    drawW2Comp(fulls);
     drawCarryforwards(fulls);
   });
 }
@@ -658,7 +659,107 @@ function drawCarryforwards(fulls) {
   });
 }
 
-// ─── year detail ───────────────────────────────────────────────────────────
+// ─── W-2 compensation breakdown ─────────────────────────────────────────
+//
+// Pulls the four buckets that constitute total W-2 gross comp:
+//   • Box 1 wages (post-deferral) — already in `ret.wages`
+//   • Trad 401(k) (Box 12 D) — pre-tax, NOT in Box 1, must be added back
+//   • Roth 401(k) (Box 12 AA) — post-tax, IS in Box 1; we subtract it
+//     from the wages bar and show it as its own slice so the Roth share
+//     of comp is visible without double-counting
+//   • HSA via payroll (Box 12 W) — pre-tax cafeteria plan, NOT in Box 1
+//
+// Bar height = Box 1 + Trad 401(k) + HSA = total gross comp; Roth slice
+// is carved out of Box 1 visually.
+const _W2_LIMITS = {
+  // IRS §402(g) employee elective-deferral cap (Trad + Roth 401(k) combined),
+  // and §223 HSA self-only contribution cap. These are conservative
+  // (self-only) HSA caps — family coverage is roughly 2× and we don't know
+  // the user's coverage type from the W-2 alone, so we show "% of self-only
+  // cap" as a directional indicator.
+  2018: { def: 18500, hsa: 3450 },
+  2019: { def: 19000, hsa: 3500 },
+  2020: { def: 19500, hsa: 3550 },
+  2021: { def: 19500, hsa: 3600 },
+  2022: { def: 20500, hsa: 3650 },
+  2023: { def: 22500, hsa: 3850 },
+  2024: { def: 23000, hsa: 4150 },
+  2025: { def: 23500, hsa: 4300 },
+  2026: { def: 24500, hsa: 4400 },
+};
+
+function _w2YearsWithData(fulls) {
+  return fulls.filter(f => f.return && f.return.w2_data_present);
+}
+
+function drawW2Comp(fulls) {
+  const card = document.getElementById('w2CompCard');
+  if (!card) return;
+  const w2Fulls = _w2YearsWithData(fulls);
+  if (w2Fulls.length === 0) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  const years = w2Fulls.map(f => f.tax_year);
+  const num = (v) => Number(v || 0);
+  const trad = w2Fulls.map(f => num(f.return.traditional_401k_contributions));
+  const roth = w2Fulls.map(f => num(f.return.roth_401k_contributions));
+  const hsa  = w2Fulls.map(f => num(f.return.hsa_contributions));
+  const wagesBox1 = w2Fulls.map(f => num(f.return.wages));
+  // Box 1 already includes Roth 401(k). Carve it out so we can show the
+  // Roth slice separately without double-counting toward the bar total.
+  const wagesNonRoth = wagesBox1.map((w, i) => Math.max(0, w - roth[i]));
+
+  const datasets = [
+    { label: 'Box 1 wages (taxable)', data: wagesNonRoth, backgroundColor: '#0ea5e9' },
+    { label: 'Roth 401(k) (Box 12 AA)', data: roth,      backgroundColor: '#a855f7' },
+    { label: 'Trad 401(k) (Box 12 D)',  data: trad,      backgroundColor: '#10b981' },
+    { label: 'HSA via payroll (Box 12 W)', data: hsa,    backgroundColor: '#f59e0b' },
+  ].filter(ds => ds.data.some(v => v > 0));
+
+  recreate('w2Comp', {
+    type: 'bar',
+    data: { labels: years, datasets },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } },
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`,
+            footer: (items) => {
+              const total = items.reduce((s, it) => s + it.parsed.y, 0);
+              return `Total gross comp: ${fmt(total)}`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Per-year utilization strip beneath the chart.
+  const cells = w2Fulls.map((f, i) => {
+    const y = f.tax_year;
+    const lim = _W2_LIMITS[y];
+    const defCap = lim ? lim.def : null;
+    const hsaCap = lim ? lim.hsa : null;
+    const defUsed = trad[i] + roth[i];
+    const defPct = defCap ? Math.round(defUsed / defCap * 100) : null;
+    const hsaPct = hsaCap ? Math.round(hsa[i] / hsaCap * 100) : null;
+    const defLine = defCap
+      ? `<div>401(k): ${fmt(defUsed)} / ${fmt(defCap)} <span class="${defPct >= 100 ? 'text-emerald-600 font-semibold' : 'text-slate-500'}">(${defPct}%)</span></div>`
+      : `<div>401(k): ${fmt(defUsed)}</div>`;
+    const hsaLine = hsaCap
+      ? `<div>HSA: ${fmt(hsa[i])} / ${fmt(hsaCap)} <span class="${hsaPct >= 100 ? 'text-emerald-600 font-semibold' : 'text-slate-500'}">(${hsaPct}% self-only)</span></div>`
+      : `<div>HSA: ${fmt(hsa[i])}</div>`;
+    return `<div class="text-center"><div class="font-semibold text-slate-700">${y}</div>${defLine}${hsaLine}</div>`;
+  }).join('');
+  document.getElementById('w2CompUtilization').innerHTML = cells;
+}
+
 $('#yearPicker').addEventListener('change', renderYearDetail);
 async function renderYearDetail() {
   if (RETURNS.length === 0) return;
@@ -1891,6 +1992,8 @@ async function renderTrends() {
     document.getElementById('trendsRates').innerHTML = '';
     document.getElementById('trendsStack').innerHTML = '';
     document.getElementById('trendsTaxStack').innerHTML = '';
+    const w2Card = document.getElementById('trendsW2CompCard');
+    if (w2Card) w2Card.classList.add('hidden');
     document.getElementById('trendsYoyTable').innerHTML = '';
     return;
   }
@@ -1993,6 +2096,11 @@ async function renderTrends() {
   });
   drawStackedBars('trendsTaxStack', years, taxSeries);
 
+  // W-2 compensation breakdown (only renders if at least one year has W-2
+  // data). Same buckets as the dashboard card; uses the SVG stacked-bar
+  // primitive that the Trends tab already uses.
+  drawTrendsW2Comp(fulls);
+
   // YoY table — deltas inline alongside each year's value.
   // `goodWhen: 'up'` means an increase is good (income, credits, refund,
   // taxable income — more income to be taxed = more income earned) →
@@ -2082,6 +2190,30 @@ async function renderTrends() {
     document.getElementById('trendsAdvisorSavings').innerHTML =
       '<text x="20" y="40" font-size="13" fill="#94a3b8">Advisor data unavailable.</text>';
   }
+}
+
+function drawTrendsW2Comp(fulls) {
+  const card = document.getElementById('trendsW2CompCard');
+  if (!card) return;
+  const w2Fulls = _w2YearsWithData(fulls);
+  if (w2Fulls.length === 0) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  const years = w2Fulls.map(f => f.return.tax_year);
+  const num = (v) => Number(v || 0);
+  const trad = w2Fulls.map(f => num(f.return.traditional_401k_contributions));
+  const roth = w2Fulls.map(f => num(f.return.roth_401k_contributions));
+  const hsa  = w2Fulls.map(f => num(f.return.hsa_contributions));
+  const wagesNonRoth = w2Fulls.map((f, i) =>
+    Math.max(0, num(f.return.wages) - roth[i])
+  );
+  const series = [
+    { label: 'Box 1 wages',           color: '#0ea5e9', data: wagesNonRoth },
+    { label: 'Roth 401(k) (Box 12 AA)', color: '#a855f7', data: roth },
+    { label: 'Trad 401(k) (Box 12 D)',  color: '#10b981', data: trad },
+    { label: 'HSA via payroll (Box 12 W)', color: '#f59e0b', data: hsa },
+  ].filter(s => s.data.some(v => v > 0));
+  drawStackedBars('trendsW2Comp', years, series);
 }
 
 function drawBracketHeatmap(svgId, fulls) {

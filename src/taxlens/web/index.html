@@ -134,6 +134,14 @@
         </div>
         <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
+      <div id="w2CompCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
+        <div class="flex items-baseline justify-between mb-3">
+          <div class="font-semibold" data-help="Stacked bars showing your total W-2 compensation per year, broken down into Box 1 taxable wages plus the pre-tax / Roth deferrals that don't appear on Box 1: Traditional 401(k) (Box 12 code D — reduces Box 1), Roth 401(k) (Box 12 code AA — already in Box 1, shown separately so you can see the Roth slice), and HSA via payroll (Box 12 code W — reduces Box 1). The bar total is your gross W-2 compensation. Underneath each bar: contribution-vs-IRS-cap utilization for 401(k) and HSA so you can see year-over-year how close you got to maxing out.">W-2 compensation breakdown</div>
+          <div class="text-xs text-slate-500">Box 1 wages + payroll deferrals = total gross comp · Only years with a parsed W-2 are shown</div>
+        </div>
+        <div class="relative h-64"><canvas id="w2Comp"></canvas></div>
+        <div id="w2CompUtilization" class="mt-3 text-xs text-slate-500 grid grid-flow-col auto-cols-fr gap-2"></div>
+      </div>
       <div id="carryCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
         <div class="flex items-baseline justify-between mb-3">
           <div class="font-semibold" data-help="End-of-year balances for every carryforward bucket. Capital losses ($3k/year max offset against ordinary income, rest carries forward indefinitely); NOLs (Net Operating Losses — business losses carried to future years); AMT credit (refunds AMT paid on timing differences in earlier years); FTC (Foreign Tax Credit — foreign income tax paid that you couldn't use this year, expires after 10 years); charitable contribution carryovers (5-year limit); IRA basis (after-tax contributions tracked on Form 8606). Hover bars to see expiration windows.">Carryforward balances by year</div>
@@ -389,6 +397,13 @@
       </div>
       <svg id="trendsAdvisorSavings" viewBox="0 0 600 200" class="w-full h-48"></svg>
       <div id="trendsAdvisorSavingsEmpty" class="text-xs text-slate-400 italic mt-2 hidden">No advisor recommendations with estimated savings.</div>
+    </div>
+    <div id="trendsW2CompCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="font-semibold" data-help="W-2 compensation trend across years. Each bar = total gross comp (Box 1 wages + payroll-deferred Trad 401(k) + Roth 401(k) + HSA via payroll). Use to see how comp grew year over year and how the pre-tax savings rate evolved alongside it. Years without an imported W-2 (1040 only) are omitted because Box 12 isn't on the 1040.">W-2 compensation by year</div>
+        <div class="text-xs text-slate-500">Stacked: Box 1 + 401(k) + Roth 401(k) + HSA = total gross comp</div>
+      </div>
+      <svg id="trendsW2Comp" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div id="trendsCarryCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
       <div class="flex items-baseline justify-between mb-2">
