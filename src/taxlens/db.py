@@ -66,6 +66,14 @@ class StoredReturn(Base):
     # return-detail view so layout-only extractions stay visually
     # flagged for manual review.
     field_sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON list of W-2 imports merged into this return via the
+    # standalone-W-2 path. Each entry is
+    # ``{"filename": str, "imported_at": ISO-8601, "source_hash": str}``.
+    # Tracked separately because ``_attach_w2`` doesn't replace the
+    # parent return row, so the W-2's filename would otherwise be lost
+    # on app close. Surfaced on the Import tab so users see every file
+    # they've uploaded — 1040s and W-2s — when they reopen the app.
+    w2_imports_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cache: Mapped["ComputationCache | None"] = relationship(
         back_populates="ret", uselist=False, cascade="all, delete-orphan"
@@ -122,6 +130,7 @@ def _migrate_add_columns(eng) -> None:
     schema. Idempotent: skips columns that already exist."""
     additions = [
         ("returns", "field_sources_json", "TEXT"),
+        ("returns", "w2_imports_json", "TEXT"),
     ]
     with eng.begin() as conn:
         for table, col, ddl in additions:

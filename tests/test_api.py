@@ -157,3 +157,26 @@ def test_clear_all_returns_via_api(client) -> None:
     assert r.status_code == 200
     assert r.json() == {"deleted": 0}
 
+
+def test_list_imports_returns_persisted_grouping(client) -> None:
+    """The /api/imports endpoint groups every persisted upload into
+    `tax_returns` and `w2_imports`. The Import-tab UI calls this on
+    app load so users see what they uploaded after closing/reopening."""
+    yaml_path = _fixture_yaml()
+    with yaml_path.open("rb") as f:
+        r = client.post(
+            "/api/returns/import",
+            files={"file": ("mfj_2024_basic.yaml", f, "application/yaml")},
+        )
+    assert r.status_code == 200
+
+    out = client.get("/api/imports").json()
+    assert "tax_returns" in out and "w2_imports" in out
+    assert len(out["tax_returns"]) >= 1
+    tr = out["tax_returns"][0]
+    assert tr["tax_year"] == 2024
+    assert tr["source_filename"] == "mfj_2024_basic.yaml"
+    assert tr["source"]  # non-empty string
+    # No W-2 was uploaded so the w2 group is empty.
+    assert out["w2_imports"] == []
+

@@ -200,9 +200,92 @@ dz.addEventListener('drop', e => {
 });
 fi.addEventListener('change', () => uploadFiles([...fi.files]));
 
-async function uploadFiles(files) {
+// Helpers for the grouped import list. Each successful import lives in
+// its server-backed group ("tax-returns" or "w2s") so the list survives
+// app close. In-flight uploads (parsing/failed) live in a transient
+// "in-flight" group that's only relevant to the current session.
+function _importGroup(key) {
+  return document.querySelector(`[data-import-group="${key}"]`);
+}
+function _importRows(key) {
+  const g = _importGroup(key);
+  return g ? g.querySelector('[data-group-rows]') : null;
+}
+function _refreshImportListVisibility() {
   const list = $('#importList');
-  list.classList.remove('hidden');
+  if (!list) return;
+  let any = false;
+  for (const key of ['tax-returns', 'w2s', 'in-flight']) {
+    const g = _importGroup(key);
+    if (!g) continue;
+    const rows = _importRows(key);
+    const count = rows ? rows.children.length : 0;
+    g.classList.toggle('hidden', count === 0);
+    const cEl = g.querySelector('[data-group-count]');
+    if (cEl && key !== 'in-flight') {
+      cEl.textContent = count + ' file' + (count === 1 ? '' : 's');
+    }
+    if (count > 0) any = true;
+  }
+  list.classList.toggle('hidden', !any);
+}
+
+function _renderTaxReturnRow(rec) {
+  // rec: { id, tax_year, filing_status, source, source_filename, imported_at }
+  const fname = rec.source_filename || '(no filename)';
+  return `<div class="px-5 py-3 flex items-center justify-between" data-return-id="${rec.id}">
+    <div class="flex items-center gap-3 min-w-0">
+      <span class="text-emerald-600">✓</span>
+      <div class="min-w-0">
+        <div class="font-medium truncate">${fname}</div>
+        <div class="text-xs text-slate-500">TY ${rec.tax_year} · ${(rec.filing_status||'').toUpperCase()} · ${rec.source}</div>
+      </div>
+    </div>
+    <button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Remove this return"
+      onclick="removeImportedReturn(${rec.id}, ${rec.tax_year}, this.closest('[data-return-id]'))">🗑</button>
+  </div>`;
+}
+function _renderW2Row(rec) {
+  // rec: { return_id, tax_year, filename, imported_at, trad_401k, roth_401k, hsa }
+  const fname = rec.filename || '(no filename)';
+  const bits = [];
+  const n = (v) => Number(v || 0);
+  if (n(rec.trad_401k) > 0) bits.push('Trad 401(k) ' + fmt(n(rec.trad_401k)));
+  if (n(rec.roth_401k) > 0) bits.push('Roth 401(k) ' + fmt(n(rec.roth_401k)));
+  if (n(rec.hsa) > 0)       bits.push('HSA ' + fmt(n(rec.hsa)));
+  const summary = bits.length ? bits.join(' · ') : 'no Box 12 deferrals';
+  return `<div class="px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3 min-w-0">
+      <span class="text-emerald-600">✓</span>
+      <div class="min-w-0">
+        <div class="font-medium truncate">${fname}</div>
+        <div class="text-xs text-slate-500">TY ${rec.tax_year} · attached to return #${rec.return_id} · ${summary}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function refreshImportList() {
+  // Persisted view of the Import tab; called on app load and after
+  // every successful (or failed) upload so the list reflects server state.
+  let data;
+  try {
+    data = await api('/api/imports');
+  } catch (e) {
+    console.error('Failed to load import list', e);
+    return;
+  }
+  const tr = _importRows('tax-returns');
+  const w2 = _importRows('w2s');
+  if (tr) tr.innerHTML = (data.tax_returns || []).map(_renderTaxReturnRow).join('');
+  if (w2) w2.innerHTML = (data.w2_imports || []).map(_renderW2Row).join('');
+  _refreshImportListVisibility();
+}
+
+async function uploadFiles(files) {
+  const inflightRows = _importRows('in-flight');
+  if (!inflightRows) return;
+  $('#importList').classList.remove('hidden');
   for (const f of files) {
     const row = document.createElement('div');
     row.className = 'px-5 py-3 flex items-center justify-between';
@@ -210,34 +293,16 @@ async function uploadFiles(files) {
         <span class="text-sky-500 animate-pulse">⟳</span>
         <div><div class="font-medium">${f.name}</div><div class="text-xs text-slate-500">parsing…</div></div>
       </div><span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">parsing</span>`;
-    list.appendChild(row);
+    inflightRows.appendChild(row);
+    _refreshImportListVisibility();
     try {
       const fd = new FormData();
       fd.append('file', f);
       const out = await api('/api/returns/import', { method: 'POST', body: fd });
-      const recon = out.result.reconciliation_delta;
-      const reconciled = recon != null && Math.abs(Number(recon)) <= 1;
-      const badge = recon == null
-        ? `<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">no reported tax</span>`
-        : reconciled
-          ? `<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Reconciled ✓</span>`
-          : `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Δ $${recon}</span>`;
-      const warn = out.warnings && out.warnings.length ? ` · ${out.warnings.length} warning(s)` : '';
-      const logLink = out.import_log
-        ? ` · <a href="/api/import-logs/${encodeURIComponent(out.import_log)}" target="_blank" class="text-sky-600 hover:underline">view log</a>`
-        : '';
-      row.innerHTML = `<div class="flex items-center gap-3">
-          <span class="text-emerald-600">✓</span>
-          <div><div class="font-medium">${f.name}</div>
-            <div class="text-xs text-slate-500">TY ${out.tax_year} · ${out.filing_status.toUpperCase()} · ${out.source}${warn}${logLink}</div>
-          </div></div>
-        <div class="flex items-center gap-2">${badge}
-          <button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Remove this return"
-            onclick="removeImportedReturn(${out.id}, ${out.tax_year}, this)">🗑</button>
-        </div>`;
+      // Successful: drop the in-flight row; the persisted list refresh
+      // below will repaint it in the right group (Tax returns vs W-2s).
+      row.remove();
     } catch (err) {
-      // err.detail (set by api()) contains the diagnostic from the 422 body.
-      // Split on " Tail: " so the noisy traceback can be hidden by default.
       const detail = err.detail || err.message || 'Unknown error';
       const tailIdx = detail.indexOf(' Tail:');
       const headline = tailIdx >= 0 ? detail.slice(0, tailIdx) : detail;
@@ -257,8 +322,10 @@ async function uploadFiles(files) {
           </div></div><span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 ml-2 flex-shrink-0">failed</span>`;
       row.className = 'px-5 py-3 flex items-start justify-between';
     }
+    _refreshImportListVisibility();
   }
   await refreshAll();
+  await refreshImportList();
 }
 
 // ─── dashboard ─────────────────────────────────────────────────────────────
@@ -362,6 +429,7 @@ window.removeImportedReturn = async (id, year, btn) => {
       row.innerHTML = `<div class="text-xs text-slate-500 italic">Removed tax year ${year}.</div>`;
     }
     await refreshAll();
+    await refreshImportList();
   } catch (err) {
     btn.disabled = false;
     btn.textContent = '🗑';
@@ -1655,6 +1723,7 @@ async function renderDiff(li, ri) {
 
 // ─── boot ──────────────────────────────────────────────────────────────────
 refreshAll();
+refreshImportList();
 
 
 // --- advisor -------------------------------------------------------------
@@ -1877,10 +1946,8 @@ if (clearAllBtn) {
     clearAllBtn.textContent = 'Clearing…';
     try {
       await api('/api/returns', { method: 'DELETE' });
-      // Also clear the import-list UI on the page.
-      const list = document.getElementById('importList');
-      if (list) { list.innerHTML = ''; list.classList.add('hidden'); }
       await refreshAll();
+      await refreshImportList();
       clearAllBtn.textContent = '✓ Cleared';
       setTimeout(() => { clearAllBtn.textContent = prev; clearAllBtn.disabled = false; }, 1200);
     } catch (e) {
@@ -1901,6 +1968,7 @@ if (demoBtn) {
       const out = await api('/api/demo/load', { method: 'POST' });
       demoBtn.textContent = `✓ Loaded ${out.count} demo returns — switching to Dashboard`;
       await refreshAll();
+      await refreshImportList();
       setTimeout(() => showTab('dashboard'), 600);
     } catch (e) {
       demoBtn.disabled = false;

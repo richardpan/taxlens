@@ -5,8 +5,10 @@ doors stay in sync.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -60,8 +62,21 @@ class TaxLensService:
 
     # ── ingest ───────────────────────────────────────────────────────────────
 
-    def import_file(self, path: Path) -> tuple[StoredReturn, TaxResult, list[str]]:
+    def import_file(
+        self,
+        path: Path,
+        *,
+        original_filename: str | None = None,
+    ) -> tuple[StoredReturn, TaxResult, list[str]]:
         imported = import_path(path)
+        if original_filename:
+            # The API hands us a tempfile path; replace with the user-
+            # facing filename so the Import-tab listing shows what they
+            # actually uploaded. Imported is frozen, so build a fresh
+            # instance rather than mutating.
+            imported = dataclasses.replace(
+                imported, source_filename=original_filename
+            )
         return self._store(imported)
 
     def import_files(
@@ -199,6 +214,22 @@ class TaxLensService:
             })
             result = compute(merged)
             row.return_json = dumps(merged.model_dump(mode="json"))
+            # Record the W-2 import so the Import tab can show the
+            # filename after app close/reopen. _attach_w2 doesn't create
+            # a new StoredReturn (it merges into the parent 1040), so
+            # the W-2 filename would otherwise be transient.
+            existing_w2s = (
+                json.loads(row.w2_imports_json) if row.w2_imports_json else []
+            )
+            existing_w2s.append({
+                "filename": imp.source_filename,
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+                "source_hash": imp.source_hash,
+                "trad_401k": str(imp.ret.traditional_401k_contributions),
+                "roth_401k": str(imp.ret.roth_401k_contributions),
+                "hsa": str(imp.ret.hsa_contributions),
+            })
+            row.w2_imports_json = dumps(existing_w2s)
             if row.cache is not None:
                 row.cache.result_json = dumps(result.model_dump(mode="json"))
             else:
@@ -306,6 +337,44 @@ class TaxLensService:
                 select(StoredReturn).order_by(StoredReturn.tax_year)
             ).scalars().all()
             return [self._summary(r) for r in rows]
+
+    def list_imports(self) -> dict[str, list[dict[str, Any]]]:
+        """Return every persisted import grouped by document type.
+
+        Powers the Import-tab list so users see what they uploaded
+        across app sessions. Tax returns surface as one row each.
+        Standalone W-2s surface as their own rows under ``w2_imports``,
+        keyed back to the parent return so the UI can show the linkage.
+        """
+        with self.sessionmaker_() as s:
+            rows = s.execute(
+                select(StoredReturn).order_by(
+                    StoredReturn.tax_year, StoredReturn.imported_at
+                )
+            ).scalars().all()
+            tax_returns: list[dict[str, Any]] = []
+            w2_imports: list[dict[str, Any]] = []
+            for r in rows:
+                tax_returns.append({
+                    "id": r.id,
+                    "tax_year": r.tax_year,
+                    "filing_status": r.filing_status,
+                    "source": r.source,
+                    "source_filename": r.source_filename,
+                    "imported_at": r.imported_at.isoformat() if r.imported_at else None,
+                })
+                if r.w2_imports_json:
+                    for entry in json.loads(r.w2_imports_json):
+                        w2_imports.append({
+                            "return_id": r.id,
+                            "tax_year": r.tax_year,
+                            "filename": entry.get("filename"),
+                            "imported_at": entry.get("imported_at"),
+                            "trad_401k": entry.get("trad_401k"),
+                            "roth_401k": entry.get("roth_401k"),
+                            "hsa": entry.get("hsa"),
+                        })
+            return {"tax_returns": tax_returns, "w2_imports": w2_imports}
 
     def get_return(self, return_id: int) -> dict[str, Any] | None:
         with self.sessionmaker_() as s:

@@ -102,7 +102,29 @@
       🗑 Clear all imported returns
     </button>
   </div>
-  <div id="importList" class="mt-6 bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 hidden"></div>
+  <div id="importList" class="mt-6 space-y-6 hidden">
+    <div data-import-group="tax-returns" class="bg-white rounded-2xl border border-slate-200 hidden">
+      <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div class="font-semibold text-slate-700">📄 Tax returns</div>
+        <div data-group-count class="text-xs text-slate-500"></div>
+      </div>
+      <div data-group-rows class="divide-y divide-slate-100"></div>
+    </div>
+    <div data-import-group="w2s" class="bg-white rounded-2xl border border-slate-200 hidden">
+      <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div class="font-semibold text-slate-700">🧾 W-2s</div>
+        <div data-group-count class="text-xs text-slate-500"></div>
+      </div>
+      <div data-group-rows class="divide-y divide-slate-100"></div>
+    </div>
+    <div data-import-group="in-flight" class="bg-white rounded-2xl border border-slate-200 hidden">
+      <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div class="font-semibold text-slate-700">⏳ This session</div>
+        <div data-group-count class="text-xs text-slate-500">parsing or failed</div>
+      </div>
+      <div data-group-rows class="divide-y divide-slate-100"></div>
+    </div>
+  </div>
 </section>
 
 <!-- ─── Dashboard ─── -->

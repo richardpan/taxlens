@@ -79,6 +79,16 @@ def list_returns() -> list[dict[str, Any]]:
     return service.list_returns()
 
 
+@app.get("/api/imports")
+def list_imports() -> dict[str, list[dict[str, Any]]]:
+    """Persisted view of every uploaded file the user can see on the
+    Import tab. Grouped into ``tax_returns`` (1040/TXF/JSON/YAML/CSV)
+    and ``w2_imports`` (standalone W-2 PDFs merged into a 1040).
+    Restored on app reopen so the Import-tab list survives close.
+    """
+    return service.list_imports()
+
+
 @app.get("/api/returns/{return_id}")
 def get_return(return_id: int) -> dict[str, Any]:
     out = service.get_return(return_id)
@@ -117,7 +127,9 @@ async def import_return(file: UploadFile = File(...)) -> dict[str, Any]:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = Path(tmp.name)
     try:
-        row, result, warnings = service.import_file(tmp_path)
+        row, result, warnings = service.import_file(
+            tmp_path, original_filename=file.filename or None
+        )
         # Extract import-log basename (if any) from the warnings list so the
         # UI can render a "View log" link without re-parsing the string.
         import_log = None
