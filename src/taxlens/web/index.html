@@ -134,6 +134,13 @@
         </div>
         <div class="relative h-64"><canvas id="taxStack"></canvas></div>
       </div>
+      <div id="contribCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
+        <div class="flex items-baseline justify-between mb-3">
+          <div class="font-semibold" data-help="Stacked bars showing every retirement / health-savings contribution bucket per year, regardless of source. Includes payroll-deferred amounts (Trad 401(k), Roth 401(k), HSA via Box 12 W) plus personal contributions (Trad IRA, Roth IRA). Use this to see your total annual retirement-savings effort at a glance and whether the Roth/Traditional split is shifting over time.">Retirement &amp; savings contributions by year</div>
+          <div class="text-xs text-slate-500">All buckets · payroll + personal</div>
+        </div>
+        <div class="relative h-64"><canvas id="contribStack"></canvas></div>
+      </div>
       <div id="w2CompCard" class="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-5 hidden">
         <div class="flex items-baseline justify-between mb-3">
           <div class="font-semibold" data-help="Stacked bars showing your total W-2 compensation per year, broken down into Box 1 taxable wages plus the pre-tax / Roth deferrals that don't appear on Box 1: Traditional 401(k) (Box 12 code D — reduces Box 1), Roth 401(k) (Box 12 code AA — already in Box 1, shown separately so you can see the Roth slice), and HSA via payroll (Box 12 code W — reduces Box 1). The bar total is your gross W-2 compensation. Underneath each bar: contribution-vs-IRS-cap utilization for 401(k) and HSA so you can see year-over-year how close you got to maxing out.">W-2 compensation breakdown</div>
@@ -396,6 +403,13 @@
       </div>
       <svg id="trendsAdvisorSavings" viewBox="0 0 600 200" class="w-full h-48"></svg>
       <div id="trendsAdvisorSavingsEmpty" class="text-xs text-slate-400 italic mt-2 hidden">No advisor recommendations with estimated savings.</div>
+    </div>
+    <div id="trendsContribCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="font-semibold" data-help="All retirement / health-savings contributions per year (payroll-deferred + personal). Includes Trad 401(k), Roth 401(k), HSA (Box 12 W), Traditional IRA, and Roth IRA. Use to track total savings effort and the Roth/Traditional mix over time. Stays visible whenever any bucket is non-zero, even for years with no W-2 imported.">Retirement &amp; savings contributions by year</div>
+        <div class="text-xs text-slate-500">Stacked: 401(k) · Roth 401(k) · HSA · Trad IRA · Roth IRA</div>
+      </div>
+      <svg id="trendsContrib" viewBox="0 0 800 320" class="w-full h-72"></svg>
     </div>
     <div id="trendsW2CompCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
       <div class="flex items-baseline justify-between mb-2">
