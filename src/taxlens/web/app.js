@@ -1750,10 +1750,6 @@ async function renderAdvisor() {
     advTile('Est. annual savings', '$' + Math.round(totalSavings).toLocaleString(), 'rough headline number'),
   ].join('');
 
-  $('#advisorCross').innerHTML = data.cross_year.length
-    ? data.cross_year.map(recCard).join('')
-    : '<div class="text-sm text-slate-500 italic md:col-span-2">No cross-year patterns yet — import at least 2 years.</div>';
-
   // Per-year advice is rendered by _redrawAdvisor, which respects the
   // year-picker selection (single year vs. all). When no returns are
   // imported yet, the picker stays empty and _redrawAdvisor falls
@@ -1783,8 +1779,7 @@ function _redrawAdvisor(data) {
 
   // Top-opportunities chart: all years vs single year. Cross-year
   // recommendations are inherently multi-year and excluded from a
-  // single-year view (they show up in the "Multi-year patterns"
-  // section at the bottom of the page).
+  // single-year view.
   let chartRecs;
   if (choice === 'all') {
     chartRecs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
