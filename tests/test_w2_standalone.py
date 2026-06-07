@@ -231,3 +231,66 @@ def test_w2_without_existing_return_raises(svc: TaxLensService):
     )
     with pytest.raises(ValueError, match="No existing return found"):
         svc._store(w2)
+
+
+def test_delete_w2_subtracts_contributions_and_keeps_parent(svc: TaxLensService):
+    """delete_w2 should remove one W-2 entry, subtract its Box-12
+    deferrals back out of the merged Return, and leave the parent 1040
+    intact."""
+    base = Return(
+        tax_year=2024,
+        filing_status=FilingStatus.MFJ,
+        wages=Decimal("200000"),
+    )
+    svc.import_return(base, source="manual")
+    parent = svc.get_by_year(2024)
+    assert parent is not None
+    parent_id = parent["id"]
+
+    for amt_t, amt_h, h in [("15000", "2000", "h1"), ("8000", "1500", "h2")]:
+        svc._store(Imported(
+            ret=Return(
+                tax_year=2024,
+                filing_status=FilingStatus.SINGLE,
+                traditional_401k_contributions=Decimal(amt_t),
+                hsa_contributions=Decimal(amt_h),
+                w2_data_present=True,
+            ),
+            source="pdf-w2",
+            source_hash=h,
+            source_filename=f"w2_{h}.pdf",
+            warnings=[],
+        ))
+
+    merged = svc.get_by_year(2024)
+    assert Decimal(merged["return"]["traditional_401k_contributions"]) == Decimal("23000")
+    assert Decimal(merged["return"]["hsa_contributions"]) == Decimal("3500")
+
+    # Drop one W-2 — its 15k/2k should subtract out, but wages stay.
+    assert svc.delete_w2(parent_id, "h1") is True
+    after = svc.get_by_year(2024)
+    assert Decimal(after["return"]["traditional_401k_contributions"]) == Decimal("8000")
+    assert Decimal(after["return"]["hsa_contributions"]) == Decimal("1500")
+    assert Decimal(after["return"]["wages"]) == Decimal("200000")
+    assert after["return"]["w2_data_present"] is True  # one W-2 still attached
+
+    # Drop the last one — w2_data_present should clear.
+    assert svc.delete_w2(parent_id, "h2") is True
+    after2 = svc.get_by_year(2024)
+    assert Decimal(after2["return"]["traditional_401k_contributions"]) == Decimal("0")
+    assert after2["return"]["w2_data_present"] is False
+
+    # Listing should now show zero W-2 attachments for this return.
+    imports = svc.list_imports()
+    assert imports["w2_imports"] == []
+    assert len(imports["tax_returns"]) == 1
+
+
+def test_delete_w2_unknown_hash_returns_false(svc: TaxLensService):
+    base = Return(
+        tax_year=2024, filing_status=FilingStatus.SINGLE, wages=Decimal("80000"),
+    )
+    svc.import_return(base, source="manual")
+    parent_id = svc.get_by_year(2024)["id"]
+    assert svc.delete_w2(parent_id, "does-not-exist") is False
+    assert svc.delete_w2(99999, "anything") is False

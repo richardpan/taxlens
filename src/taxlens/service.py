@@ -370,6 +370,7 @@ class TaxLensService:
                             "tax_year": r.tax_year,
                             "filename": entry.get("filename"),
                             "imported_at": entry.get("imported_at"),
+                            "source_hash": entry.get("source_hash"),
                             "trad_401k": entry.get("trad_401k"),
                             "roth_401k": entry.get("roth_401k"),
                             "hsa": entry.get("hsa"),
@@ -569,6 +570,55 @@ class TaxLensService:
                 s.delete(row)
             s.commit()
             return n
+
+    def delete_w2(self, return_id: int, source_hash: str) -> bool:
+        """Remove one W-2 import from a return without affecting the parent
+        1040. Subtracts that W-2's Box-12 contributions back out of the
+        merged Return so the engine recomputes correctly. Returns True if
+        the entry was found and removed."""
+        with self.sessionmaker_() as s:
+            row = s.get(StoredReturn, return_id)
+            if row is None or not row.w2_imports_json:
+                return False
+            entries = json.loads(row.w2_imports_json)
+            keep: list[dict[str, Any]] = []
+            removed: dict[str, Any] | None = None
+            for e in entries:
+                if removed is None and e.get("source_hash") == source_hash:
+                    removed = e
+                else:
+                    keep.append(e)
+            if removed is None:
+                return False
+            current = Return(**self._decimalize(json.loads(row.return_json)))
+            updated = current.model_copy(update={
+                "traditional_401k_contributions": (
+                    current.traditional_401k_contributions
+                    - Decimal(str(removed.get("trad_401k") or 0))
+                ),
+                "roth_401k_contributions": (
+                    current.roth_401k_contributions
+                    - Decimal(str(removed.get("roth_401k") or 0))
+                ),
+                "hsa_contributions": (
+                    current.hsa_contributions
+                    - Decimal(str(removed.get("hsa") or 0))
+                ),
+                # If this was the only attached W-2, clear the flag so the
+                # UI no longer claims W-2 detail is present.
+                "w2_data_present": current.w2_data_present and bool(keep),
+            })
+            result = compute(updated)
+            row.return_json = dumps(updated.model_dump(mode="json"))
+            row.w2_imports_json = dumps(keep) if keep else None
+            if row.cache is not None:
+                row.cache.result_json = dumps(result.model_dump(mode="json"))
+            else:
+                row.cache = ComputationCache(
+                    result_json=dumps(result.model_dump(mode="json"))
+                )
+            s.commit()
+            return True
 
     # ── what-if ──────────────────────────────────────────────────────────────
 

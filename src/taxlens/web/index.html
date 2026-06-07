@@ -320,7 +320,16 @@
       <select id="advisorYearPicker" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
     </div>
   </div>
-  <p class="text-slate-500 mb-6">Each suggestion shows an estimated annual savings. <strong>Not tax advice</strong> — review with a CPA before acting.</p>
+  <p class="text-slate-500 mb-6">Multi-year scan for missed deductions, unmaxed accounts, and tax-saving moves. Each suggestion shows an estimated annual savings. <strong>Not tax advice</strong> — review with a CPA before acting.</p>
+
+  <div id="advisorEmpty" class="hidden bg-white rounded-2xl border border-dashed border-slate-300 p-10 mb-8 text-center">
+    <div class="text-3xl mb-2">✨</div>
+    <div class="text-lg font-semibold text-slate-700 mb-1">Nothing to advise on yet</div>
+    <p class="text-sm text-slate-500 max-w-md mx-auto mb-4">
+      Import a tax return on the <strong>Import</strong> tab and the Advisor will surface unmaxed retirement accounts, missed credits, Roth conversion windows, and tax-loss harvesting opportunities. Add multiple years to unlock cross-year patterns.
+    </p>
+    <button onclick="document.querySelector('[data-tab=\'import\']').click()" class="bg-emerald-600 text-white text-sm px-4 py-2 rounded hover:bg-emerald-700">Go to Import →</button>
+  </div>
 
   <div id="advisorSummary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"></div>
 
@@ -434,6 +443,7 @@
         <div class="text-xs text-slate-500">Stacked: Box 1 + 401(k) + Roth 401(k) + HSA = total gross comp</div>
       </div>
       <svg id="trendsW2Comp" viewBox="0 0 800 320" class="w-full h-72"></svg>
+      <div id="trendsW2CompW2List" class="mt-3 text-xs text-slate-500 grid grid-flow-col auto-cols-fr gap-2"></div>
     </div>
     <div id="trendsCarryCard" class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2 hidden">
       <div class="flex items-baseline justify-between mb-2">

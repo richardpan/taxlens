@@ -112,6 +112,17 @@ def clear_all_returns() -> dict[str, int]:
     return {"deleted": n}
 
 
+@app.delete("/api/returns/{return_id}/w2/{source_hash}")
+def delete_w2(return_id: int, source_hash: str) -> dict[str, bool]:
+    """Remove a single W-2 attachment from a return without deleting the
+    parent 1040. The return is recomputed with the W-2's Box-12 deferrals
+    subtracted out."""
+    ok = service.delete_w2(return_id, source_hash)
+    if not ok:
+        raise HTTPException(404, "W-2 attachment not found")
+    return {"deleted": True}
+
+
 @app.get("/api/diff")
 def diff_returns(left: int, right: int) -> dict[str, Any]:
     out = service.diff_returns(left, right)

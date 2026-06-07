@@ -49,6 +49,7 @@ window.showTab = showTab;
 // ─── state ─────────────────────────────────────────────────────────────────
 let RETURNS = [];           // list_returns() output, sorted by year
 const FULL = new Map();     // id → full return record (lazy)
+let W2_BY_YEAR = {};        // tax_year → [{filename, source_hash, trad_401k, roth_401k, hsa, ...}]
 
 async function api(path, opts = {}) {
   // Auto-set Content-Type: application/json when sending a body string
@@ -246,7 +247,7 @@ function _renderTaxReturnRow(rec) {
   </div>`;
 }
 function _renderW2Row(rec) {
-  // rec: { return_id, tax_year, filename, imported_at, trad_401k, roth_401k, hsa }
+  // rec: { return_id, tax_year, filename, imported_at, source_hash, trad_401k, roth_401k, hsa }
   const fname = rec.filename || '(no filename)';
   const bits = [];
   const n = (v) => Number(v || 0);
@@ -254,7 +255,8 @@ function _renderW2Row(rec) {
   if (n(rec.roth_401k) > 0) bits.push('Roth 401(k) ' + fmt(n(rec.roth_401k)));
   if (n(rec.hsa) > 0)       bits.push('HSA ' + fmt(n(rec.hsa)));
   const summary = bits.length ? bits.join(' · ') : 'no Box 12 deferrals';
-  return `<div class="px-5 py-3 flex items-center justify-between">
+  const sh = rec.source_hash || '';
+  return `<div class="px-5 py-3 flex items-center justify-between" data-w2-hash="${sh}">
     <div class="flex items-center gap-3 min-w-0">
       <span class="text-emerald-600">✓</span>
       <div class="min-w-0">
@@ -262,6 +264,8 @@ function _renderW2Row(rec) {
         <div class="text-xs text-slate-500">TY ${rec.tax_year} · attached to return #${rec.return_id} · ${summary}</div>
       </div>
     </div>
+    <button class="text-slate-400 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50" title="Remove this W-2 (keeps the 1040)"
+      onclick="removeImportedW2(${rec.return_id}, '${sh}', this.closest('[data-w2-hash]'))" ${sh ? '' : 'disabled'}>🗑</button>
   </div>`;
 }
 
@@ -279,6 +283,14 @@ async function refreshImportList() {
   const w2 = _importRows('w2s');
   if (tr) tr.innerHTML = (data.tax_returns || []).map(_renderTaxReturnRow).join('');
   if (w2) w2.innerHTML = (data.w2_imports || []).map(_renderW2Row).join('');
+  // Cache by tax year so visualizations can show per-W-2 attribution
+  // without re-fetching. Each entry: [{ filename, trad_401k, roth_401k, hsa, source_hash }]
+  W2_BY_YEAR = {};
+  for (const w of (data.w2_imports || [])) {
+    const y = w.tax_year;
+    if (!W2_BY_YEAR[y]) W2_BY_YEAR[y] = [];
+    W2_BY_YEAR[y].push(w);
+  }
   _refreshImportListVisibility();
 }
 
@@ -434,6 +446,26 @@ window.removeImportedReturn = async (id, year, btn) => {
     btn.disabled = false;
     btn.textContent = '🗑';
     alert('Could not remove return: ' + (err.detail || err.message));
+  }
+};
+
+// Remove a single W-2 attachment without deleting the parent 1040.
+window.removeImportedW2 = async (returnId, sourceHash, row) => {
+  if (!sourceHash) return;
+  if (!confirm('Remove this W-2 from TaxLens? The 1040 will stay; its Box-12 contributions will be subtracted from the merged return.')) return;
+  const btn = row ? row.querySelector('button') : null;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    await api(`/api/returns/${returnId}/w2/${encodeURIComponent(sourceHash)}`, { method: 'DELETE' });
+    if (row) {
+      row.style.opacity = '0.5';
+      row.innerHTML = `<div class="text-xs text-slate-500 italic">W-2 removed.</div>`;
+    }
+    await refreshAll();
+    await refreshImportList();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '🗑'; }
+    alert('Could not remove W-2: ' + (err.detail || err.message));
   }
 };
 
@@ -800,7 +832,23 @@ function drawW2Comp(fulls) {
             label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`,
             footer: (items) => {
               const total = items.reduce((s, it) => s + it.parsed.y, 0);
-              return `Total gross comp: ${fmt(total)}`;
+              const lines = [`Total gross comp: ${fmt(total)}`];
+              const yr = items[0] && items[0].label;
+              const w2s = (W2_BY_YEAR[yr] || []);
+              if (w2s.length) {
+                lines.push('');
+                lines.push(`Standalone W-2s attached (${w2s.length}):`);
+                for (const w of w2s) {
+                  const bits = [];
+                  const n = (v) => Number(v || 0);
+                  if (n(w.trad_401k) > 0) bits.push('Trad ' + fmt(n(w.trad_401k)));
+                  if (n(w.roth_401k) > 0) bits.push('Roth ' + fmt(n(w.roth_401k)));
+                  if (n(w.hsa) > 0)       bits.push('HSA '  + fmt(n(w.hsa)));
+                  const tail = bits.length ? ' — ' + bits.join(', ') : '';
+                  lines.push(`• ${w.filename || '(W-2)'}${tail}`);
+                }
+              }
+              return lines;
             },
           },
         },
@@ -827,7 +875,19 @@ function drawW2Comp(fulls) {
       ? `<div class="text-slate-400 text-[10px] mt-0.5">${y} caps: $${lim.hsa.toLocaleString()} self · $${(lim.hsaFamily || lim.hsa * 2).toLocaleString()} family</div>`
       : '';
     const hsaLine = `<div>HSA: ${fmt(hsa[i])}${hsaCapHint}</div>`;
-    return `<div class="text-center"><div class="font-semibold text-slate-700">${y}</div>${defLine}${hsaLine}</div>`;
+    // Per-W-2 attribution from /api/imports. The 1040 itself usually
+    // already aggregates Box-12, so this list only appears for years
+    // where a standalone W-2 was uploaded (rare but useful when it is).
+    const w2List = (W2_BY_YEAR[y] || []);
+    let w2Block = '';
+    if (w2List.length) {
+      const items = w2List.map(w => {
+        const fname = (w.filename || 'W-2').replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]));
+        return `<li class="truncate" title="${fname}">${fname}</li>`;
+      }).join('');
+      w2Block = `<details class="mt-1 text-[10px] text-slate-500"><summary class="cursor-pointer hover:text-slate-700">${w2List.length} W-2${w2List.length>1?'s':''} attached</summary><ul class="mt-1 pl-3 list-disc text-left">${items}</ul></details>`;
+    }
+    return `<div class="text-center"><div class="font-semibold text-slate-700">${y}</div>${defLine}${hsaLine}${w2Block}</div>`;
   }).join('');
   document.getElementById('w2CompUtilization').innerHTML = cells;
 }
@@ -1722,8 +1782,9 @@ async function renderDiff(li, ri) {
 }
 
 // ─── boot ──────────────────────────────────────────────────────────────────
-refreshAll();
-refreshImportList();
+// Populate W-2 attribution cache first so the dashboard's W-2 viz can
+// show per-W-2 detail on its first paint.
+refreshImportList().then(refreshAll);
 
 
 // --- advisor -------------------------------------------------------------
@@ -1743,6 +1804,18 @@ async function renderAdvisor() {
   const allRecs = [...data.cross_year, ...data.per_year.flatMap(p => p.recommendations)];
   const totalSavings = allRecs.reduce((s, r) => s + Number(r.est_annual_savings || 0), 0);
   const highCount = allRecs.filter(r => r.severity === 'high').length;
+
+  // Empty-state takeover: when nothing is imported, show a friendly CTA
+  // and hide all the would-be-zero scaffolding.
+  const hasReturns = data.per_year.length > 0;
+  const empty = document.getElementById('advisorEmpty');
+  const summary = document.getElementById('advisorSummary');
+  const perYearWrap = document.getElementById('advisorPerYear');
+  const perYearHeading = document.getElementById('advisorPerYearHeading');
+  if (empty) empty.classList.toggle('hidden', hasReturns);
+  if (summary) summary.classList.toggle('hidden', !hasReturns);
+  if (perYearWrap) perYearWrap.classList.toggle('hidden', !hasReturns);
+  if (perYearHeading) perYearHeading.classList.toggle('hidden', !hasReturns);
 
   $('#advisorSummary').innerHTML = [
     advTile('Total opportunities', allRecs.length, 'across all returns'),
@@ -2358,6 +2431,23 @@ function drawTrendsW2Comp(fulls) {
     { label: 'HSA via payroll (Box 12 W)', color: '#f59e0b', data: hsa },
   ].filter(s => s.data.some(v => v > 0));
   drawStackedBars('trendsW2Comp', years, series);
+
+  // Per-year W-2 attribution from /api/imports. Renders only when at
+  // least one year has standalone W-2 attachments; otherwise the strip
+  // is empty (1040-only years already aggregate Box 12).
+  const list = document.getElementById('trendsW2CompW2List');
+  if (list) {
+    const cells = years.map(y => {
+      const w2s = (W2_BY_YEAR[y] || []);
+      if (!w2s.length) return `<div class="text-center text-slate-400">${y}<div class="text-[10px] mt-0.5">no W-2 file attached</div></div>`;
+      const items = w2s.map(w => {
+        const fname = (w.filename || 'W-2').replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]));
+        return `<li class="truncate" title="${fname}">${fname}</li>`;
+      }).join('');
+      return `<div class="text-center"><div class="font-semibold text-slate-700">${y}</div><details class="mt-1 text-[10px]"><summary class="cursor-pointer hover:text-slate-700">${w2s.length} W-2${w2s.length>1?'s':''} attached</summary><ul class="mt-1 pl-3 list-disc text-left">${items}</ul></details></div>`;
+    }).join('');
+    list.innerHTML = cells;
+  }
 }
 
 function drawBracketHeatmap(svgId, fulls) {
